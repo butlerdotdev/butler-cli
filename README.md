@@ -1,8 +1,6 @@
 # butler-cli
 
-[![Go Version](https://img.shields.io/github/go-mod/go-version/butlerdotdev/butler-cli)](https://go.dev/)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
-[![Go Report Card](https://goreportcard.com/badge/github.com/butlerdotdev/butler-cli)](https://goreportcard.com/report/github.com/butlerdotdev/butler-cli)
 
 Command-line tools for the Butler Kubernetes-as-a-Service platform.
 
