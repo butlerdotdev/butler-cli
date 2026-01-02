@@ -1,0 +1,143 @@
+---
+# Butler Bootstrap Controller
+# Deploys to KIND cluster during bootstrap phase
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: butler-system
+  labels:
+    app.kubernetes.io/name: butler
+    app.kubernetes.io/component: system
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: butler-bootstrap-controller
+  namespace: butler-system
+  labels:
+    app.kubernetes.io/name: butler-bootstrap
+    app.kubernetes.io/component: controller
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: butler-bootstrap-controller
+  labels:
+    app.kubernetes.io/name: butler-bootstrap
+    app.kubernetes.io/component: controller
+rules:
+  # Core resources
+  - apiGroups: [""]
+    resources: ["secrets", "configmaps", "events"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: [""]
+    resources: ["namespaces"]
+    verbs: ["get", "list", "watch"]
+  # Butler CRDs
+  - apiGroups: ["butler.butlerlabs.dev"]
+    resources: ["clusterbootstraps", "machinerequests", "providerconfigs"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["butler.butlerlabs.dev"]
+    resources: ["clusterbootstraps/status", "machinerequests/status"]
+    verbs: ["get", "update", "patch"]
+  - apiGroups: ["butler.butlerlabs.dev"]
+    resources: ["clusterbootstraps/finalizers", "machinerequests/finalizers"]
+    verbs: ["update"]
+  # Coordination for leader election
+  - apiGroups: ["coordination.k8s.io"]
+    resources: ["leases"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: butler-bootstrap-controller
+  labels:
+    app.kubernetes.io/name: butler-bootstrap
+    app.kubernetes.io/component: controller
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: butler-bootstrap-controller
+subjects:
+  - kind: ServiceAccount
+    name: butler-bootstrap-controller
+    namespace: butler-system
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: butler-bootstrap-controller
+  namespace: butler-system
+  labels:
+    app.kubernetes.io/name: butler-bootstrap
+    app.kubernetes.io/component: controller
+    control-plane: controller-manager
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: butler-bootstrap
+      control-plane: controller-manager
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: butler-bootstrap
+        control-plane: controller-manager
+    spec:
+      serviceAccountName: butler-bootstrap-controller
+      hostNetwork: true  # Use host network for access to external networks (VPN, Tailscale, etc.)
+      dnsPolicy: ClusterFirstWithHostNet  # Required when using hostNetwork
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: manager
+          image: ghcr.io/butlerdotdev/butler-bootstrap:v0.1.0
+          imagePullPolicy: IfNotPresent
+          command:
+            - /manager
+          args:
+            - --leader-elect=false
+            - --health-probe-bind-address=:8081
+            - --metrics-bind-address=:8080
+          env:
+            - name: TALOSCTL_PATH
+              value: /usr/local/bin/talosctl
+            - name: HELM_PATH
+              value: /usr/local/bin/helm
+            - name: KUBECTL_PATH
+              value: /usr/local/bin/kubectl
+          ports:
+            - containerPort: 8080
+              name: metrics
+              protocol: TCP
+            - containerPort: 8081
+              name: health
+              protocol: TCP
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8081
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: 8081
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            limits:
+              cpu: 500m
+              memory: 256Mi
+            requests:
+              cpu: 100m
+              memory: 128Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+      terminationGracePeriodSeconds: 10

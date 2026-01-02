@@ -1,0 +1,144 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: providerconfigs.butler.butlerlabs.dev
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.16.1
+spec:
+  group: butler.butlerlabs.dev
+  names:
+    kind: ProviderConfig
+    listKind: ProviderConfigList
+    plural: providerconfigs
+    singular: providerconfig
+    shortNames:
+      - pc
+  scope: Namespaced
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      subresources:
+        status: {}
+      additionalPrinterColumns:
+        - name: Provider
+          type: string
+          jsonPath: .spec.provider
+        - name: Ready
+          type: string
+          jsonPath: .status.conditions[?(@.type=="Ready")].status
+        - name: Age
+          type: date
+          jsonPath: .metadata.creationTimestamp
+      schema:
+        openAPIV3Schema:
+          type: object
+          description: ProviderConfig defines credentials and settings for an infrastructure provider
+          properties:
+            apiVersion:
+              type: string
+            kind:
+              type: string
+            metadata:
+              type: object
+            spec:
+              type: object
+              required:
+                - provider
+                - credentialsRef
+              properties:
+                provider:
+                  type: string
+                  enum:
+                    - harvester
+                    - nutanix
+                    - proxmox
+                credentialsRef:
+                  type: object
+                  required:
+                    - name
+                  properties:
+                    name:
+                      type: string
+                    namespace:
+                      type: string
+                    key:
+                      type: string
+                      default: kubeconfig
+                harvester:
+                  type: object
+                  description: Harvester-specific configuration
+                  properties:
+                    namespace:
+                      type: string
+                      default: default
+                    networkName:
+                      type: string
+                      description: Network name in namespace/name format
+                    imageName:
+                      type: string
+                      description: Talos image name in namespace/name format
+                nutanix:
+                  type: object
+                  description: Nutanix-specific configuration
+                  properties:
+                    endpoint:
+                      type: string
+                    cluster:
+                      type: string
+                    subnet:
+                      type: string
+                    image:
+                      type: string
+                    insecure:
+                      type: boolean
+                      default: false
+                proxmox:
+                  type: object
+                  description: Proxmox-specific configuration
+                  properties:
+                    endpoint:
+                      type: string
+                    node:
+                      type: string
+                    storage:
+                      type: string
+                    network:
+                      type: string
+                    template:
+                      type: integer
+                    insecure:
+                      type: boolean
+                      default: false
+            status:
+              type: object
+              properties:
+                ready:
+                  type: boolean
+                failureReason:
+                  type: string
+                failureMessage:
+                  type: string
+                lastValidated:
+                  type: string
+                  format: date-time
+                conditions:
+                  type: array
+                  items:
+                    type: object
+                    required:
+                      - type
+                      - status
+                    properties:
+                      type:
+                        type: string
+                      status:
+                        type: string
+                      reason:
+                        type: string
+                      message:
+                        type: string
+                      lastTransitionTime:
+                        type: string
+                        format: date-time

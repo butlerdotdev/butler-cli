@@ -1,0 +1,646 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.19.0
+  name: clusterbootstraps.butler.butlerlabs.dev
+spec:
+  group: butler.butlerlabs.dev
+  names:
+    kind: ClusterBootstrap
+    listKind: ClusterBootstrapList
+    plural: clusterbootstraps
+    shortNames:
+    - cb
+    singular: clusterbootstrap
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .spec.cluster.name
+      name: Cluster
+      type: string
+    - jsonPath: .status.phase
+      name: Phase
+      type: string
+    - jsonPath: .status.controlPlaneEndpoint
+      name: Endpoint
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: ClusterBootstrap is the Schema for the clusterbootstraps API
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: ClusterBootstrapSpec defines the desired state of ClusterBootstrap
+            properties:
+              addons:
+                description: Addons defines which addons to install
+                properties:
+                  butlerController:
+                    description: ButlerController defines butler-controller configuration
+                    properties:
+                      enabled:
+                        default: true
+                        description: Enabled controls whether butler-controller is
+                          installed
+                        type: boolean
+                      image:
+                        default: ghcr.io/butlerdotdev/butler-controller
+                        description: Image is the full image reference (overrides
+                          default)
+                        type: string
+                      version:
+                        default: latest
+                        description: Version is the butler-controller version (image
+                          tag)
+                        type: string
+                    type: object
+                  capi:
+                    description: CAPI defines Cluster API configuration
+                    properties:
+                      enabled:
+                        default: true
+                        description: Enabled controls whether CAPI is installed
+                        type: boolean
+                      infrastructureProviders:
+                        description: |-
+                          InfrastructureProviders lists additional infrastructure providers to install
+                          The management cluster's provider is ALWAYS included automatically
+                        items:
+                          description: CAPIInfraProviderSpec defines an infrastructure
+                            provider configuration
+                          properties:
+                            credentialsSecretRef:
+                              description: |-
+                                CredentialsSecretRef points to provider credentials
+                                Required for providers other than the management cluster's provider
+                              properties:
+                                key:
+                                  description: |-
+                                    Key is the key within the Secret to reference.
+                                    If not specified, the entire Secret data is used.
+                                  type: string
+                                name:
+                                  description: Name is the name of the Secret.
+                                  minLength: 1
+                                  type: string
+                                namespace:
+                                  description: |-
+                                    Namespace is the namespace of the Secret.
+                                    If not specified, the namespace of the referencing resource is used.
+                                  type: string
+                              required:
+                              - name
+                              type: object
+                            name:
+                              description: Name is the provider name
+                              enum:
+                              - harvester
+                              - nutanix
+                              - proxmox
+                              type: string
+                            version:
+                              description: Version overrides the default provider
+                                version
+                              type: string
+                          required:
+                          - name
+                          type: object
+                        type: array
+                      version:
+                        default: v1.9.4
+                        description: Version is the CAPI core version
+                        type: string
+                    type: object
+                  certManager:
+                    description: CertManager defines cert-manager configuration
+                    properties:
+                      enabled:
+                        default: true
+                        description: Enabled controls whether cert-manager is installed
+                        type: boolean
+                      version:
+                        description: Version is the cert-manager version
+                        type: string
+                    type: object
+                  cni:
+                    description: CNI defines the CNI configuration
+                    properties:
+                      hubbleEnabled:
+                        default: true
+                        description: HubbleEnabled enables Hubble observability (Cilium
+                          only)
+                        type: boolean
+                      type:
+                        default: cilium
+                        description: Type is the CNI type
+                        enum:
+                        - cilium
+                        - none
+                        type: string
+                      version:
+                        description: Version is the addon version
+                        type: string
+                    type: object
+                  controlPlaneHA:
+                    description: ControlPlaneHA defines control plane HA configuration
+                    properties:
+                      type:
+                        default: kube-vip
+                        description: Type is the HA type
+                        enum:
+                        - kube-vip
+                        - none
+                        type: string
+                      version:
+                        description: Version is the addon version
+                        type: string
+                    type: object
+                  controlPlaneProvider:
+                    description: ControlPlaneProvider defines hosted control plane
+                      provider (Kamaji)
+                    properties:
+                      enabled:
+                        default: true
+                        description: Enabled controls whether Kamaji is installed
+                        type: boolean
+                      type:
+                        default: kamaji
+                        description: Type is the control plane provider type
+                        enum:
+                        - kamaji
+                        - none
+                        type: string
+                      version:
+                        description: Version is the Kamaji version
+                        type: string
+                    type: object
+                  gitOps:
+                    description: GitOps defines GitOps configuration
+                    properties:
+                      enabled:
+                        default: false
+                        description: Enabled controls whether GitOps is installed
+                        type: boolean
+                      gitBranch:
+                        default: main
+                        description: GitBranch is the branch to track
+                        type: string
+                      gitPath:
+                        default: clusters/management
+                        description: GitPath is the path within the repository
+                        type: string
+                      gitRepository:
+                        description: GitRepository is the repository URL for GitOps
+                        type: string
+                      type:
+                        default: flux
+                        description: Type is the GitOps type
+                        enum:
+                        - flux
+                        - none
+                        type: string
+                      version:
+                        description: Version is the addon version
+                        type: string
+                    type: object
+                  ingress:
+                    description: Ingress defines ingress controller configuration
+                    properties:
+                      enabled:
+                        default: true
+                        description: Enabled controls whether the ingress controller
+                          is installed
+                        type: boolean
+                      type:
+                        default: traefik
+                        description: Type is the ingress controller type
+                        enum:
+                        - traefik
+                        - none
+                        type: string
+                      version:
+                        description: Version is the ingress controller version
+                        type: string
+                    type: object
+                  loadBalancer:
+                    description: LoadBalancer defines load balancer configuration
+                    properties:
+                      addressPool:
+                        description: AddressPool defines the IP address pool for LoadBalancer
+                          services
+                        type: string
+                      type:
+                        default: metallb
+                        description: Type is the load balancer type
+                        enum:
+                        - metallb
+                        - none
+                        type: string
+                    type: object
+                  storage:
+                    description: Storage defines storage configuration
+                    properties:
+                      defaultReplicaCount:
+                        default: 2
+                        description: DefaultReplicaCount is the default number of
+                          replicas (Longhorn)
+                        format: int32
+                        type: integer
+                      type:
+                        default: longhorn
+                        description: Type is the storage type
+                        enum:
+                        - longhorn
+                        - linstor
+                        - none
+                        type: string
+                      version:
+                        description: Version is the addon version
+                        type: string
+                    type: object
+                type: object
+              cluster:
+                description: Cluster defines the cluster configuration
+                properties:
+                  controlPlane:
+                    description: ControlPlane defines control plane node configuration
+                    properties:
+                      cpu:
+                        description: CPU is the number of CPU cores per node
+                        format: int32
+                        maximum: 128
+                        minimum: 1
+                        type: integer
+                      diskGB:
+                        description: DiskGB is the root disk size in GB per node (matches
+                          MachineRequest)
+                        format: int32
+                        minimum: 20
+                        type: integer
+                      extraDisks:
+                        description: |-
+                          ExtraDisks defines additional disks to attach to each node
+                          Reuses DiskSpec from machinerequest_types.go
+                        items:
+                          description: DiskSpec defines an additional disk to attach
+                            to a machine.
+                          properties:
+                            sizeGB:
+                              description: SizeGB is the disk size in gigabytes.
+                              format: int32
+                              minimum: 1
+                              type: integer
+                            storageClass:
+                              description: StorageClass is the provider-specific storage
+                                class or tier.
+                              type: string
+                          required:
+                          - sizeGB
+                          type: object
+                        type: array
+                      labels:
+                        additionalProperties:
+                          type: string
+                        description: Labels to apply to nodes in this pool
+                        type: object
+                      memoryMB:
+                        description: MemoryMB is the memory in MB per node (matches
+                          MachineRequest)
+                        format: int32
+                        minimum: 2048
+                        type: integer
+                      replicas:
+                        description: Replicas is the number of nodes in this pool
+                        format: int32
+                        maximum: 10
+                        minimum: 1
+                        type: integer
+                    required:
+                    - cpu
+                    - diskGB
+                    - memoryMB
+                    - replicas
+                    type: object
+                  name:
+                    description: Name is the cluster name used for resource naming
+                    maxLength: 63
+                    minLength: 1
+                    pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
+                    type: string
+                  workers:
+                    description: Workers defines worker node configuration
+                    properties:
+                      cpu:
+                        description: CPU is the number of CPU cores per node
+                        format: int32
+                        maximum: 128
+                        minimum: 1
+                        type: integer
+                      diskGB:
+                        description: DiskGB is the root disk size in GB per node (matches
+                          MachineRequest)
+                        format: int32
+                        minimum: 20
+                        type: integer
+                      extraDisks:
+                        description: |-
+                          ExtraDisks defines additional disks to attach to each node
+                          Reuses DiskSpec from machinerequest_types.go
+                        items:
+                          description: DiskSpec defines an additional disk to attach
+                            to a machine.
+                          properties:
+                            sizeGB:
+                              description: SizeGB is the disk size in gigabytes.
+                              format: int32
+                              minimum: 1
+                              type: integer
+                            storageClass:
+                              description: StorageClass is the provider-specific storage
+                                class or tier.
+                              type: string
+                          required:
+                          - sizeGB
+                          type: object
+                        type: array
+                      labels:
+                        additionalProperties:
+                          type: string
+                        description: Labels to apply to nodes in this pool
+                        type: object
+                      memoryMB:
+                        description: MemoryMB is the memory in MB per node (matches
+                          MachineRequest)
+                        format: int32
+                        minimum: 2048
+                        type: integer
+                      replicas:
+                        description: Replicas is the number of nodes in this pool
+                        format: int32
+                        maximum: 10
+                        minimum: 1
+                        type: integer
+                    required:
+                    - cpu
+                    - diskGB
+                    - memoryMB
+                    - replicas
+                    type: object
+                required:
+                - controlPlane
+                - name
+                type: object
+              network:
+                description: Network defines network configuration for the cluster
+                properties:
+                  podCIDR:
+                    description: PodCIDR is the CIDR for pod networking
+                    pattern: ^([0-9]{1,3}\.){3}[0-9]{1,3}/[0-9]{1,2}$
+                    type: string
+                  serviceCIDR:
+                    description: ServiceCIDR is the CIDR for service networking
+                    pattern: ^([0-9]{1,3}\.){3}[0-9]{1,3}/[0-9]{1,2}$
+                    type: string
+                  vip:
+                    description: VIP is the virtual IP for the control plane endpoint
+                    pattern: ^([0-9]{1,3}\.){3}[0-9]{1,3}$
+                    type: string
+                  vipInterface:
+                    description: VIPInterface is the network interface for the VIP
+                      (optional, auto-detected)
+                    type: string
+                required:
+                - podCIDR
+                - serviceCIDR
+                - vip
+                type: object
+              paused:
+                description: Paused can be set to true to pause reconciliation
+                type: boolean
+              provider:
+                description: Provider is the infrastructure provider type (harvester,
+                  nutanix, proxmox)
+                enum:
+                - harvester
+                - nutanix
+                - proxmox
+                type: string
+              providerRef:
+                description: |-
+                  ProviderRef references the ProviderConfig to use for provisioning
+                  Reuses existing ProviderReference from common_types.go
+                properties:
+                  name:
+                    description: Name is the name of the ProviderConfig resource.
+                    minLength: 1
+                    type: string
+                  namespace:
+                    description: |-
+                      Namespace is the namespace of the ProviderConfig resource.
+                      If not specified, the namespace of the referencing resource is used.
+                    type: string
+                required:
+                - name
+                type: object
+              talos:
+                description: Talos defines Talos-specific configuration
+                properties:
+                  configPatches:
+                    description: ConfigPatches allows inline Talos config patches
+                    items:
+                      description: TalosConfigPatch defines a Talos config patch
+                      properties:
+                        op:
+                          description: Op is the patch operation (add, remove, replace)
+                          enum:
+                          - add
+                          - remove
+                          - replace
+                          type: string
+                        path:
+                          description: Path is the JSON path to patch
+                          type: string
+                        value:
+                          description: Value is the value to set (for add/replace)
+                          type: string
+                      required:
+                      - op
+                      - path
+                      type: object
+                    type: array
+                  installDisk:
+                    default: /dev/vda
+                    description: InstallDisk overrides the default install disk
+                    type: string
+                  schematic:
+                    description: Schematic is the Talos factory schematic ID for the
+                      image
+                    type: string
+                  version:
+                    description: Version is the Talos version to use
+                    pattern: ^v[0-9]+\.[0-9]+\.[0-9]+$
+                    type: string
+                required:
+                - schematic
+                - version
+                type: object
+            required:
+            - cluster
+            - network
+            - provider
+            - providerRef
+            - talos
+            type: object
+          status:
+            description: ClusterBootstrapStatus defines the observed state of ClusterBootstrap
+            properties:
+              addonsInstalled:
+                additionalProperties:
+                  type: boolean
+                description: AddonsInstalled tracks which addons have been installed
+                type: object
+              conditions:
+                description: Conditions represents the current conditions of the ClusterBootstrap
+                items:
+                  description: Condition contains details for one aspect of the current
+                    state of this API Resource.
+                  properties:
+                    lastTransitionTime:
+                      description: |-
+                        lastTransitionTime is the last time the condition transitioned from one status to another.
+                        This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
+                      format: date-time
+                      type: string
+                    message:
+                      description: |-
+                        message is a human readable message indicating details about the transition.
+                        This may be an empty string.
+                      maxLength: 32768
+                      type: string
+                    observedGeneration:
+                      description: |-
+                        observedGeneration represents the .metadata.generation that the condition was set based upon.
+                        For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date
+                        with respect to the current state of the instance.
+                      format: int64
+                      minimum: 0
+                      type: integer
+                    reason:
+                      description: |-
+                        reason contains a programmatic identifier indicating the reason for the condition's last transition.
+                        Producers of specific condition types may define expected values and meanings for this field,
+                        and whether the values are considered a guaranteed API.
+                        The value should be a CamelCase string.
+                        This field may not be empty.
+                      maxLength: 1024
+                      minLength: 1
+                      pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                      type: string
+                    status:
+                      description: status of the condition, one of True, False, Unknown.
+                      enum:
+                      - "True"
+                      - "False"
+                      - Unknown
+                      type: string
+                    type:
+                      description: type of condition in CamelCase or in foo.example.com/CamelCase.
+                      maxLength: 316
+                      pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                      type: string
+                  required:
+                  - lastTransitionTime
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+              controlPlaneEndpoint:
+                description: ControlPlaneEndpoint is the endpoint for the control
+                  plane
+                type: string
+              failureMessage:
+                description: FailureMessage provides details about the failure
+                type: string
+              failureReason:
+                description: FailureReason indicates why bootstrap failed
+                type: string
+              kubeconfig:
+                description: Kubeconfig contains the base64-encoded kubeconfig for
+                  the cluster
+                type: string
+              lastUpdated:
+                description: LastUpdated is the timestamp of the last status update
+                format: date-time
+                type: string
+              machines:
+                description: Machines contains the status of each machine
+                items:
+                  description: ClusterBootstrapMachineStatus tracks the status of
+                    a machine in the cluster
+                  properties:
+                    ipAddress:
+                      description: IPAddress is the machine's IP address
+                      type: string
+                    name:
+                      description: Name is the MachineRequest name
+                      type: string
+                    phase:
+                      description: Phase is the MachineRequest phase
+                      type: string
+                    ready:
+                      description: Ready indicates if the node has joined the cluster
+                      type: boolean
+                    role:
+                      description: Role is the machine role (control-plane or worker)
+                      type: string
+                    talosConfigured:
+                      description: TalosConfigured indicates if Talos config has been
+                        applied
+                      type: boolean
+                  required:
+                  - name
+                  - phase
+                  - role
+                  type: object
+                type: array
+              observedGeneration:
+                description: ObservedGeneration is the last observed generation
+                format: int64
+                type: integer
+              phase:
+                description: Phase is the current phase of bootstrap
+                type: string
+              talosconfig:
+                description: TalosConfig contains the base64-encoded talosconfig for
+                  the cluster
+                type: string
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

@@ -1,0 +1,95 @@
+# Butler Management Cluster Bootstrap Configuration
+# Provider: Harvester HCI
+# 
+# This configuration bootstraps a production-ready Kubernetes management cluster
+# running Talos Linux on Harvester HCI infrastructure.
+
+# Infrastructure provider
+provider: harvester
+
+# Cluster configuration
+cluster:
+  # Cluster name (used for VM names, kubeconfig context, etc.)
+  name: butler-alpha
+
+  # Control plane nodes
+  controlPlane:
+    replicas: 3          # 3 for HA, 1 for dev/test
+    cpu: 4               # vCPUs per node
+    memoryMB: 8192       # 8GB per node
+    diskGB: 50           # Boot disk size
+
+  # Worker nodes
+  workers:
+    replicas: 2          # Number of worker nodes
+    cpu: 4               # vCPUs per node
+    memoryMB: 16384      # 16GB per node
+    diskGB: 100          # Boot disk size
+    extraDisks:
+      - sizeGB: 100      # Additional disk for Longhorn storage
+
+# Network configuration
+network:
+  # Kubernetes internal networks
+  podCIDR: 10.244.0.0/16
+  serviceCIDR: 10.96.0.0/12
+  
+  # Control plane VIP (must be in your VLAN, not in DHCP range)
+  vip: 10.40.0.201
+  
+  # Network interface for VIP (optional, auto-detected from default route)
+  # vipInterface: eth0
+
+# Talos Linux configuration
+talos:
+  # Talos version
+  version: v1.9.0
+  
+  # Talos schematic ID (custom image with extensions)
+  # Generated from factory.talos.dev with qemu-guest-agent + iscsi-tools
+  schematic: dc7b152cb3ea99b821fcb7340ce7168313ce393d663740b791c36f6e95fc8586
+
+# Addon configuration
+addons:
+  # Container Network Interface
+  cni:
+    type: cilium        # cilium (kube-proxy replacement mode)
+
+  # Storage
+  storage:
+    type: longhorn      # longhorn distributed storage
+
+  # Load balancer for Services
+  loadBalancer:
+    type: metallb
+    addressPool: 10.40.0.200-10.40.0.250
+
+  # GitOps
+  gitOps:
+    type: flux          # FluxCD for GitOps
+
+  capi:
+    enabled: true
+    version: v1.9.4
+    # infrastructureProviders: []  # Optional: add additional providers beyond harvester
+
+  butlerController:
+    enabled: false
+    version: latest
+    image: ghcr.io/butlerdotdev/butler-controller
+
+# Provider-specific configuration
+providerConfig:
+  harvester:
+    # Path to Harvester kubeconfig
+    kubeconfigPath: ~/.butler/harvester-kubeconfig
+    
+    # Harvester namespace for VMs
+    namespace: default
+    
+    # Network name (namespace/name format)
+    networkName: default/vlan40-workloads
+    
+    # Talos image name (namespace/name format)
+    # Image must have qemu-guest-agent extension for IP reporting
+    imageName: default/image-5rs6d
