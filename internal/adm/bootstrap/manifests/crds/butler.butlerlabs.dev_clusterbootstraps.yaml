@@ -119,6 +119,7 @@ spec:
                               - harvester
                               - nutanix
                               - proxmox
+                              - kubevirt
                               type: string
                             version:
                               description: Version overrides the default provider
@@ -248,8 +249,10 @@ spec:
                     description: LoadBalancer defines load balancer configuration
                     properties:
                       addressPool:
-                        description: AddressPool defines the IP address pool for LoadBalancer
-                          services
+                        description: |-
+                          AddressPool defines the IP address pool for LoadBalancer services
+                          DEPRECATED: Use spec.network.loadBalancerPool instead for proper validation.
+                          If both are set, spec.network.loadBalancerPool takes precedence.
                         type: string
                       type:
                         default: metallb
@@ -415,6 +418,24 @@ spec:
               network:
                 description: Network defines network configuration for the cluster
                 properties:
+                  loadBalancerPool:
+                    description: |-
+                      LoadBalancerPool defines the IP range for MetalLB LoadBalancer services
+                      This range must NOT include the VIP address to avoid conflicts between
+                      kube-vip (control plane) and MetalLB (services)
+                    properties:
+                      end:
+                        description: End is the last IP in the pool (inclusive)
+                        pattern: ^([0-9]{1,3}\.){3}[0-9]{1,3}$
+                        type: string
+                      start:
+                        description: Start is the first IP in the pool (inclusive)
+                        pattern: ^([0-9]{1,3}\.){3}[0-9]{1,3}$
+                        type: string
+                    required:
+                    - end
+                    - start
+                    type: object
                   podCIDR:
                     description: PodCIDR is the CIDR for pod networking
                     pattern: ^([0-9]{1,3}\.){3}[0-9]{1,3}/[0-9]{1,2}$
@@ -424,7 +445,9 @@ spec:
                     pattern: ^([0-9]{1,3}\.){3}[0-9]{1,3}/[0-9]{1,2}$
                     type: string
                   vip:
-                    description: VIP is the virtual IP for the control plane endpoint
+                    description: |-
+                      VIP is the virtual IP for the control plane endpoint (kube-vip)
+                      This IP is used ONLY for kube-apiserver HA and must NOT be in LoadBalancerPool
                     pattern: ^([0-9]{1,3}\.){3}[0-9]{1,3}$
                     type: string
                   vipInterface:

@@ -24,6 +24,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/butlerdotdev/butler/internal/adm/bootstrap/manifests"
@@ -49,6 +50,12 @@ const (
 	// API Group for Butler CRDs
 	butlerAPIGroup   = "butler.butlerlabs.dev"
 	butlerAPIVersion = "v1alpha1"
+
+	// Environment variable for custom CA certificate path
+	envCACertPath = "BUTLER_CA_CERT_PATH"
+
+	// Default directory for CA certificates
+	defaultCACertDir = ".butler/certificates"
 )
 
 // GVR definitions for Butler CRDs
@@ -125,6 +132,14 @@ func (o *Orchestrator) Run(ctx context.Context, cfg *Config) error {
 			}
 		}
 	}()
+
+	// Inject host aliases for corporate DNS resolution (must be after KIND cluster creation)
+	hostAliases := o.getHostAliases(cfg)
+	if len(hostAliases) > 0 {
+		if err := o.injectHostAliases(ctx, hostAliases); err != nil {
+			o.logger.Warn("Failed to inject host aliases", "error", err)
+		}
+	}
 
 	// Phase 1.5: Build and load images in local dev mode
 	if o.options.LocalDev {
@@ -218,6 +233,166 @@ func (o *Orchestrator) dryRun(cfg *Config) error {
 			cfg.Cluster.Name, i, cfg.Cluster.Workers.CPU, cfg.Cluster.Workers.MemoryMB)
 	}
 
+	// Show CA certificates that would be injected
+	caCerts := o.findCACertificates()
+	if len(caCerts) > 0 {
+		fmt.Println("\n--- CA Certificates (will be injected into KIND) ---")
+		for _, cert := range caCerts {
+			fmt.Printf("- %s\n", cert)
+		}
+	}
+
+	// Show host aliases that would be injected
+	hostAliases := o.getHostAliases(cfg)
+	if len(hostAliases) > 0 {
+		fmt.Println("\n--- Host Aliases (will be injected into KIND /etc/hosts) ---")
+		for _, alias := range hostAliases {
+			fmt.Printf("- %s\n", alias)
+		}
+	}
+
+	return nil
+}
+
+// findCACertificates discovers CA certificates from standard locations.
+// Priority order:
+// 1. BUTLER_CA_CERT_PATH environment variable (single file or directory)
+// 2. ~/.butler/certificates/ directory (all .crt and .pem files)
+func (o *Orchestrator) findCACertificates() []string {
+	var certs []string
+
+	// Check environment variable first
+	if envPath := os.Getenv(envCACertPath); envPath != "" {
+		info, err := os.Stat(envPath)
+		if err == nil {
+			if info.IsDir() {
+				// It's a directory, scan for cert files
+				dirCerts := o.scanCertDirectory(envPath)
+				certs = append(certs, dirCerts...)
+			} else {
+				// It's a file
+				certs = append(certs, envPath)
+			}
+		}
+	}
+
+	// Check default directory ~/.butler/certificates/
+	home, err := os.UserHomeDir()
+	if err == nil {
+		certDir := filepath.Join(home, defaultCACertDir)
+		if info, err := os.Stat(certDir); err == nil && info.IsDir() {
+			dirCerts := o.scanCertDirectory(certDir)
+			certs = append(certs, dirCerts...)
+		}
+	}
+
+	return certs
+}
+
+// scanCertDirectory scans a directory for certificate files (.crt, .pem)
+func (o *Orchestrator) scanCertDirectory(dir string) []string {
+	var certs []string
+
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return certs
+	}
+
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		name := entry.Name()
+		if strings.HasSuffix(name, ".crt") || strings.HasSuffix(name, ".pem") {
+			certs = append(certs, filepath.Join(dir, name))
+		}
+	}
+
+	return certs
+}
+
+// buildKINDConfig generates a KIND cluster configuration with CA certificate mounts
+func (o *Orchestrator) buildKINDConfig(caCerts []string) string {
+	if len(caCerts) == 0 {
+		// No custom certs, use minimal config
+		return `kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+nodes:
+  - role: control-plane
+`
+	}
+
+	// Build extraMounts for each certificate
+	var mounts strings.Builder
+	for i, certPath := range caCerts {
+		containerPath := fmt.Sprintf("/usr/local/share/ca-certificates/butler-custom-%d.crt", i)
+		mounts.WriteString(fmt.Sprintf(`      - hostPath: %s
+        containerPath: %s
+        readOnly: true
+`, certPath, containerPath))
+	}
+
+	return fmt.Sprintf(`kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+nodes:
+  - role: control-plane
+    extraMounts:
+%s`, mounts.String())
+}
+
+// installCACertificates runs update-ca-certificates in the KIND node
+func (o *Orchestrator) installCACertificates(ctx context.Context) error {
+	o.logger.Info("Installing CA certificates in KIND node")
+
+	// Run update-ca-certificates inside the KIND container
+	cmd := exec.CommandContext(ctx, "docker", "exec",
+		kindClusterName+"-control-plane",
+		"update-ca-certificates")
+
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("failed to update CA certificates: %w, output: %s", err, string(output))
+	}
+
+	o.logger.Success("CA certificates installed in KIND node")
+	return nil
+}
+
+// getHostAliases returns host aliases from the provider config
+func (o *Orchestrator) getHostAliases(cfg *Config) []string {
+	switch cfg.Provider {
+	case "nutanix":
+		if cfg.ProviderConfig.Nutanix != nil {
+			return cfg.ProviderConfig.Nutanix.HostAliases
+		}
+	case "proxmox":
+		if cfg.ProviderConfig.Proxmox != nil {
+			return cfg.ProviderConfig.Proxmox.HostAliases
+		}
+	}
+	return nil
+}
+
+// injectHostAliases adds /etc/hosts entries to the KIND container
+func (o *Orchestrator) injectHostAliases(ctx context.Context, hostAliases []string) error {
+	if len(hostAliases) == 0 {
+		return nil
+	}
+
+	o.logger.Info("Injecting host aliases into KIND node", "count", len(hostAliases))
+
+	for _, alias := range hostAliases {
+		cmd := exec.CommandContext(ctx, "docker", "exec",
+			kindClusterName+"-control-plane",
+			"sh", "-c", fmt.Sprintf("echo '%s' >> /etc/hosts", alias))
+
+		if output, err := cmd.CombinedOutput(); err != nil {
+			return fmt.Errorf("failed to inject host alias %q: %w, output: %s", alias, err, string(output))
+		}
+		o.logger.Debug("Injected host alias", "alias", alias)
+	}
+
+	o.logger.Success("Host aliases injected")
 	return nil
 }
 
@@ -239,11 +414,44 @@ func (o *Orchestrator) createKINDCluster(ctx context.Context, provider *cluster.
 			return kubeconfigPath, nil
 		}
 	}
-	// Create cluster
-	if err := provider.Create(kindClusterName); err != nil {
+
+	// Discover CA certificates
+	caCerts := o.findCACertificates()
+	if len(caCerts) > 0 {
+		o.logger.Info("Found CA certificates to inject", "count", len(caCerts))
+		for _, cert := range caCerts {
+			o.logger.Debug("CA certificate", "path", cert)
+		}
+	}
+
+	// Build KIND config
+	kindConfig := o.buildKINDConfig(caCerts)
+
+	// Write KIND config to temp file
+	configFile, err := os.CreateTemp("", "kind-config-*.yaml")
+	if err != nil {
+		return "", fmt.Errorf("creating temp config file: %w", err)
+	}
+	defer os.Remove(configFile.Name())
+
+	if _, err := configFile.WriteString(kindConfig); err != nil {
+		return "", fmt.Errorf("writing KIND config: %w", err)
+	}
+	configFile.Close()
+
+	// Create cluster with config
+	if err := provider.Create(kindClusterName, cluster.CreateWithConfigFile(configFile.Name())); err != nil {
 		return "", fmt.Errorf("creating cluster: %w", err)
 	}
 	o.logger.Success("KIND cluster created")
+
+	// Install CA certificates if we mounted any
+	if len(caCerts) > 0 {
+		if err := o.installCACertificates(ctx); err != nil {
+			o.logger.Warn("Failed to install CA certificates", "error", err)
+			// Don't fail the bootstrap, just warn - user might not need them
+		}
+	}
 
 	kubeconfigPath, err := o.getKINDKubeconfig(provider)
 	if err != nil {
@@ -288,28 +496,23 @@ func (o *Orchestrator) patchCoreDNS(kubeconfigPath string) error {
 	cmd := exec.Command("kubectl", "--kubeconfig", kubeconfigPath,
 		"patch", "configmap", "coredns", "-n", "kube-system",
 		"--type=merge", "-p", patch)
-	output, err := cmd.CombinedOutput()
-	if err != nil {
+
+	if output, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("patching CoreDNS: %w, output: %s", err, string(output))
 	}
 
-	// Restart CoreDNS to pick up changes
+	// Restart CoreDNS to pick up new config
 	cmd = exec.Command("kubectl", "--kubeconfig", kubeconfigPath,
 		"rollout", "restart", "deployment/coredns", "-n", "kube-system")
-	output, err = cmd.CombinedOutput()
-	if err != nil {
+
+	if output, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("restarting CoreDNS: %w, output: %s", err, string(output))
 	}
 
-	// Wait for rollout
-	cmd = exec.Command("kubectl", "--kubeconfig", kubeconfigPath,
-		"rollout", "status", "deployment/coredns", "-n", "kube-system", "--timeout=60s")
-	cmd.Run() // Ignore error, just best effort
-
+	o.logger.Debug("CoreDNS patched to use Google DNS")
 	return nil
 }
 
-// getKINDKubeconfig writes KIND kubeconfig to temp file and returns path
 func (o *Orchestrator) getKINDKubeconfig(provider *cluster.Provider) (string, error) {
 	kubeconfig, err := provider.KubeConfig(kindClusterName, false)
 	if err != nil {
@@ -317,21 +520,14 @@ func (o *Orchestrator) getKINDKubeconfig(provider *cluster.Provider) (string, er
 	}
 
 	// Write to temp file
-	tmpFile, err := os.CreateTemp("", "butler-bootstrap-kubeconfig-*")
-	if err != nil {
-		return "", fmt.Errorf("creating temp file: %w", err)
-	}
-
-	if _, err := tmpFile.WriteString(kubeconfig); err != nil {
-		os.Remove(tmpFile.Name())
+	kubeconfigPath := "/tmp/kind-kubeconfig"
+	if err := os.WriteFile(kubeconfigPath, []byte(kubeconfig), 0600); err != nil {
 		return "", fmt.Errorf("writing kubeconfig: %w", err)
 	}
-	tmpFile.Close()
 
-	return tmpFile.Name(), nil
+	return kubeconfigPath, nil
 }
 
-// createClients creates Kubernetes clients from kubeconfig path
 func (o *Orchestrator) createClients(kubeconfigPath string) (*kubernetes.Clientset, dynamic.Interface, error) {
 	config, err := clientcmd.BuildConfigFromFlags("", kubeconfigPath)
 	if err != nil {
@@ -380,7 +576,6 @@ func (o *Orchestrator) deployCRDs(ctx context.Context, clientset *kubernetes.Cli
 	return nil
 }
 
-// createNamespaceAndSecrets creates the butler-system namespace and provider secrets
 func (o *Orchestrator) createNamespaceAndSecrets(ctx context.Context, clientset *kubernetes.Clientset, cfg *Config) error {
 	// Create namespace
 	ns := &corev1.Namespace{
@@ -388,16 +583,18 @@ func (o *Orchestrator) createNamespaceAndSecrets(ctx context.Context, clientset 
 			Name: butlerNamespace,
 		},
 	}
-	if _, err := clientset.CoreV1().Namespaces().Create(ctx, ns, metav1.CreateOptions{}); err != nil {
-		o.logger.Debug("namespace may already exist", "error", err)
+	_, err := clientset.CoreV1().Namespaces().Create(ctx, ns, metav1.CreateOptions{})
+	if err != nil && !strings.Contains(err.Error(), "already exists") {
+		return fmt.Errorf("creating namespace: %w", err)
 	}
 
-	// Create provider secret based on provider type
+	// Create provider credentials secret based on provider type
 	switch cfg.Provider {
 	case "harvester":
-		kubeconfBytes, err := os.ReadFile(cfg.ProviderConfig.Harvester.KubeconfigPath)
+		// Read kubeconfig file for Harvester
+		kubeconfigData, err := os.ReadFile(cfg.ProviderConfig.Harvester.KubeconfigPath)
 		if err != nil {
-			return fmt.Errorf("reading harvester kubeconfig: %w", err)
+			return fmt.Errorf("reading Harvester kubeconfig: %w", err)
 		}
 
 		secret := &corev1.Secret{
@@ -407,16 +604,31 @@ func (o *Orchestrator) createNamespaceAndSecrets(ctx context.Context, clientset 
 			},
 			Type: corev1.SecretTypeOpaque,
 			Data: map[string][]byte{
-				"kubeconfig": kubeconfBytes,
+				"kubeconfig": kubeconfigData,
 			},
 		}
-		if _, err := clientset.CoreV1().Secrets(butlerNamespace).Create(ctx, secret, metav1.CreateOptions{}); err != nil {
-			return fmt.Errorf("creating secret: %w", err)
+		_, err = clientset.CoreV1().Secrets(butlerNamespace).Create(ctx, secret, metav1.CreateOptions{})
+		if err != nil && !strings.Contains(err.Error(), "already exists") {
+			return fmt.Errorf("creating Harvester secret: %w", err)
 		}
 
 	case "nutanix":
-		// TODO: Create Nutanix credentials secret
-		o.logger.Debug("Nutanix credentials not yet implemented")
+		// Create Nutanix credentials secret
+		secret := &corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      cfg.Cluster.Name + "-nutanix-credentials",
+				Namespace: butlerNamespace,
+			},
+			Type: corev1.SecretTypeOpaque,
+			StringData: map[string]string{
+				"username": cfg.ProviderConfig.Nutanix.Username,
+				"password": cfg.ProviderConfig.Nutanix.Password,
+			},
+		}
+		_, err = clientset.CoreV1().Secrets(butlerNamespace).Create(ctx, secret, metav1.CreateOptions{})
+		if err != nil && !strings.Contains(err.Error(), "already exists") {
+			return fmt.Errorf("creating Nutanix secret: %w", err)
+		}
 
 	case "proxmox":
 		// TODO: Create Proxmox credentials secret
@@ -440,7 +652,7 @@ func (o *Orchestrator) deployControllers(ctx context.Context, clientset *kuberne
 	o.logger.Debug("waiting for controllers to be ready")
 
 	// Create a timeout context for waiting
-	waitCtx, cancel := context.WithTimeout(ctx, 120*time.Second)
+	waitCtx, cancel := context.WithTimeout(ctx, 300*time.Second)
 	defer cancel()
 
 	// Wait for bootstrap controller
@@ -475,6 +687,40 @@ func (o *Orchestrator) createProviderConfig(ctx context.Context, client dynamic.
 
 // buildProviderConfigUnstructured builds a ProviderConfig as unstructured
 func (o *Orchestrator) buildProviderConfigUnstructured(cfg *Config) *unstructured.Unstructured {
+	spec := map[string]interface{}{
+		"provider": cfg.Provider,
+	}
+
+	// Add provider-specific config and credentialsRef based on provider type
+	switch cfg.Provider {
+	case "harvester":
+		spec["credentialsRef"] = map[string]interface{}{
+			"name":      cfg.Cluster.Name + "-harvester-credentials",
+			"namespace": butlerNamespace,
+			"key":       "kubeconfig",
+		}
+		spec["harvester"] = map[string]interface{}{
+			"namespace":   cfg.ProviderConfig.Harvester.Namespace,
+			"networkName": cfg.ProviderConfig.Harvester.NetworkName,
+			"imageName":   cfg.ProviderConfig.Harvester.ImageName,
+		}
+	case "nutanix":
+		spec["credentialsRef"] = map[string]interface{}{
+			"name":      cfg.Cluster.Name + "-nutanix-credentials",
+			"namespace": butlerNamespace,
+		}
+		spec["nutanix"] = map[string]interface{}{
+			"endpoint":    cfg.ProviderConfig.Nutanix.Endpoint,
+			"port":        cfg.ProviderConfig.Nutanix.Port,
+			"insecure":    cfg.ProviderConfig.Nutanix.Insecure,
+			"clusterUUID": cfg.ProviderConfig.Nutanix.ClusterUUID,
+			"subnetUUID":  cfg.ProviderConfig.Nutanix.SubnetUUID,
+			"imageUUID":   cfg.ProviderConfig.Nutanix.ImageUUID,
+		}
+	case "proxmox":
+		// TODO: Proxmox ProviderConfig not yet implemented
+	}
+
 	pc := &unstructured.Unstructured{
 		Object: map[string]interface{}{
 			"apiVersion": butlerAPIGroup + "/" + butlerAPIVersion,
@@ -483,27 +729,8 @@ func (o *Orchestrator) buildProviderConfigUnstructured(cfg *Config) *unstructure
 				"name":      cfg.Cluster.Name + "-provider",
 				"namespace": butlerNamespace,
 			},
-			"spec": map[string]interface{}{
-				"provider": cfg.Provider,
-				"credentialsRef": map[string]interface{}{
-					"name":      cfg.Cluster.Name + "-harvester-credentials",
-					"namespace": butlerNamespace,
-					"key":       "kubeconfig",
-				},
-			},
+			"spec": spec,
 		},
-	}
-
-	// Add provider-specific config
-	spec := pc.Object["spec"].(map[string]interface{})
-
-	switch cfg.Provider {
-	case "harvester":
-		spec["harvester"] = map[string]interface{}{
-			"namespace":   cfg.ProviderConfig.Harvester.Namespace,
-			"networkName": cfg.ProviderConfig.Harvester.NetworkName,
-			"imageName":   cfg.ProviderConfig.Harvester.ImageName,
-		}
 	}
 
 	return pc

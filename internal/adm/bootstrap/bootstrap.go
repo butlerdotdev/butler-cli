@@ -50,7 +50,8 @@ Example:
 
 	// Register provider subcommands
 	cmd.AddCommand(NewHarvesterCmd(logger))
-	// TODO: Add nutanix, proxmox commands
+	cmd.AddCommand(NewNutanixCmd(logger))
+	// TODO: Add proxmox commands
 
 	return cmd
 }

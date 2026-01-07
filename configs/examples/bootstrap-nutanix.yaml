@@ -1,0 +1,58 @@
+# Butler Management Cluster Bootstrap Configuration
+# Provider: Nutanix AHV via Prism Central
+
+provider: nutanix
+
+cluster:
+  name: butler-ntnx
+  controlPlane:
+    replicas: 3
+    cpu: 4
+    memoryMB: 8192
+    diskGB: 50
+  workers:
+    replicas: 2
+    cpu: 8
+    memoryMB: 8192
+    diskGB: 100
+    extraDisks:
+      - sizeGB: 200  # For Longhorn storage
+
+network:
+  podCIDR: 10.244.0.0/16
+  serviceCIDR: 10.96.0.0/12
+  vip: 10.127.14.29
+
+talos:
+  version: v1.12.1
+  schematic: dc7b152cb3ea99b821fcb7340ce7168313ce393d663740b791c36f6e95fc8586
+
+addons:
+  cni:
+    type: cilium
+  storage:
+    type: longhorn
+  loadBalancer:
+    type: metallb
+    addressPool: 10.127.14.30-10.127.14.31
+  gitOps:
+    type: flux
+  capi:
+    enabled: true
+    version: v1.9.0
+  butlerController:
+    enabled: true
+    image: ghcr.io/butlerdotdev/butler-controller
+
+providerConfig:
+  nutanix:
+    endpoint: https://prism-central-endpoint.com
+    port: 9440
+    username: ""
+    password: ""
+    insecure: true
+    clusterUUID: "0006250f-b2f0-3e64-10b0-7cc25589555b"
+    subnetUUID: "9a3cdfd4-a6cd-4ea8-8918-298e4c8d339b"
+    imageUUID: "3c0f16ab-2947-4cbc-81e3-ca34ccfcf324"
+    hostAliases:
+      - "100.64.1.20 jhshpc.phibred.com"

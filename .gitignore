@@ -2,6 +2,8 @@
 bin/
 dist/
 
+secrets/
+
 # Test artifacts
 cover.out
 coverage.out

@@ -80,11 +80,11 @@ type DiskConfig struct {
 	// SizeGB is the disk size in GB
 	SizeGB int32 `mapstructure:"sizeGB"`
 
-	// StorageClass is the storage class to use (provider-specific)
+	// StorageClass is the optional storage class for this disk
 	StorageClass string `mapstructure:"storageClass,omitempty"`
 }
 
-// NetworkConfig defines networking configuration
+// NetworkConfig defines network configuration
 type NetworkConfig struct {
 	// PodCIDR is the pod network CIDR
 	PodCIDR string `mapstructure:"podCIDR"`
@@ -92,28 +92,25 @@ type NetworkConfig struct {
 	// ServiceCIDR is the service network CIDR
 	ServiceCIDR string `mapstructure:"serviceCIDR"`
 
-	// VIP is the control plane virtual IP
+	// VIP is the control plane VIP address
 	VIP string `mapstructure:"vip"`
-
-	// VIPInterface is the network interface for VIP (optional, auto-detected)
-	VIPInterface string `mapstructure:"vipInterface,omitempty"`
 }
 
-// TalosConfig defines Talos Linux configuration
+// TalosConfig defines Talos OS configuration
 type TalosConfig struct {
-	// Version is the Talos version (e.g., v1.9.0)
+	// Version is the Talos version
 	Version string `mapstructure:"version"`
 
-	// Schematic is the Talos schematic ID (for custom images with extensions)
+	// Schematic is the Talos schematic ID (for extensions)
 	Schematic string `mapstructure:"schematic,omitempty"`
 }
 
-// AddonsConfig defines addon configuration
+// AddonsConfig defines which addons to install
 type AddonsConfig struct {
-	// CNI defines the CNI configuration
+	// CNI defines CNI configuration
 	CNI CNIConfig `mapstructure:"cni"`
 
-	// Storage defines storage addon configuration
+	// Storage defines storage configuration
 	Storage StorageConfig `mapstructure:"storage"`
 
 	// LoadBalancer defines load balancer configuration
@@ -122,8 +119,10 @@ type AddonsConfig struct {
 	// GitOps defines GitOps configuration
 	GitOps GitOpsConfig `mapstructure:"gitOps"`
 
+	// CAPI defines Cluster API configuration
 	CAPI CAPIConfig `mapstructure:"capi"`
 
+	// ButlerController defines Butler Controller configuration
 	ButlerController ButlerControllerConfig `mapstructure:"butlerController"`
 }
 
@@ -133,9 +132,9 @@ type CNIConfig struct {
 	Type string `mapstructure:"type"`
 }
 
-// StorageConfig defines storage addon configuration
+// StorageConfig defines storage configuration
 type StorageConfig struct {
-	// Type is the storage type (longhorn, linstor)
+	// Type is the storage type (longhorn)
 	Type string `mapstructure:"type"`
 }
 
@@ -154,7 +153,7 @@ type GitOpsConfig struct {
 	Type string `mapstructure:"type"`
 }
 
-// CapiConfig defines CAPI configuration
+// CAPIConfig defines CAPI configuration
 type CAPIConfig struct {
 	Enabled bool   `mapstructure:"enabled"`
 	Version string `mapstructure:"version"`
@@ -196,135 +195,129 @@ type HarvesterProviderConfig struct {
 
 // NutanixProviderConfig contains Nutanix-specific settings
 type NutanixProviderConfig struct {
-	// Endpoint is the Prism Central endpoint
+	// Endpoint is the Prism Central URL (e.g., https://prism-central.example.com)
 	Endpoint string `mapstructure:"endpoint"`
+
+	// Port is the Prism Central API port (default: 9440)
+	Port int32 `mapstructure:"port"`
+
+	// Insecure allows insecure TLS connections (for self-signed certs)
+	Insecure bool `mapstructure:"insecure"`
 
 	// Username is the Prism Central username
 	Username string `mapstructure:"username"`
 
-	// Password is the Prism Central password (or reference to secret)
-	Password string `mapstructure:"password,omitempty"`
+	// Password is the Prism Central password
+	Password string `mapstructure:"password"`
 
-	// PasswordFile is the path to a file containing the password
-	PasswordFile string `mapstructure:"passwordFile,omitempty"`
+	// ClusterUUID is the target Nutanix cluster UUID
+	ClusterUUID string `mapstructure:"clusterUUID"`
 
-	// Cluster is the Nutanix cluster name
-	Cluster string `mapstructure:"cluster"`
+	// SubnetUUID is the network subnet UUID for VMs
+	SubnetUUID string `mapstructure:"subnetUUID"`
 
-	// Subnet is the subnet name for VMs
-	Subnet string `mapstructure:"subnet"`
+	// ImageUUID is the Talos image UUID in Prism Central
+	ImageUUID string `mapstructure:"imageUUID"`
 
-	// Image is the Talos image name in Nutanix
-	Image string `mapstructure:"image"`
+	// StorageContainerUUID is the storage container for VM disks (optional)
+	StorageContainerUUID string `mapstructure:"storageContainerUUID,omitempty"`
+
+	// HostAliases adds /etc/hosts entries to the KIND node for corporate DNS.
+	// Required when the Prism Central hostname is only resolvable via VPN/corporate DNS
+	// and not by public DNS (8.8.8.8) which KIND uses after CoreDNS patching.
+	// Format: ["ip hostname", "10.0.0.1 prism.corp.local"]
+	HostAliases []string `mapstructure:"hostAliases,omitempty"`
 }
 
 // ProxmoxProviderConfig contains Proxmox-specific settings
 type ProxmoxProviderConfig struct {
-	// Endpoint is the Proxmox API endpoint
+	// Endpoint is the Proxmox API URL
 	Endpoint string `mapstructure:"endpoint"`
 
-	// TokenID is the API token ID
-	TokenID string `mapstructure:"tokenId"`
+	// Insecure allows insecure TLS connections
+	Insecure bool `mapstructure:"insecure"`
 
-	// TokenSecret is the API token secret
-	TokenSecret string `mapstructure:"tokenSecret,omitempty"`
+	// Username is the Proxmox username
+	Username string `mapstructure:"username"`
 
-	// TokenSecretFile is the path to a file containing the token secret
-	TokenSecretFile string `mapstructure:"tokenSecretFile,omitempty"`
+	// Password is the Proxmox password
+	Password string `mapstructure:"password"`
 
-	// Node is the Proxmox node name
-	Node string `mapstructure:"node"`
+	// Nodes is the list of Proxmox nodes available for VM placement
+	Nodes []string `mapstructure:"nodes"`
 
-	// Storage is the storage pool for VMs
+	// Storage is the storage location for VM disks
 	Storage string `mapstructure:"storage"`
 
-	// Network is the network bridge
-	Network string `mapstructure:"network"`
+	// TemplateID is the VM template ID to clone (optional)
+	TemplateID int32 `mapstructure:"templateID,omitempty"`
 
-	// Template is the Talos template ID
-	Template int `mapstructure:"template"`
+	// VMIDStart is the start of the VM ID range
+	VMIDStart int32 `mapstructure:"vmidStart,omitempty"`
+
+	// VMIDEnd is the end of the VM ID range
+	VMIDEnd int32 `mapstructure:"vmidEnd,omitempty"`
+
+	// HostAliases adds /etc/hosts entries to the KIND node for corporate DNS.
+	// Required when the Proxmox hostname is only resolvable via VPN/corporate DNS
+	// and not by public DNS (8.8.8.8) which KIND uses after CoreDNS patching.
+	// Format: ["ip hostname", "10.0.0.1 proxmox.corp.local"]
+	HostAliases []string `mapstructure:"hostAliases,omitempty"`
 }
 
-// LoadConfig loads and validates the bootstrap configuration
+// LoadConfig loads the bootstrap configuration from viper
 func LoadConfig() (*Config, error) {
 	var cfg Config
 	if err := viper.Unmarshal(&cfg); err != nil {
 		return nil, fmt.Errorf("unmarshaling config: %w", err)
 	}
 
-	if err := cfg.Validate(); err != nil {
-		return nil, err
+	// Set defaults
+	if cfg.Network.PodCIDR == "" {
+		cfg.Network.PodCIDR = "10.244.0.0/16"
+	}
+	if cfg.Network.ServiceCIDR == "" {
+		cfg.Network.ServiceCIDR = "10.96.0.0/12"
+	}
+	if cfg.Talos.Version == "" {
+		cfg.Talos.Version = "v1.9.0"
+	}
+	if cfg.Addons.CNI.Type == "" {
+		cfg.Addons.CNI.Type = "cilium"
+	}
+	if cfg.Addons.Storage.Type == "" {
+		cfg.Addons.Storage.Type = "longhorn"
+	}
+	if cfg.Addons.LoadBalancer.Type == "" {
+		cfg.Addons.LoadBalancer.Type = "metallb"
+	}
+	if cfg.Addons.GitOps.Type == "" {
+		cfg.Addons.GitOps.Type = "flux"
 	}
 
-	// Expand paths
-	if cfg.ProviderConfig.Harvester != nil && cfg.ProviderConfig.Harvester.KubeconfigPath != "" {
-		expanded, err := expandPath(cfg.ProviderConfig.Harvester.KubeconfigPath)
-		if err != nil {
-			return nil, fmt.Errorf("expanding kubeconfig path: %w", err)
+	// Provider-specific defaults
+	if cfg.Provider == "nutanix" && cfg.ProviderConfig.Nutanix != nil {
+		if cfg.ProviderConfig.Nutanix.Port == 0 {
+			cfg.ProviderConfig.Nutanix.Port = 9440
 		}
-		cfg.ProviderConfig.Harvester.KubeconfigPath = expanded
+	}
+
+	// Expand home directory in paths
+	if cfg.ProviderConfig.Harvester != nil && cfg.ProviderConfig.Harvester.KubeconfigPath != "" {
+		cfg.ProviderConfig.Harvester.KubeconfigPath = expandPath(cfg.ProviderConfig.Harvester.KubeconfigPath)
 	}
 
 	return &cfg, nil
 }
 
-// Validate validates the configuration
-func (c *Config) Validate() error {
-	if c.Provider == "" {
-		return fmt.Errorf("provider is required")
-	}
-
-	if c.Cluster.Name == "" {
-		return fmt.Errorf("cluster.name is required")
-	}
-
-	if c.Cluster.ControlPlane.Replicas < 1 {
-		return fmt.Errorf("cluster.controlPlane.replicas must be at least 1")
-	}
-
-	if c.Network.VIP == "" {
-		return fmt.Errorf("network.vip is required")
-	}
-
-	if c.Talos.Version == "" {
-		return fmt.Errorf("talos.version is required")
-	}
-
-	// Validate provider-specific config
-	switch c.Provider {
-	case "harvester":
-		if c.ProviderConfig.Harvester == nil {
-			return fmt.Errorf("providerConfig.harvester is required for harvester provider")
-		}
-		if c.ProviderConfig.Harvester.KubeconfigPath == "" {
-			return fmt.Errorf("providerConfig.harvester.kubeconfigPath is required")
-		}
-	case "nutanix":
-		if c.ProviderConfig.Nutanix == nil {
-			return fmt.Errorf("providerConfig.nutanix is required for nutanix provider")
-		}
-	case "proxmox":
-		if c.ProviderConfig.Proxmox == nil {
-			return fmt.Errorf("providerConfig.proxmox is required for proxmox provider")
-		}
-	default:
-		return fmt.Errorf("unsupported provider: %s", c.Provider)
-	}
-
-	return nil
-}
-
 // expandPath expands ~ to home directory
-func expandPath(path string) (string, error) {
-	if path == "" {
-		return "", nil
-	}
-	if path[0] == '~' {
+func expandPath(path string) string {
+	if len(path) > 0 && path[0] == '~' {
 		home, err := os.UserHomeDir()
 		if err != nil {
-			return "", err
+			return path
 		}
-		path = filepath.Join(home, path[1:])
+		return filepath.Join(home, path[1:])
 	}
-	return filepath.Abs(path)
+	return path
 }
