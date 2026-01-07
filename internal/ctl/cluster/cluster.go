@@ -18,21 +18,13 @@ limitations under the License.
 package cluster
 
 import (
+	"context"
 	"fmt"
-	"os"
-	"path/filepath"
-	"text/tabwriter"
 	"time"
 
 	"github.com/butlerdotdev/butler/internal/common/client"
 	"github.com/butlerdotdev/butler/internal/common/log"
 	"github.com/spf13/cobra"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-)
-
-const (
-	butlerNamespace = "butler-system"
 )
 
 // NewClusterCmd creates the cluster parent command
@@ -43,394 +35,210 @@ func NewClusterCmd(logger *log.Logger) *cobra.Command {
 		Long: `Manage tenant Kubernetes clusters on the Butler platform.
 
 Tenant clusters are isolated Kubernetes environments for your workloads.
-Butler supports both hosted control planes (resource-efficient) and 
-standalone clusters (full isolation).
+Butler uses Kamaji for hosted control planes (resource-efficient) with
+worker nodes running on your infrastructure provider.
+
+Commands:
+  create      Create a new tenant cluster
+  list        List all tenant clusters
+  get         Get details of a specific cluster
+  scale       Scale worker node count
+  export      Export cluster config as clean YAML
+  kubeconfig  Download kubeconfig for cluster access
+  destroy     Permanently destroy a cluster
 
 Examples:
-  butlerctl cluster create my-app --workers 3
+  # Create a new cluster
+  butlerctl cluster create my-cluster --lb-pool 10.127.14.40
+
+  # List all clusters
   butlerctl cluster list
-  butlerctl cluster kubeconfig my-app
-  butlerctl cluster delete my-app`,
+
+  # Scale workers
+  butlerctl cluster scale my-cluster --workers 3
+
+  # Export for GitOps
+  butlerctl cluster export my-cluster -o my-cluster.yaml
+
+  # Get kubeconfig
+  butlerctl cluster kubeconfig my-cluster --merge
+
+  # Destroy a cluster
+  butlerctl cluster destroy my-cluster`,
 	}
 
-	cmd.AddCommand(newCreateCmd(logger))
+	// Register subcommands
 	cmd.AddCommand(newListCmd(logger))
-	cmd.AddCommand(newGetCmd(logger))
+	cmd.AddCommand(NewCreateCmd(logger))
+	cmd.AddCommand(NewScaleCmd(logger))
+	cmd.AddCommand(NewExportCmd(logger))
 	cmd.AddCommand(newKubeconfigCmd(logger))
-	cmd.AddCommand(newDeleteCmd(logger))
-
-	return cmd
-}
-
-// newCreateCmd creates the cluster create command
-func newCreateCmd(logger *log.Logger) *cobra.Command {
-	var (
-		workers   int32
-		cpu       int32
-		memoryGB  int32
-		version   string
-		hosted    bool
-		waitReady bool
-	)
-
-	cmd := &cobra.Command{
-		Use:   "create NAME",
-		Short: "Create a new tenant cluster",
-		Long: `Create a new tenant Kubernetes cluster.
-
-By default, clusters use hosted control planes (Kamaji) for resource efficiency.
-Use --standalone for dedicated control plane nodes.
-
-Examples:
-  # Create a 3-worker cluster with defaults
-  butlerctl cluster create my-app --workers 3
-
-  # Create a production cluster
-  butlerctl cluster create prod --workers 5 --cpu 8 --memory 32 --version v1.30.2
-
-  # Create and wait for ready
-  butlerctl cluster create my-app --workers 3 --wait`,
-		Args: cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			name := args[0]
-			ctx := cmd.Context()
-
-			// Connect to management cluster
-			c, err := client.NewFromDefault()
-			if err != nil {
-				return fmt.Errorf("connecting to management cluster: %w", err)
-			}
-
-			logger.Info("creating tenant cluster", "name", name, "workers", workers)
-
-			// Build TenantCluster CR
-			tc := &unstructured.Unstructured{
-				Object: map[string]interface{}{
-					"apiVersion": client.ButlerAPIGroup + "/" + client.ButlerAPIVersion,
-					"kind":       "TenantCluster",
-					"metadata": map[string]interface{}{
-						"name":      name,
-						"namespace": butlerNamespace,
-					},
-					"spec": map[string]interface{}{
-						"controlPlane": map[string]interface{}{
-							"type":    "hosted",
-							"version": version,
-						},
-						"machinePools": []interface{}{
-							map[string]interface{}{
-								"name":     "default",
-								"replicas": workers,
-								"machineTemplate": map[string]interface{}{
-									"cpu":      cpu,
-									"memoryGi": memoryGB,
-								},
-							},
-						},
-					},
-				},
-			}
-
-			if _, err := c.CreateTenantCluster(ctx, tc); err != nil {
-				return fmt.Errorf("creating TenantCluster: %w", err)
-			}
-
-			logger.Success("TenantCluster created", "name", name)
-
-			if waitReady {
-				logger.Waiting("waiting for cluster to be ready...")
-				// TODO: Watch TenantCluster status
-			}
-
-			return nil
-		},
-	}
-
-	cmd.Flags().Int32VarP(&workers, "workers", "w", 3, "number of worker nodes")
-	cmd.Flags().Int32Var(&cpu, "cpu", 4, "vCPUs per worker node")
-	cmd.Flags().Int32Var(&memoryGB, "memory", 16, "memory (GB) per worker node")
-	cmd.Flags().StringVar(&version, "version", "v1.30.2", "Kubernetes version")
-	cmd.Flags().BoolVar(&hosted, "hosted", true, "use hosted control plane (default)")
-	cmd.Flags().BoolVar(&waitReady, "wait", false, "wait for cluster to be ready")
-
-	return cmd
-}
-
-// newListCmd creates the cluster list command
-func newListCmd(logger *log.Logger) *cobra.Command {
-	var outputFormat string
-
-	cmd := &cobra.Command{
-		Use:     "list",
-		Aliases: []string{"ls"},
-		Short:   "List tenant clusters",
-		RunE: func(cmd *cobra.Command, args []string) error {
-			ctx := cmd.Context()
-
-			// Connect to management cluster
-			c, err := client.NewFromDefault()
-			if err != nil {
-				return fmt.Errorf("connecting to management cluster: %w", err)
-			}
-
-			// List TenantClusters
-			list, err := c.ListTenantClusters(ctx, butlerNamespace)
-			if err != nil {
-				return fmt.Errorf("listing TenantClusters: %w", err)
-			}
-
-			// Print table
-			w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-			fmt.Fprintln(w, "NAME\tSTATUS\tVERSION\tWORKERS\tAGE")
-
-			for _, item := range list.Items {
-				name := item.GetName()
-				status := getNestedString(item.Object, "status", "phase")
-				version := getNestedString(item.Object, "spec", "controlPlane", "version")
-				workersReady := getNestedInt64(item.Object, "status", "workerNodesReady")
-				workersDesired := getNestedInt64(item.Object, "status", "workerNodesDesired")
-				age := formatAge(item.GetCreationTimestamp().Time)
-
-				fmt.Fprintf(w, "%s\t%s\t%s\t%d/%d\t%s\n",
-					name, status, version, workersReady, workersDesired, age)
-			}
-			w.Flush()
-
-			return nil
-		},
-	}
-
-	cmd.Flags().StringVarP(&outputFormat, "output", "o", "table", "output format (table, yaml, json)")
+	cmd.AddCommand(newGetCmd(logger))
+	cmd.AddCommand(NewDestroyCmd(logger))
 
 	return cmd
 }
 
 // newGetCmd creates the cluster get command
 func newGetCmd(logger *log.Logger) *cobra.Command {
-	var outputFormat string
+	var (
+		namespace    string
+		outputFormat string
+		kubeconfig   string
+	)
 
 	cmd := &cobra.Command{
 		Use:   "get NAME",
 		Short: "Get details of a tenant cluster",
-		Args:  cobra.ExactArgs(1),
+		Long: `Get detailed information about a specific tenant cluster.
+
+Displays cluster configuration, status, worker nodes, and installed addons.
+
+Examples:
+  # Get cluster details
+  butlerctl cluster get my-cluster
+
+  # Get cluster in a specific namespace
+  butlerctl cluster get my-cluster -n team-payments
+
+  # Output as YAML
+  butlerctl cluster get my-cluster -o yaml`,
+		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			name := args[0]
-			ctx := cmd.Context()
-
-			// Connect to management cluster
-			c, err := client.NewFromDefault()
-			if err != nil {
-				return fmt.Errorf("connecting to management cluster: %w", err)
-			}
-
-			// Get TenantCluster
-			tc, err := c.GetTenantCluster(ctx, butlerNamespace, name)
-			if err != nil {
-				return fmt.Errorf("getting TenantCluster: %w", err)
-			}
-
-			// Display info
-			fmt.Printf("Name:          %s\n", tc.GetName())
-			fmt.Printf("Namespace:     %s\n", tc.GetNamespace())
-			fmt.Printf("Status:        %s\n", getNestedString(tc.Object, "status", "phase"))
-			fmt.Printf("Version:       %s\n", getNestedString(tc.Object, "spec", "controlPlane", "version"))
-			fmt.Printf("Control Plane: %s\n", getNestedString(tc.Object, "spec", "controlPlane", "type"))
-			fmt.Printf("Workers:       %d/%d Ready\n",
-				getNestedInt64(tc.Object, "status", "workerNodesReady"),
-				getNestedInt64(tc.Object, "status", "workerNodesDesired"))
-			fmt.Printf("Endpoint:      %s\n", getNestedString(tc.Object, "status", "endpoint"))
-			fmt.Printf("Age:           %s\n", formatAge(tc.GetCreationTimestamp().Time))
-
-			return nil
+			return runGet(cmd.Context(), logger, args[0], namespace, outputFormat, kubeconfig)
 		},
 	}
 
+	cmd.Flags().StringVarP(&namespace, "namespace", "n", DefaultTenantNamespace, "namespace of the TenantCluster")
 	cmd.Flags().StringVarP(&outputFormat, "output", "o", "", "output format (yaml, json)")
+	cmd.Flags().StringVar(&kubeconfig, "kubeconfig", "", "path to management cluster kubeconfig")
 
 	return cmd
 }
 
-// newKubeconfigCmd creates the cluster kubeconfig command
-func newKubeconfigCmd(logger *log.Logger) *cobra.Command {
-	var outputPath string
-
-	cmd := &cobra.Command{
-		Use:   "kubeconfig NAME",
-		Short: "Download kubeconfig for a tenant cluster",
-		Long: `Download the kubeconfig for accessing a tenant cluster.
-
-By default, saves to ~/.kube/<cluster-name>-config.
-Use --output to specify a different path.
-
-Examples:
-  # Download and save kubeconfig
-  butlerctl cluster kubeconfig my-app
-
-  # Save to specific path
-  butlerctl cluster kubeconfig my-app --output ./my-app.kubeconfig
-
-  # Output to stdout (for piping)
-  butlerctl cluster kubeconfig my-app --output -`,
-		Args: cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			name := args[0]
-			ctx := cmd.Context()
-
-			// Connect to management cluster
-			c, err := client.NewFromDefault()
-			if err != nil {
-				return fmt.Errorf("connecting to management cluster: %w", err)
-			}
-
-			// Get TenantCluster to find kubeconfig secret reference
-			tc, err := c.GetTenantCluster(ctx, butlerNamespace, name)
-			if err != nil {
-				return fmt.Errorf("getting TenantCluster: %w", err)
-			}
-
-			// Get kubeconfig from status or associated secret
-			kubeconfigSecretName := getNestedString(tc.Object, "status", "kubeconfigSecretRef", "name")
-			if kubeconfigSecretName == "" {
-				kubeconfigSecretName = name + "-kubeconfig"
-			}
-
-			// Fetch the secret
-			secret, err := c.Clientset.CoreV1().Secrets(butlerNamespace).Get(ctx, kubeconfigSecretName, metav1.GetOptions{})
-			if err != nil {
-				return fmt.Errorf("getting kubeconfig secret: %w", err)
-			}
-
-			kubeconfig := secret.Data["kubeconfig"]
-			if len(kubeconfig) == 0 {
-				kubeconfig = secret.Data["value"]
-			}
-			if len(kubeconfig) == 0 {
-				return fmt.Errorf("kubeconfig not found in secret")
-			}
-
-			// Determine output path
-			if outputPath == "-" {
-				fmt.Print(string(kubeconfig))
-				return nil
-			}
-
-			if outputPath == "" {
-				home, err := os.UserHomeDir()
-				if err != nil {
-					return fmt.Errorf("getting home directory: %w", err)
-				}
-				outputPath = filepath.Join(home, ".kube", name+"-config")
-			}
-
-			// Ensure directory exists
-			if err := os.MkdirAll(filepath.Dir(outputPath), 0700); err != nil {
-				return fmt.Errorf("creating directory: %w", err)
-			}
-
-			// Write kubeconfig
-			if err := os.WriteFile(outputPath, kubeconfig, 0600); err != nil {
-				return fmt.Errorf("writing kubeconfig: %w", err)
-			}
-
-			logger.Success("kubeconfig saved", "path", outputPath)
-			logger.Info("Use: export KUBECONFIG=" + outputPath)
-
-			return nil
-		},
+func runGet(ctx context.Context, logger *log.Logger, name, namespace, outputFormat, kubeconfigPath string) error {
+	// Connect to management cluster
+	var c *client.Client
+	var err error
+	if kubeconfigPath != "" {
+		c, err = client.NewFromKubeconfig(kubeconfigPath)
+	} else {
+		c, err = client.NewFromDefault()
+	}
+	if err != nil {
+		return fmt.Errorf("connecting to management cluster: %w", err)
 	}
 
-	cmd.Flags().StringVarP(&outputPath, "output", "o", "", "output path (use - for stdout)")
-
-	return cmd
-}
-
-// newDeleteCmd creates the cluster delete command
-func newDeleteCmd(logger *log.Logger) *cobra.Command {
-	var (
-		force  bool
-		noWait bool
-	)
-
-	cmd := &cobra.Command{
-		Use:   "delete NAME",
-		Short: "Delete a tenant cluster",
-		Long: `Delete a tenant cluster and all its resources.
-
-This will:
-  • Terminate all worker nodes
-  • Delete hosted control plane (if applicable)
-  • Clean up associated resources (PVCs, secrets, etc.)
-
-By default, waits for deletion to complete.
-Use --no-wait to return immediately.
-
-Examples:
-  butlerctl cluster delete my-app
-  butlerctl cluster delete my-app --force --no-wait`,
-		Args: cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			name := args[0]
-			ctx := cmd.Context()
-
-			// Connect to management cluster
-			c, err := client.NewFromDefault()
-			if err != nil {
-				return fmt.Errorf("connecting to management cluster: %w", err)
-			}
-
-			// Confirm deletion (unless force)
-			if !force {
-				fmt.Printf("This will permanently delete cluster %q and all its resources.\n", name)
-				fmt.Print("Type the cluster name to confirm: ")
-				var confirm string
-				fmt.Scanln(&confirm)
-				if confirm != name {
-					return fmt.Errorf("confirmation failed")
-				}
-			}
-
-			logger.Info("deleting tenant cluster", "name", name)
-
-			if err := c.DeleteTenantCluster(ctx, butlerNamespace, name); err != nil {
-				return fmt.Errorf("deleting TenantCluster: %w", err)
-			}
-
-			if !noWait {
-				logger.Waiting("waiting for cluster deletion...")
-				// TODO: Watch for TenantCluster to be gone
-				time.Sleep(2 * time.Second) // placeholder
-			}
-
-			logger.Success("cluster deleted", "name", name)
-			return nil
-		},
+	// Get TenantCluster
+	tc, err := c.GetTenantCluster(ctx, namespace, name)
+	if err != nil {
+		return fmt.Errorf("getting TenantCluster %s/%s: %w", namespace, name, err)
 	}
 
-	cmd.Flags().BoolVar(&force, "force", false, "skip confirmation prompt")
-	cmd.Flags().BoolVar(&noWait, "no-wait", false, "don't wait for deletion to complete")
+	// For YAML/JSON output, print the raw resource
+	if outputFormat == "yaml" || outputFormat == "json" {
+		// TODO: Implement proper yaml/json output
+		fmt.Printf("Output format %s not yet implemented\n", outputFormat)
+		return nil
+	}
 
-	return cmd
+	// Extract info
+	info := ExtractTenantClusterInfo(tc)
+
+	// Format age
+	var age string
+	if info.CreationTime != "" {
+		t, err := time.Parse(time.RFC3339, info.CreationTime)
+		if err == nil {
+			duration := time.Since(t)
+			if duration < time.Hour {
+				age = fmt.Sprintf("%dm", int(duration.Minutes()))
+			} else if duration < 24*time.Hour {
+				age = fmt.Sprintf("%dh", int(duration.Hours()))
+			} else {
+				age = fmt.Sprintf("%dd", int(duration.Hours()/24))
+			}
+		}
+	}
+
+	// Print details
+	fmt.Printf("Name:             %s\n", info.Name)
+	fmt.Printf("Namespace:        %s\n", info.Namespace)
+	fmt.Printf("Phase:            %s\n", info.Phase)
+	fmt.Printf("K8s Version:      %s\n", info.KubernetesVersion)
+	fmt.Printf("Workers:          %d/%d Ready\n", info.WorkersReady, info.WorkersDesired)
+	fmt.Printf("Endpoint:         %s\n", orDefault(info.Endpoint, "<pending>"))
+	fmt.Printf("Tenant Namespace: %s\n", orDefault(info.TenantNamespace, "<pending>"))
+	fmt.Printf("Provider Config:  %s\n", orDefault(info.ProviderConfig, "<default>"))
+	fmt.Printf("Age:              %s\n", orDefault(age, "<unknown>"))
+
+	// Print conditions if available
+	conditions, found, _ := unstructuredNestedSlice(tc.Object, "status", "conditions")
+	if found && len(conditions) > 0 {
+		fmt.Println("\nConditions:")
+		for _, c := range conditions {
+			cond, ok := c.(map[string]interface{})
+			if !ok {
+				continue
+			}
+			condType := GetNestedString(cond, "type")
+			status := GetNestedString(cond, "status")
+			reason := GetNestedString(cond, "reason")
+			fmt.Printf("  %s: %s (%s)\n", condType, status, reason)
+		}
+	}
+
+	// Print addons if available
+	addons, found, _ := unstructuredNestedSlice(tc.Object, "status", "observedState", "addons")
+	if found && len(addons) > 0 {
+		fmt.Println("\nAddons:")
+		for _, a := range addons {
+			addon, ok := a.(map[string]interface{})
+			if !ok {
+				continue
+			}
+			name := GetNestedString(addon, "name")
+			version := GetNestedString(addon, "version")
+			status := GetNestedString(addon, "status")
+			fmt.Printf("  %s: %s (%s)\n", name, version, status)
+		}
+	}
+
+	return nil
 }
 
 // Helper functions
 
-func getNestedString(obj map[string]interface{}, fields ...string) string {
-	val, _, _ := unstructured.NestedString(obj, fields...)
-	return val
+func orDefault(s, def string) string {
+	if s == "" {
+		return def
+	}
+	return s
 }
 
-func getNestedInt64(obj map[string]interface{}, fields ...string) int64 {
-	val, _, _ := unstructured.NestedInt64(obj, fields...)
-	return val
+func unstructuredNestedSlice(obj map[string]interface{}, fields ...string) ([]interface{}, bool, error) {
+	val, found, err := nestedFieldNoCopy(obj, fields...)
+	if !found || err != nil {
+		return nil, found, err
+	}
+	slice, ok := val.([]interface{})
+	if !ok {
+		return nil, false, fmt.Errorf("value is not a slice")
+	}
+	return slice, true, nil
 }
 
-func formatAge(t time.Time) string {
-	d := time.Since(t)
-	if d < time.Hour {
-		return fmt.Sprintf("%dm", int(d.Minutes()))
+func nestedFieldNoCopy(obj map[string]interface{}, fields ...string) (interface{}, bool, error) {
+	var val interface{} = obj
+	for _, field := range fields {
+		m, ok := val.(map[string]interface{})
+		if !ok {
+			return nil, false, nil
+		}
+		val, ok = m[field]
+		if !ok {
+			return nil, false, nil
+		}
 	}
-	if d < 24*time.Hour {
-		return fmt.Sprintf("%dh", int(d.Hours()))
-	}
-	return fmt.Sprintf("%dd", int(d.Hours()/24))
+	return val, true, nil
 }

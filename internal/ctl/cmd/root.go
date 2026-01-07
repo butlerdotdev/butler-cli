@@ -19,11 +19,14 @@ package cmd
 
 import (
 	"github.com/butlerdotdev/butler/internal/common/log"
+	"github.com/butlerdotdev/butler/internal/common/output"
 	"github.com/butlerdotdev/butler/internal/ctl/cluster"
 	"github.com/spf13/cobra"
 )
 
-var verbose bool
+var (
+	verbose bool
+)
 
 // Execute runs the butlerctl CLI
 func Execute(logger *log.Logger) error {
@@ -35,45 +38,52 @@ func Execute(logger *log.Logger) error {
 func NewRootCmd(logger *log.Logger) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "butlerctl",
-		Short: "Butler Platform User CLI",
-		Long: `butlerctl is the user CLI for the Butler Kubernetes-as-a-Service platform.
+		Short: "Butler Kubernetes Cluster Management",
+		Long: `butlerctl is the cluster management CLI for the Butler platform.
 
-It is designed for Platform Users and Developers who consume the Butler platform:
-  • Create and manage tenant Kubernetes clusters
-  • Enable and configure platform addons
-  • Manage cluster access and permissions
-  • Download kubeconfig for cluster access
+It is designed for developers and platform users who work with tenant clusters:
 
-All operations create Custom Resources that Butler controllers reconcile.
-This enables consistent behavior whether using CLI, Console, or direct API.
+  • Create and destroy tenant clusters
+  • Scale worker nodes up and down
+  • Get kubeconfig for cluster access
+  • Export cluster configs for GitOps
+
+Butler provides Kubernetes-as-a-Service with hosted control planes (Kamaji)
+and infrastructure-agnostic worker provisioning.
 
 Examples:
-  # Create a new tenant cluster
-  butlerctl cluster create my-app --workers 3
+  # List all clusters
+  butlerctl cluster list
 
-  # Get kubeconfig for a cluster
-  butlerctl cluster kubeconfig my-app
+  # Create a new cluster
+  butlerctl cluster create my-cluster --lb-pool 10.127.14.40
 
-  # Enable monitoring addon
-  butlerctl addon enable prometheus --cluster my-app
+  # Get kubeconfig
+  butlerctl cluster kubeconfig my-cluster --merge
 
-  # Grant access to a team member
-  butlerctl access grant --cluster my-app --user alice@example.com --role admin`,
-		PersistentPreRun: func(cmd *cobra.Command, args []string) {
+  # Scale workers
+  butlerctl cluster scale my-cluster --workers 3
+
+  # Destroy a cluster
+  butlerctl cluster destroy my-cluster`,
+		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 			if verbose {
 				logger.SetVerbose(true)
 			}
+			return nil
 		},
 		SilenceUsage:  true,
 		SilenceErrors: true,
 	}
+
+	// Configure colorized help
+	output.ConfigureHelp(cmd)
 
 	// Global flags
 	cmd.PersistentFlags().BoolVarP(&verbose, "verbose", "v", false, "enable verbose output")
 
 	// Register subcommands
 	cmd.AddCommand(cluster.NewClusterCmd(logger))
-	// TODO: Add addon, access commands
 	cmd.AddCommand(NewVersionCmd())
 
 	return cmd
@@ -85,9 +95,9 @@ func NewVersionCmd() *cobra.Command {
 		Use:   "version",
 		Short: "Print version information",
 		Run: func(cmd *cobra.Command, args []string) {
-			cmd.Println("butlerctl version v0.1.0-dev")
+			cmd.Println(output.Binary("butlerctl") + " version v0.1.0-dev")
 			cmd.Println("Butler Kubernetes-as-a-Service Platform")
-			cmd.Println("https://github.com/butlerdotdev/butler")
+			cmd.Println(output.Dim("https://github.com/butlerdotdev/butler"))
 		},
 	}
 }

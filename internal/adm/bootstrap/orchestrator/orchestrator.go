@@ -933,12 +933,12 @@ func (o *Orchestrator) buildAndLoadImages(ctx context.Context, provider string) 
 		{
 			name:    "butler-bootstrap",
 			repoDir: filepath.Join(o.options.RepoRoot, "butler-bootstrap"),
-			image:   "ghcr.io/butlerdotdev/butler-bootstrap:v0.1.0",
+			image:   "ghcr.io/butlerdotdev/butler-bootstrap:latest",
 		},
 		{
 			name:    fmt.Sprintf("butler-provider-%s", provider),
 			repoDir: filepath.Join(o.options.RepoRoot, fmt.Sprintf("butler-provider-%s", provider)),
-			image:   fmt.Sprintf("ghcr.io/butlerdotdev/butler-provider-%s:v0.1.0", provider),
+			image:   fmt.Sprintf("ghcr.io/butlerdotdev/butler-provider-%s:latest", provider),
 		},
 	}
 

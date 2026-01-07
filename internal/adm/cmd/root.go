@@ -19,7 +19,10 @@ package cmd
 
 import (
 	"github.com/butlerdotdev/butler/internal/adm/bootstrap"
+	"github.com/butlerdotdev/butler/internal/adm/provider"
+	"github.com/butlerdotdev/butler/internal/adm/status"
 	"github.com/butlerdotdev/butler/internal/common/log"
+	"github.com/butlerdotdev/butler/internal/common/output"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
@@ -43,13 +46,27 @@ func NewRootCmd(logger *log.Logger) *cobra.Command {
 		Long: `butleradm is the administration CLI for the Butler Kubernetes-as-a-Service platform.
 
 It is designed for Platform Operators who manage the Butler infrastructure:
+
   • Bootstrap new management clusters
+  • Check platform health and status
+  • Manage infrastructure providers
   • Upgrade Butler platform components
-  • Backup and restore cluster state
-  • Monitor platform health and status
 
 Butler follows CNCF best practices with a Kubernetes-native, controller-based architecture.
-All operations create Custom Resources that controllers reconcile to desired state.`,
+All operations create Custom Resources that controllers reconcile to desired state.
+
+Examples:
+  # Bootstrap a new management cluster on Nutanix
+  butleradm bootstrap nutanix --config bootstrap-nutanix.yaml
+
+  # Check platform status
+  butleradm status
+
+  # List configured providers
+  butleradm provider list
+
+  # Validate provider connectivity
+  butleradm provider validate nutanix`,
 		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 			if verbose {
 				logger.SetVerbose(true)
@@ -60,6 +77,9 @@ All operations create Custom Resources that controllers reconcile to desired sta
 		SilenceErrors: true,
 	}
 
+	// Configure colorized help
+	output.ConfigureHelp(cmd)
+
 	// Global flags
 	cmd.PersistentFlags().StringVar(&cfgFile, "config", "", "config file (default: ./bootstrap.yaml or ~/.butler/config.yaml)")
 	cmd.PersistentFlags().BoolVarP(&verbose, "verbose", "v", false, "enable verbose output")
@@ -69,8 +89,11 @@ All operations create Custom Resources that controllers reconcile to desired sta
 
 	// Register subcommands
 	cmd.AddCommand(bootstrap.NewBootstrapCmd(logger))
+	cmd.AddCommand(status.NewStatusCmd(logger))
+	cmd.AddCommand(provider.NewProviderCmd(logger))
 	cmd.AddCommand(NewVersionCmd())
-	// TODO: Add upgrade, backup, restore, status commands
+
+	// TODO: Add upgrade, backup, restore commands
 
 	return cmd
 }
@@ -105,9 +128,9 @@ func NewVersionCmd() *cobra.Command {
 		Use:   "version",
 		Short: "Print version information",
 		Run: func(cmd *cobra.Command, args []string) {
-			cmd.Println("butleradm version v0.1.0-dev")
-			cmd.Println("Built with controller-based architecture")
-			cmd.Println("https://github.com/butlerdotdev/butler")
+			cmd.Println(output.Binary("butleradm") + " version v0.1.0-dev")
+			cmd.Println("Butler Platform Administration")
+			cmd.Println(output.Dim("https://github.com/butlerdotdev/butler"))
 		},
 	}
 }
