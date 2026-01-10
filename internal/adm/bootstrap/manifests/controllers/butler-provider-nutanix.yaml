@@ -78,8 +78,8 @@ spec:
         control-plane: controller-manager
     spec:
       serviceAccountName: butler-provider-nutanix
-      hostNetwork: true  # Use host network for access to Prism Central API
-      dnsPolicy: ClusterFirstWithHostNet  # Required when using hostNetwork
+      hostNetwork: true
+      dnsPolicy: ClusterFirstWithHostNet
       securityContext:
         runAsNonRoot: true
         seccompProfile:
@@ -94,6 +94,9 @@ spec:
             - --leader-elect=false
             - --health-probe-bind-address=:8084
             - --metrics-bind-address=:8085
+          env:
+            - name: GODEBUG
+              value: "http2client=0"
           ports:
             - containerPort: 8085
               name: metrics
@@ -125,4 +128,13 @@ spec:
             capabilities:
               drop:
                 - ALL
+          volumeMounts:
+            - name: ca-certs
+              mountPath: /etc/ssl/certs
+              readOnly: true
+      volumes:
+        - name: ca-certs
+          hostPath:
+            path: /etc/ssl/certs
+            type: Directory
       terminationGracePeriodSeconds: 10

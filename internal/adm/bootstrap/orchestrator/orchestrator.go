@@ -104,6 +104,13 @@ func New(logger *log.Logger, options Options) *Orchestrator {
 	}
 }
 
+// clusterCredentials holds the kubeconfig and talosconfig for a cluster
+type clusterCredentials struct {
+	kubeconfig      []byte
+	talosconfig     []byte
+	controlPlaneIPs []string
+}
+
 // Run executes the bootstrap process
 func (o *Orchestrator) Run(ctx context.Context, cfg *Config) error {
 	if o.options.DryRun {
@@ -141,7 +148,7 @@ func (o *Orchestrator) Run(ctx context.Context, cfg *Config) error {
 		}
 	}
 
-	// Phase 1.5: Build and load images in local dev mode
+	// Build and load images in local dev mode
 	if o.options.LocalDev {
 		o.logger.Phase("Building and loading controller images (local dev mode)")
 		if err := o.buildAndLoadImages(ctx, cfg.Provider); err != nil {
@@ -149,59 +156,68 @@ func (o *Orchestrator) Run(ctx context.Context, cfg *Config) error {
 		}
 	}
 
-	// Phase 2: Create Kubernetes clients
+	// Create Kubernetes clients
 	o.logger.Phase("Connecting to KIND cluster")
 	clientset, dynamicClient, err := o.createClients(kubeconfigPath)
 	if err != nil {
 		return fmt.Errorf("creating clients: %w", err)
 	}
 
-	// Phase 3: Deploy Butler CRDs
+	// Deploy Butler CRDs
 	o.logger.Phase("Deploying Butler CRDs")
 	if err := o.deployCRDs(ctx, clientset, dynamicClient); err != nil {
 		return fmt.Errorf("deploying CRDs: %w", err)
 	}
 
-	// Phase 4: Create namespace and provider secret
+	// Create namespace and provider secret
 	o.logger.Phase("Creating namespace and secrets")
 	if err := o.createNamespaceAndSecrets(ctx, clientset, cfg); err != nil {
 		return fmt.Errorf("creating namespace/secrets: %w", err)
 	}
 
-	// Phase 5: Deploy controllers
+	// Deploy controllers
 	o.logger.Phase("Deploying Butler controllers")
 	if err := o.deployControllers(ctx, clientset, dynamicClient, cfg); err != nil {
 		return fmt.Errorf("deploying controllers: %w", err)
 	}
 
-	// Phase 6: Create ProviderConfig CR
+	// Create ProviderConfig CR
 	o.logger.Phase("Creating ProviderConfig")
 	if err := o.createProviderConfig(ctx, dynamicClient, cfg); err != nil {
 		return fmt.Errorf("creating ProviderConfig: %w", err)
 	}
 
-	// Phase 7: Create ClusterBootstrap CR
+	// Create ClusterBootstrap CR
 	o.logger.Phase("Creating ClusterBootstrap")
 	if err := o.createClusterBootstrap(ctx, dynamicClient, cfg); err != nil {
 		return fmt.Errorf("creating ClusterBootstrap: %w", err)
 	}
 
-	// Phase 8: Watch for completion
+	// Watch for completion
 	o.logger.Phase("Waiting for cluster bootstrap")
-	kubeconfBytes, err := o.watchBootstrap(ctx, dynamicClient, cfg)
+	creds, err := o.watchBootstrap(ctx, dynamicClient, cfg)
 	if err != nil {
 		return fmt.Errorf("watching bootstrap: %w", err)
 	}
 
-	// Phase 9: Save kubeconfig
-	o.logger.Phase("Saving kubeconfig")
-	if err := o.saveKubeconfig(cfg.Cluster.Name, kubeconfBytes); err != nil {
-		return fmt.Errorf("saving kubeconfig: %w", err)
+	// Save cluster credentials
+	o.logger.Phase("Saving cluster credentials")
+	if err := o.saveClusterCredentials(cfg.Cluster.Name, creds); err != nil {
+		return fmt.Errorf("saving cluster credentials: %w", err)
 	}
 
 	o.logger.Success("Bootstrap complete!")
-	o.logger.Info("Kubeconfig saved to ~/.butler/" + cfg.Cluster.Name + "-kubeconfig")
-	o.logger.Info("Use: export KUBECONFIG=~/.butler/" + cfg.Cluster.Name + "-kubeconfig")
+	o.logger.Info("")
+	o.logger.Info("Cluster credentials saved to:")
+	o.logger.Info("  Kubeconfig:   ~/.butler/" + cfg.Cluster.Name + "-kubeconfig")
+	o.logger.Info("  Talosconfig:  ~/.butler/" + cfg.Cluster.Name + "-talosconfig")
+	o.logger.Info("")
+	o.logger.Info("Usage:")
+	o.logger.Info("  export KUBECONFIG=~/.butler/" + cfg.Cluster.Name + "-kubeconfig")
+	o.logger.Info("  export TALOSCONFIG=~/.butler/" + cfg.Cluster.Name + "-talosconfig")
+	o.logger.Info("")
+	o.logger.Info("  kubectl get nodes")
+	o.logger.Info("  talosctl health --nodes <CONTROL_PLANE_IP>")
 
 	return nil
 }
@@ -396,6 +412,7 @@ func (o *Orchestrator) injectHostAliases(ctx context.Context, hostAliases []stri
 	return nil
 }
 
+// createKINDCluster creates a KIND cluster with the specified configuration
 func (o *Orchestrator) createKINDCluster(ctx context.Context, provider *cluster.Provider) (string, error) {
 	// Check if cluster already exists
 	clusters, err := provider.List()
@@ -445,6 +462,11 @@ func (o *Orchestrator) createKINDCluster(ctx context.Context, provider *cluster.
 	}
 	o.logger.Success("KIND cluster created")
 
+	// Tune kernel parameters for controller-heavy workloads
+	if err := o.tuneKINDNode(ctx); err != nil {
+		o.logger.Warn("Failed to tune KIND node", "error", err)
+	}
+
 	// Install CA certificates if we mounted any
 	if len(caCerts) > 0 {
 		if err := o.installCACertificates(ctx); err != nil {
@@ -464,6 +486,30 @@ func (o *Orchestrator) createKINDCluster(ctx context.Context, provider *cluster.
 	}
 
 	return kubeconfigPath, nil
+}
+
+// tuneKINDNode adjusts kernel parameters inside the KIND node
+// to handle controller-runtime's heavy use of inotify watches
+func (o *Orchestrator) tuneKINDNode(ctx context.Context) error {
+	nodeName := kindClusterName + "-control-plane"
+
+	// Increase inotify instances (default 128 is too low for multiple controllers)
+	cmd := exec.CommandContext(ctx, "docker", "exec", nodeName,
+		"sysctl", "-w", "fs.inotify.max_user_instances=1024")
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("setting inotify instances: %w, output: %s", err, string(output))
+	}
+
+	// Increase max watches
+	cmd = exec.CommandContext(ctx, "docker", "exec", nodeName,
+		"sysctl", "-w", "fs.inotify.max_user_watches=524288")
+	if output, err := cmd.CombinedOutput(); err != nil {
+		o.logger.Debug("failed to set inotify watches", "error", err, "output", string(output))
+	}
+
+	o.logger.Debug("Tuned KIND node kernel parameters")
+	return nil
 }
 
 // patchCoreDNS fixes CoreDNS to use Google DNS instead of /etc/resolv.conf
@@ -513,6 +559,7 @@ func (o *Orchestrator) patchCoreDNS(kubeconfigPath string) error {
 	return nil
 }
 
+// getKINDKubeconfig retrieves the kubeconfig for the KIND cluster
 func (o *Orchestrator) getKINDKubeconfig(provider *cluster.Provider) (string, error) {
 	kubeconfig, err := provider.KubeConfig(kindClusterName, false)
 	if err != nil {
@@ -528,6 +575,7 @@ func (o *Orchestrator) getKINDKubeconfig(provider *cluster.Provider) (string, er
 	return kubeconfigPath, nil
 }
 
+// createClients creates Kubernetes clients for the KIND cluster
 func (o *Orchestrator) createClients(kubeconfigPath string) (*kubernetes.Clientset, dynamic.Interface, error) {
 	config, err := clientcmd.BuildConfigFromFlags("", kubeconfigPath)
 	if err != nil {
@@ -576,6 +624,7 @@ func (o *Orchestrator) deployCRDs(ctx context.Context, clientset *kubernetes.Cli
 	return nil
 }
 
+// createNamespaceAndSecrets creates the Butler namespace and provider credentials secrets
 func (o *Orchestrator) createNamespaceAndSecrets(ctx context.Context, clientset *kubernetes.Clientset, cfg *Config) error {
 	// Create namespace
 	ns := &corev1.Namespace{
@@ -835,7 +884,7 @@ func (o *Orchestrator) buildClusterBootstrapUnstructured(cfg *Config) *unstructu
 }
 
 // watchBootstrap watches the ClusterBootstrap CR for completion
-func (o *Orchestrator) watchBootstrap(ctx context.Context, client dynamic.Interface, cfg *Config) ([]byte, error) {
+func (o *Orchestrator) watchBootstrap(ctx context.Context, client dynamic.Interface, cfg *Config) (*clusterCredentials, error) {
 	// Poll for status updates
 	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
@@ -866,7 +915,8 @@ func (o *Orchestrator) watchBootstrap(ctx context.Context, client dynamic.Interf
 				lastPhase = phase
 			}
 
-			// Log machine status if available
+			// Collect control plane IPs from machine status
+			var controlPlaneIPs []string
 			if machines, ok := status["machines"].([]interface{}); ok {
 				for _, m := range machines {
 					if machine, ok := m.(map[string]interface{}); ok {
@@ -876,6 +926,12 @@ func (o *Orchestrator) watchBootstrap(ctx context.Context, client dynamic.Interf
 							"ip", machine["ipAddress"],
 							"ready", machine["ready"],
 						)
+						// Collect control plane IPs for talosconfig endpoints
+						if role, _ := machine["role"].(string); role == "control-plane" {
+							if ip, _ := machine["ipAddress"].(string); ip != "" {
+								controlPlaneIPs = append(controlPlaneIPs, ip)
+							}
+						}
 					}
 				}
 			}
@@ -883,12 +939,26 @@ func (o *Orchestrator) watchBootstrap(ctx context.Context, client dynamic.Interf
 			switch phase {
 			case "Ready":
 				o.logger.Success("Cluster is ready!")
+
+				// Decode kubeconfig
 				kubeconfig, _ := status["kubeconfig"].(string)
-				decoded, err := base64.StdEncoding.DecodeString(kubeconfig)
+				kubeconfigBytes, err := base64.StdEncoding.DecodeString(kubeconfig)
 				if err != nil {
 					return nil, fmt.Errorf("decoding kubeconfig: %w", err)
 				}
-				return decoded, nil
+
+				// Decode talosconfig
+				talosconfig, _ := status["talosConfig"].(string)
+				talosconfigBytes, err := base64.StdEncoding.DecodeString(talosconfig)
+				if err != nil {
+					return nil, fmt.Errorf("decoding talosconfig: %w", err)
+				}
+
+				return &clusterCredentials{
+					kubeconfig:      kubeconfigBytes,
+					talosconfig:     talosconfigBytes,
+					controlPlaneIPs: controlPlaneIPs,
+				}, nil
 			case "Failed":
 				reason, _ := status["failureReason"].(string)
 				message, _ := status["failureMessage"].(string)
@@ -898,8 +968,8 @@ func (o *Orchestrator) watchBootstrap(ctx context.Context, client dynamic.Interf
 	}
 }
 
-// saveKubeconfig saves the kubeconfig to ~/.butler/
-func (o *Orchestrator) saveKubeconfig(clusterName string, kubeconfig []byte) error {
+// saveClusterCredentials saves the kubeconfig and talosconfig to ~/.butler/
+func (o *Orchestrator) saveClusterCredentials(clusterName string, creds *clusterCredentials) error {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return fmt.Errorf("getting home directory: %w", err)
@@ -910,12 +980,73 @@ func (o *Orchestrator) saveKubeconfig(clusterName string, kubeconfig []byte) err
 		return fmt.Errorf("creating .butler directory: %w", err)
 	}
 
+	// Save kubeconfig
 	kubeconfigPath := filepath.Join(butlerDir, clusterName+"-kubeconfig")
-	if err := os.WriteFile(kubeconfigPath, kubeconfig, 0600); err != nil {
+	if err := os.WriteFile(kubeconfigPath, creds.kubeconfig, 0600); err != nil {
 		return fmt.Errorf("writing kubeconfig: %w", err)
 	}
 
+	// Fix talosconfig endpoints and save
+	talosconfig := o.fixTalosconfigEndpoints(creds.talosconfig, clusterName, creds.controlPlaneIPs)
+	talosconfigPath := filepath.Join(butlerDir, clusterName+"-talosconfig")
+	if err := os.WriteFile(talosconfigPath, talosconfig, 0600); err != nil {
+		return fmt.Errorf("writing talosconfig: %w", err)
+	}
+
 	return nil
+}
+
+// fixTalosconfigEndpoints adds endpoints to the talosconfig if they're empty
+func (o *Orchestrator) fixTalosconfigEndpoints(talosconfig []byte, clusterName string, controlPlaneIPs []string) []byte {
+	if len(controlPlaneIPs) == 0 {
+		return talosconfig
+	}
+
+	// Parse the talosconfig as a map
+	var config map[string]interface{}
+	if err := yaml.Unmarshal(talosconfig, &config); err != nil {
+		o.logger.Warn("failed to parse talosconfig, returning as-is", "error", err)
+		return talosconfig
+	}
+
+	// Navigate to contexts.<clusterName>.endpoints
+	contexts, ok := config["contexts"].(map[string]interface{})
+	if !ok {
+		return talosconfig
+	}
+
+	contextConfig, ok := contexts[clusterName].(map[string]interface{})
+	if !ok {
+		return talosconfig
+	}
+
+	// Check if endpoints is empty or missing
+	endpoints, _ := contextConfig["endpoints"].([]interface{})
+	if len(endpoints) == 0 {
+		// Add control plane IPs as endpoints
+		contextConfig["endpoints"] = controlPlaneIPs
+		// Also add all IPs as nodes for convenience
+		var allNodes []string
+		if existingNodes, ok := contextConfig["nodes"].([]interface{}); ok {
+			for _, n := range existingNodes {
+				if s, ok := n.(string); ok {
+					allNodes = append(allNodes, s)
+				}
+			}
+		}
+		if len(allNodes) == 0 {
+			contextConfig["nodes"] = controlPlaneIPs
+		}
+	}
+
+	// Marshal back to YAML
+	fixed, err := yaml.Marshal(config)
+	if err != nil {
+		o.logger.Warn("failed to marshal fixed talosconfig", "error", err)
+		return talosconfig
+	}
+
+	return fixed
 }
 
 // buildAndLoadImages builds controller images and loads them into KIND (local dev mode)
