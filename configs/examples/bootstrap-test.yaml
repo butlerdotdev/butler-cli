@@ -1,0 +1,63 @@
+# Butler Test Bootstrap - Minimal cluster for testing GHCR image pulls
+provider: harvester
+
+cluster:
+  name: butler-test
+  controlPlane:
+    replicas: 1
+    cpu: 2
+    memoryMB: 4096
+    diskGB: 40
+  workers:
+    replicas: 1
+    cpu: 4
+    memoryMB: 8192
+    diskGB: 50
+    extraDisks:
+      - sizeGB: 50
+
+network:
+  podCIDR: 10.244.0.0/16
+  serviceCIDR: 10.96.0.0/12
+  vip: 10.40.0.200
+  loadBalancerPool:
+    start: 10.40.0.210
+    end: 10.40.0.220
+
+talos:
+  version: v1.9.0
+  schematic: dc7b152cb3ea99b821fcb7340ce7168313ce393d663740b791c36f6e95fc8586
+
+addons:
+  cni:
+    type: cilium
+  storage:
+    type: longhorn
+  loadBalancer:
+    type: metallb
+    addressPool: 10.40.0.210-10.40.0.220
+  gitOps:
+    type: flux
+  capi:
+    enabled: true
+    version: v1.9.4
+  butlerController:
+    enabled: true
+    version: latest
+    image: ghcr.io/butlerdotdev/butler-controller
+
+  console:
+    enabled: true
+    version: "0.1.0"
+    ingress:
+      enabled: true
+      host: butler.beta.dev    # Add to /etc/hosts pointing to Traefik LB IP
+      className: traefik         # Or leave empty for default
+      tls: false
+
+providerConfig:
+  harvester:
+    kubeconfigPath: ~/.butler/harvester-kubeconfig
+    namespace: default
+    networkName: default/vlan40-workloads
+    imageName: default/image-5rs6d

@@ -124,6 +124,9 @@ type AddonsConfig struct {
 
 	// ButlerController defines Butler Controller configuration
 	ButlerController ButlerControllerConfig `mapstructure:"butlerController"`
+
+	// Console defines Butler Console configuration
+	Console ConsoleConfig `mapstructure:"console"`
 }
 
 // CNIConfig defines CNI configuration
@@ -164,6 +167,52 @@ type ButlerControllerConfig struct {
 	Enabled bool   `mapstructure:"enabled"`
 	Version string `mapstructure:"version"`
 	Image   string `mapstructure:"image"`
+}
+
+// ConsoleConfig defines Butler Console configuration
+type ConsoleConfig struct {
+	// Enabled controls whether to install the console
+	Enabled bool `mapstructure:"enabled"`
+
+	// Version is the chart/image version (defaults to "latest")
+	Version string `mapstructure:"version"`
+
+	// Ingress configures ingress for the console
+	Ingress ConsoleIngressConfig `mapstructure:"ingress"`
+
+	// Auth configures authentication settings
+	Auth ConsoleAuthConfig `mapstructure:"auth"`
+}
+
+// ConsoleIngressConfig defines ingress configuration for the console
+type ConsoleIngressConfig struct {
+	// Enabled controls whether to create an Ingress resource
+	Enabled bool `mapstructure:"enabled"`
+
+	// Host is the hostname for the console (e.g., "butler.example.com")
+	// If not set and ingress is enabled, uses "butler.<cluster-name>.local"
+	Host string `mapstructure:"host"`
+
+	// ClassName is the ingress class (e.g., "traefik", "nginx")
+	// If not set, uses cluster default
+	ClassName string `mapstructure:"className"`
+
+	// TLS enables TLS termination
+	TLS bool `mapstructure:"tls"`
+
+	// TLSSecretName is the name of the TLS secret (auto-generated if empty and TLS enabled)
+	TLSSecretName string `mapstructure:"tlsSecretName"`
+}
+
+// ConsoleAuthConfig defines authentication configuration
+type ConsoleAuthConfig struct {
+	// AdminPassword sets the initial admin password
+	// If not set, defaults to "admin" (should be changed post-install)
+	AdminPassword string `mapstructure:"adminPassword"`
+
+	// JWTSecret is the secret for JWT signing
+	// If not set, a random secret is generated
+	JWTSecret string `mapstructure:"jwtSecret"`
 }
 
 // ProviderConfig contains provider-specific settings
@@ -223,9 +272,6 @@ type NutanixProviderConfig struct {
 	StorageContainerUUID string `mapstructure:"storageContainerUUID,omitempty"`
 
 	// HostAliases adds /etc/hosts entries to the KIND node for corporate DNS.
-	// Required when the Prism Central hostname is only resolvable via VPN/corporate DNS
-	// and not by public DNS (8.8.8.8) which KIND uses after CoreDNS patching.
-	// Format: ["ip hostname", "10.0.0.1 prism.corp.local"]
 	HostAliases []string `mapstructure:"hostAliases,omitempty"`
 }
 
@@ -259,9 +305,6 @@ type ProxmoxProviderConfig struct {
 	VMIDEnd int32 `mapstructure:"vmidEnd,omitempty"`
 
 	// HostAliases adds /etc/hosts entries to the KIND node for corporate DNS.
-	// Required when the Proxmox hostname is only resolvable via VPN/corporate DNS
-	// and not by public DNS (8.8.8.8) which KIND uses after CoreDNS patching.
-	// Format: ["ip hostname", "10.0.0.1 proxmox.corp.local"]
 	HostAliases []string `mapstructure:"hostAliases,omitempty"`
 }
 
@@ -295,6 +338,17 @@ func LoadConfig() (*Config, error) {
 		cfg.Addons.GitOps.Type = "flux"
 	}
 
+	// Console defaults
+	if cfg.Addons.Console.Enabled {
+		if cfg.Addons.Console.Version == "" {
+			cfg.Addons.Console.Version = "latest"
+		}
+		// Default ingress host based on cluster name
+		if cfg.Addons.Console.Ingress.Enabled && cfg.Addons.Console.Ingress.Host == "" {
+			cfg.Addons.Console.Ingress.Host = fmt.Sprintf("butler.%s.local", cfg.Cluster.Name)
+		}
+	}
+
 	// Provider-specific defaults
 	if cfg.Provider == "nutanix" && cfg.ProviderConfig.Nutanix != nil {
 		if cfg.ProviderConfig.Nutanix.Port == 0 {
@@ -320,4 +374,22 @@ func expandPath(path string) string {
 		return filepath.Join(home, path[1:])
 	}
 	return path
+}
+
+// GetConsoleURL returns the console URL based on configuration
+func (c *Config) GetConsoleURL() string {
+	if !c.Addons.Console.Enabled {
+		return ""
+	}
+
+	if c.Addons.Console.Ingress.Enabled {
+		scheme := "http"
+		if c.Addons.Console.Ingress.TLS {
+			scheme = "https"
+		}
+		return fmt.Sprintf("%s://%s", scheme, c.Addons.Console.Ingress.Host)
+	}
+
+	// If no ingress, will need to get LoadBalancer IP at runtime
+	return ""
 }

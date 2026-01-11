@@ -109,6 +109,7 @@ type clusterCredentials struct {
 	kubeconfig      []byte
 	talosconfig     []byte
 	controlPlaneIPs []string
+	consoleURL      string
 }
 
 // Run executes the bootstrap process
@@ -212,6 +213,19 @@ func (o *Orchestrator) Run(ctx context.Context, cfg *Config) error {
 	o.logger.Info("  Kubeconfig:   ~/.butler/" + cfg.Cluster.Name + "-kubeconfig")
 	o.logger.Info("  Talosconfig:  ~/.butler/" + cfg.Cluster.Name + "-talosconfig")
 	o.logger.Info("")
+
+	if creds.consoleURL != "" {
+		o.logger.Info("Butler Console:")
+		if strings.HasPrefix(creds.consoleURL, "kubectl") {
+			// It's a port-forward instruction
+			o.logger.Info("  Access via: " + creds.consoleURL)
+		} else {
+			o.logger.Info("  URL: " + creds.consoleURL)
+		}
+		o.logger.Info("  Credentials: admin / admin (change after first login)")
+		o.logger.Info("")
+	}
+
 	o.logger.Info("Usage:")
 	o.logger.Info("  export KUBECONFIG=~/.butler/" + cfg.Cluster.Name + "-kubeconfig")
 	o.logger.Info("  export TALOSCONFIG=~/.butler/" + cfg.Cluster.Name + "-talosconfig")
@@ -264,6 +278,24 @@ func (o *Orchestrator) dryRun(cfg *Config) error {
 		fmt.Println("\n--- Host Aliases (will be injected into KIND /etc/hosts) ---")
 		for _, alias := range hostAliases {
 			fmt.Printf("- %s\n", alias)
+		}
+	}
+
+	// Show console configuration
+	if cfg.Addons.Console.Enabled {
+		fmt.Println("\n--- Butler Console ---")
+		fmt.Printf("Version: %s\n", cfg.Addons.Console.Version)
+		if cfg.Addons.Console.Ingress.Enabled {
+			scheme := "http"
+			if cfg.Addons.Console.Ingress.TLS {
+				scheme = "https"
+			}
+			fmt.Printf("URL: %s://%s\n", scheme, cfg.Addons.Console.Ingress.Host)
+			if cfg.Addons.Console.Ingress.ClassName != "" {
+				fmt.Printf("Ingress Class: %s\n", cfg.Addons.Console.Ingress.ClassName)
+			}
+		} else {
+			fmt.Println("Access: via port-forward (no ingress configured)")
 		}
 	}
 
@@ -875,6 +907,7 @@ func (o *Orchestrator) buildClusterBootstrapUnstructured(cfg *Config) *unstructu
 						"version": cfg.Addons.ButlerController.Version,
 						"image":   cfg.Addons.ButlerController.Image,
 					},
+					"console": buildConsoleConfig(cfg.Addons.Console),
 				},
 			},
 		},
@@ -954,10 +987,13 @@ func (o *Orchestrator) watchBootstrap(ctx context.Context, client dynamic.Interf
 					return nil, fmt.Errorf("decoding talosconfig: %w", err)
 				}
 
+				consoleURL, _ := status["consoleURL"].(string)
+
 				return &clusterCredentials{
 					kubeconfig:      kubeconfigBytes,
 					talosconfig:     talosconfigBytes,
 					controlPlaneIPs: controlPlaneIPs,
+					consoleURL:      consoleURL,
 				}, nil
 			case "Failed":
 				reason, _ := status["failureReason"].(string)
@@ -1104,4 +1140,30 @@ func (o *Orchestrator) buildAndLoadImages(ctx context.Context, provider string) 
 	}
 
 	return nil
+}
+
+// buildConsoleConfig builds the console addon config for the ClusterBootstrap CR
+func buildConsoleConfig(cfg ConsoleConfig) map[string]interface{} {
+	if !cfg.Enabled {
+		return map[string]interface{}{
+			"enabled": false,
+		}
+	}
+
+	result := map[string]interface{}{
+		"enabled": true,
+		"version": cfg.Version,
+	}
+
+	if cfg.Ingress.Enabled {
+		result["ingress"] = map[string]interface{}{
+			"enabled":       true,
+			"host":          cfg.Ingress.Host,
+			"className":     cfg.Ingress.ClassName,
+			"tls":           cfg.Ingress.TLS,
+			"tlsSecretName": cfg.Ingress.TLSSecretName,
+		}
+	}
+
+	return result
 }

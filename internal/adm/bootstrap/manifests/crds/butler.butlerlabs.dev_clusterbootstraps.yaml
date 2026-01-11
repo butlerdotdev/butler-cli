@@ -164,6 +164,44 @@ spec:
                         description: Version is the addon version
                         type: string
                     type: object
+                  console:
+                    description: Console defines butler-console configuration
+                    properties:
+                      enabled:
+                        default: true
+                        description: Enabled controls whether butler-console is installed
+                        type: boolean
+                      ingress:
+                        description: Ingress configures ingress for the console
+                        properties:
+                          className:
+                            description: |-
+                              ClassName is the ingress class (e.g., "traefik", "nginx")
+                              If not set, uses cluster default
+                            type: string
+                          enabled:
+                            description: Enabled controls whether to create an Ingress
+                              resource
+                            type: boolean
+                          host:
+                            description: |-
+                              Host is the hostname for the console (e.g., "butler.example.com")
+                              If not set and ingress is enabled, uses "butler.<cluster-name>.local"
+                            type: string
+                          tls:
+                            description: TLS enables TLS termination
+                            type: boolean
+                          tlsSecretName:
+                            description: TLSSecretName is the name of the TLS secret
+                              (auto-generated if empty and TLS enabled)
+                            type: string
+                        type: object
+                      version:
+                        default: latest
+                        description: Version is the butler-console version (image
+                          tag)
+                        type: string
+                    type: object
                   controlPlaneHA:
                     description: ControlPlaneHA defines control plane HA configuration
                     properties:
@@ -601,6 +639,9 @@ spec:
                   - type
                   type: object
                 type: array
+              consoleURL:
+                description: ConsoleURL is the URL to access the Butler Console
+                type: string
               controlPlaneEndpoint:
                 description: ControlPlaneEndpoint is the endpoint for the control
                   plane

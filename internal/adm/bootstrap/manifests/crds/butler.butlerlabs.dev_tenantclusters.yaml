@@ -543,6 +543,14 @@ spec:
                 description: TenantNamespace is the namespace containing CAPI/Kamaji
                   resources.
                 type: string
+              workerNodesDesired:
+                description: WorkerNodesDesired is the desired count of worker nodes
+                format: int32
+                type: integer
+              workerNodesReady:
+                description: WorkerNodesReady is the count of ready worker nodes
+                format: int32
+                type: integer
             type: object
         type: object
     served: true
