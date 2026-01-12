@@ -240,6 +240,16 @@ func (o *Orchestrator) Run(ctx context.Context, cfg *Config) error {
 func (o *Orchestrator) dryRun(cfg *Config) error {
 	o.logger.Info("DRY RUN - showing what would be created")
 
+	// Show topology information
+	fmt.Println("\n--- Cluster Topology ---")
+	fmt.Printf("Topology: %s\n", cfg.Cluster.Topology)
+	if cfg.IsSingleNode() {
+		fmt.Printf("Mode: Single control plane node running workloads (no workers)\n")
+		fmt.Printf("Note: Control plane replicas forced to 1, workers ignored\n")
+	} else {
+		fmt.Printf("Mode: HA with separate control plane and workers\n")
+	}
+
 	// Show ProviderConfig
 	pc := o.buildProviderConfigUnstructured(cfg)
 	pcYAML, _ := yaml.Marshal(pc.Object)
@@ -252,15 +262,20 @@ func (o *Orchestrator) dryRun(cfg *Config) error {
 	fmt.Println("\n--- ClusterBootstrap ---")
 	fmt.Println(string(cbYAML))
 
-	// Show MachineRequests that would be created
+	// Show MachineRequests that would be created (topology-aware)
 	fmt.Println("\n--- MachineRequests (created by controller) ---")
 	for i := int32(0); i < cfg.Cluster.ControlPlane.Replicas; i++ {
 		fmt.Printf("- %s-cp-%d (control-plane, %d CPU, %d MB RAM)\n",
 			cfg.Cluster.Name, i, cfg.Cluster.ControlPlane.CPU, cfg.Cluster.ControlPlane.MemoryMB)
 	}
-	for i := int32(0); i < cfg.Cluster.Workers.Replicas; i++ {
-		fmt.Printf("- %s-worker-%d (worker, %d CPU, %d MB RAM)\n",
-			cfg.Cluster.Name, i, cfg.Cluster.Workers.CPU, cfg.Cluster.Workers.MemoryMB)
+	// Only show workers for non-single-node topologies
+	if !cfg.IsSingleNode() {
+		for i := int32(0); i < cfg.Cluster.Workers.Replicas; i++ {
+			fmt.Printf("- %s-worker-%d (worker, %d CPU, %d MB RAM)\n",
+				cfg.Cluster.Name, i, cfg.Cluster.Workers.CPU, cfg.Cluster.Workers.MemoryMB)
+		}
+	} else {
+		fmt.Println("(no workers - single-node topology)")
 	}
 
 	// Show CA certificates that would be injected
@@ -833,16 +848,42 @@ func (o *Orchestrator) createClusterBootstrap(ctx context.Context, client dynami
 
 // buildClusterBootstrapUnstructured builds a ClusterBootstrap as unstructured
 func (o *Orchestrator) buildClusterBootstrapUnstructured(cfg *Config) *unstructured.Unstructured {
-	// Build extra disks for workers
-	var extraDisks []interface{}
-	for _, disk := range cfg.Cluster.Workers.ExtraDisks {
-		d := map[string]interface{}{
-			"sizeGB": disk.SizeGB,
+	// Build cluster spec based on topology
+	clusterSpec := map[string]interface{}{
+		"name":     cfg.Cluster.Name,
+		"topology": cfg.Cluster.Topology, // Include topology field
+		"controlPlane": map[string]interface{}{
+			"replicas": cfg.Cluster.ControlPlane.Replicas,
+			"cpu":      cfg.Cluster.ControlPlane.CPU,
+			"memoryMB": cfg.Cluster.ControlPlane.MemoryMB,
+			"diskGB":   cfg.Cluster.ControlPlane.DiskGB,
+		},
+	}
+
+	// Only include workers for non-single-node topologies
+	if !cfg.IsSingleNode() && cfg.Cluster.Workers.Replicas > 0 {
+		// Build extra disks for workers
+		var extraDisks []interface{}
+		for _, disk := range cfg.Cluster.Workers.ExtraDisks {
+			d := map[string]interface{}{
+				"sizeGB": disk.SizeGB,
+			}
+			if disk.StorageClass != "" {
+				d["storageClass"] = disk.StorageClass
+			}
+			extraDisks = append(extraDisks, d)
 		}
-		if disk.StorageClass != "" {
-			d["storageClass"] = disk.StorageClass
+
+		workersSpec := map[string]interface{}{
+			"replicas": cfg.Cluster.Workers.Replicas,
+			"cpu":      cfg.Cluster.Workers.CPU,
+			"memoryMB": cfg.Cluster.Workers.MemoryMB,
+			"diskGB":   cfg.Cluster.Workers.DiskGB,
 		}
-		extraDisks = append(extraDisks, d)
+		if len(extraDisks) > 0 {
+			workersSpec["extraDisks"] = extraDisks
+		}
+		clusterSpec["workers"] = workersSpec
 	}
 
 	cb := &unstructured.Unstructured{
@@ -859,22 +900,7 @@ func (o *Orchestrator) buildClusterBootstrapUnstructured(cfg *Config) *unstructu
 					"name":      cfg.Cluster.Name + "-provider",
 					"namespace": butlerNamespace,
 				},
-				"cluster": map[string]interface{}{
-					"name": cfg.Cluster.Name,
-					"controlPlane": map[string]interface{}{
-						"replicas": cfg.Cluster.ControlPlane.Replicas,
-						"cpu":      cfg.Cluster.ControlPlane.CPU,
-						"memoryMB": cfg.Cluster.ControlPlane.MemoryMB,
-						"diskGB":   cfg.Cluster.ControlPlane.DiskGB,
-					},
-					"workers": map[string]interface{}{
-						"replicas":   cfg.Cluster.Workers.Replicas,
-						"cpu":        cfg.Cluster.Workers.CPU,
-						"memoryMB":   cfg.Cluster.Workers.MemoryMB,
-						"diskGB":     cfg.Cluster.Workers.DiskGB,
-						"extraDisks": extraDisks,
-					},
-				},
+				"cluster": clusterSpec,
 				"network": map[string]interface{}{
 					"podCIDR":     cfg.Network.PodCIDR,
 					"serviceCIDR": cfg.Network.ServiceCIDR,
@@ -980,8 +1006,8 @@ func (o *Orchestrator) watchBootstrap(ctx context.Context, client dynamic.Interf
 					return nil, fmt.Errorf("decoding kubeconfig: %w", err)
 				}
 
-				// Decode talosconfig
-				talosconfig, _ := status["talosConfig"].(string)
+				// Decode talosconfig - NOTE: JSON field is lowercase "talosconfig"
+				talosconfig, _ := status["talosconfig"].(string)
 				talosconfigBytes, err := base64.StdEncoding.DecodeString(talosconfig)
 				if err != nil {
 					return nil, fmt.Errorf("decoding talosconfig: %w", err)

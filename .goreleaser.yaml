@@ -1,0 +1,105 @@
+version: 2
+
+project_name: butler
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: butleradm
+    binary: butleradm
+    main: ./cmd/butleradm
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w
+      - -X github.com/butlerdotdev/butler/internal/common/version.Version={{.Version}}
+      - -X github.com/butlerdotdev/butler/internal/common/version.Commit={{.Commit}}
+      - -X github.com/butlerdotdev/butler/internal/common/version.Date={{.Date}}
+
+  - id: butlerctl
+    binary: butlerctl
+    main: ./cmd/butlerctl
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w
+      - -X github.com/butlerdotdev/butler/internal/common/version.Version={{.Version}}
+      - -X github.com/butlerdotdev/butler/internal/common/version.Commit={{.Commit}}
+      - -X github.com/butlerdotdev/butler/internal/common/version.Date={{.Date}}
+
+archives:
+  - id: default
+    ids:
+      - butleradm
+      - butlerctl
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    files:
+      - README.md
+      - LICENSE
+    formats:
+      - tar.gz
+
+checksum:
+  name_template: 'checksums.txt'
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - '^docs:'
+      - '^test:'
+      - '^chore:'
+
+homebrew_casks:
+  - name: butler
+    repository:
+      owner: butlerdotdev
+      name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
+    homepage: "https://butler.dev"
+    description: "Butler Platform Engineering CLI"
+    binaries:
+      - butleradm
+      - butlerctl
+
+chocolateys:
+  - name: butler-cli
+    owners: butlerdotdev
+    authors: Butler Labs
+    project_url: https://butlerlabs.dev
+    license_url: https://github.com/butlerdotdev/butler-cli/blob/main/LICENSE
+    require_license_acceptance: false
+    project_source_url: https://github.com/butlerdotdev/butler-cli
+    docs_url: https://docs.butler.dev
+    bug_tracker_url: https://github.com/butlerdotdev/butler-cli/issues
+    tags: "kubernetes platform-engineering cli"
+    summary: Butler Platform Engineering CLI
+    description: |
+      Butler is a platform engineering toolkit that simplifies Kubernetes 
+      cluster management. Includes butleradm for cluster administration 
+      and butlerctl for day-to-day operations.
+    release_notes: "https://github.com/butlerdotdev/butler-cli/releases/tag/v{{ .Version }}"
+    api_key: "{{ .Env.CHOCOLATEY_API_KEY }}"
+
+release:
+  github:
+    owner: butlerdotdev
+    name: butler-cli
+  draft: false
+  prerelease: auto

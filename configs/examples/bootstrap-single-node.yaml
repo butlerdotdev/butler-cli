@@ -1,14 +1,10 @@
-# Butler Test Bootstrap - Minimal cluster for testing GHCR image pulls
+# Butler Single-Node Bootstrap - Minimal single-node cluster for testing
 provider: harvester
 
 cluster:
-  name: butler-test
+  name: butler-sn-dev
+  topology: single-node
   controlPlane:
-    replicas: 1
-    cpu: 2
-    memoryMB: 4096
-    diskGB: 40
-  workers:
     replicas: 1
     cpu: 4
     memoryMB: 8192
@@ -19,10 +15,10 @@ cluster:
 network:
   podCIDR: 10.244.0.0/16
   serviceCIDR: 10.96.0.0/12
-  vip: 10.40.0.201
+  vip: 10.40.0.200
   loadBalancerPool:
-    start: 10.40.0.210
-    end: 10.40.0.220
+    start: 10.40.0.221
+    end: 10.40.0.230
 
 talos:
   version: v1.9.0
@@ -35,7 +31,7 @@ addons:
     type: longhorn
   loadBalancer:
     type: metallb
-    addressPool: 10.40.0.210-10.40.0.220
+    addressPool: 10.40.0.211-10.40.0.220
   gitOps:
     type: flux
   capi:
@@ -45,14 +41,13 @@ addons:
     enabled: true
     version: latest
     image: ghcr.io/butlerdotdev/butler-controller
-
   console:
     enabled: true
     version: "0.1.0"
     ingress:
       enabled: true
-      host: butler.beta.local    # Add to /etc/hosts pointing to Traefik LB IP
-      className: traefik         # Or leave empty for default
+      host: butler.sn.local
+      className: traefik
       tls: false
 
 providerConfig:

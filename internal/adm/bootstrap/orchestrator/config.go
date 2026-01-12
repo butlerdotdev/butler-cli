@@ -50,10 +50,16 @@ type ClusterConfig struct {
 	// Name is the cluster name (used for VM names, kubeconfig context)
 	Name string `mapstructure:"name"`
 
+	// Topology defines the cluster topology
+	// - "single-node": Single control plane node that also runs workloads
+	// - "ha": High-availability with separate control plane and worker nodes (default)
+	Topology string `mapstructure:"topology"`
+
 	// ControlPlane defines control plane node configuration
 	ControlPlane NodePoolConfig `mapstructure:"controlPlane"`
 
 	// Workers defines worker node configuration
+	// Ignored when topology is "single-node"
 	Workers NodePoolConfig `mapstructure:"workers"`
 }
 
@@ -338,6 +344,30 @@ func LoadConfig() (*Config, error) {
 		cfg.Addons.GitOps.Type = "flux"
 	}
 
+	// Topology defaults and validation
+	if cfg.Cluster.Topology == "" {
+		cfg.Cluster.Topology = "ha" // Default to HA
+	}
+
+	// Validate topology
+	if cfg.Cluster.Topology != "single-node" && cfg.Cluster.Topology != "ha" {
+		return nil, fmt.Errorf("invalid topology %q, must be 'single-node' or 'ha'", cfg.Cluster.Topology)
+	}
+
+	// Single-node topology validation and enforcement
+	if cfg.Cluster.Topology == "single-node" {
+		// Force control plane replicas to 1
+		if cfg.Cluster.ControlPlane.Replicas != 1 {
+			if cfg.Cluster.ControlPlane.Replicas > 1 {
+				fmt.Printf("Warning: single-node topology forces controlPlane.replicas=1 (was %d)\n",
+					cfg.Cluster.ControlPlane.Replicas)
+			}
+			cfg.Cluster.ControlPlane.Replicas = 1
+		}
+		// Workers are ignored in single-node mode, but we don't modify them
+		// The controller will skip creating worker MachineRequests
+	}
+
 	// Console defaults
 	if cfg.Addons.Console.Enabled {
 		if cfg.Addons.Console.Version == "" {
@@ -374,6 +404,11 @@ func expandPath(path string) string {
 		return filepath.Join(home, path[1:])
 	}
 	return path
+}
+
+// IsSingleNode returns true if this is a single-node topology
+func (c *Config) IsSingleNode() bool {
+	return c.Cluster.Topology == "single-node"
 }
 
 // GetConsoleURL returns the console URL based on configuration

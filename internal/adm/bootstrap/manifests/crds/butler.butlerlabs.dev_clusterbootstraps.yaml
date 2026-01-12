@@ -20,6 +20,9 @@ spec:
     - jsonPath: .spec.cluster.name
       name: Cluster
       type: string
+    - jsonPath: .spec.cluster.topology
+      name: Topology
+      type: string
     - jsonPath: .status.phase
       name: Phase
       type: string
@@ -119,7 +122,6 @@ spec:
                               - harvester
                               - nutanix
                               - proxmox
-                              - kubevirt
                               type: string
                             version:
                               description: Version overrides the default provider
@@ -142,7 +144,7 @@ spec:
                         description: Enabled controls whether cert-manager is installed
                         type: boolean
                       version:
-                        description: Version is the cert-manager version
+                        description: Version is the addon version
                         type: string
                     type: object
                   cni:
@@ -165,21 +167,22 @@ spec:
                         type: string
                     type: object
                   console:
-                    description: Console defines butler-console configuration
+                    description: Console defines Butler Console configuration
                     properties:
                       enabled:
-                        default: true
+                        default: false
                         description: Enabled controls whether butler-console is installed
                         type: boolean
                       ingress:
-                        description: Ingress configures ingress for the console
+                        description: Ingress defines ingress configuration for the
+                          console
                         properties:
                           className:
-                            description: |-
-                              ClassName is the ingress class (e.g., "traefik", "nginx")
-                              If not set, uses cluster default
+                            description: ClassName is the ingress class (e.g., "traefik",
+                              "nginx")
                             type: string
                           enabled:
+                            default: false
                             description: Enabled controls whether to create an Ingress
                               resource
                             type: boolean
@@ -189,17 +192,16 @@ spec:
                               If not set and ingress is enabled, uses "butler.<cluster-name>.local"
                             type: string
                           tls:
+                            default: false
                             description: TLS enables TLS termination
                             type: boolean
                           tlsSecretName:
                             description: TLSSecretName is the name of the TLS secret
-                              (auto-generated if empty and TLS enabled)
                             type: string
                         type: object
                       version:
                         default: latest
-                        description: Version is the butler-console version (image
-                          tag)
+                        description: Version is the console version (image tag)
                         type: string
                     type: object
                   controlPlaneHA:
@@ -207,7 +209,7 @@ spec:
                     properties:
                       type:
                         default: kube-vip
-                        description: Type is the HA type
+                        description: Type is the control plane HA type
                         enum:
                         - kube-vip
                         - none
@@ -232,36 +234,22 @@ spec:
                         - none
                         type: string
                       version:
-                        description: Version is the Kamaji version
+                        description: Version is the addon version
                         type: string
                     type: object
                   gitOps:
                     description: GitOps defines GitOps configuration
                     properties:
                       enabled:
-                        default: false
+                        default: true
                         description: Enabled controls whether GitOps is installed
                         type: boolean
-                      gitBranch:
-                        default: main
-                        description: GitBranch is the branch to track
-                        type: string
-                      gitPath:
-                        default: clusters/management
-                        description: GitPath is the path within the repository
-                        type: string
-                      gitRepository:
-                        description: GitRepository is the repository URL for GitOps
-                        type: string
                       type:
                         default: flux
                         description: Type is the GitOps type
                         enum:
                         - flux
                         - none
-                        type: string
-                      version:
-                        description: Version is the addon version
                         type: string
                     type: object
                   ingress:
@@ -277,10 +265,11 @@ spec:
                         description: Type is the ingress controller type
                         enum:
                         - traefik
+                        - nginx
                         - none
                         type: string
                       version:
-                        description: Version is the ingress controller version
+                        description: Version is the addon version
                         type: string
                     type: object
                   loadBalancer:
@@ -288,9 +277,8 @@ spec:
                     properties:
                       addressPool:
                         description: |-
-                          AddressPool defines the IP address pool for LoadBalancer services
-                          DEPRECATED: Use spec.network.loadBalancerPool instead for proper validation.
-                          If both are set, spec.network.loadBalancerPool takes precedence.
+                          AddressPool is the IP address range for MetalLB
+                          DEPRECATED: Use network.loadBalancerPool instead for proper validation
                         type: string
                       type:
                         default: metallb
@@ -303,10 +291,11 @@ spec:
                   storage:
                     description: Storage defines storage configuration
                     properties:
-                      defaultReplicaCount:
-                        default: 2
-                        description: DefaultReplicaCount is the default number of
-                          replicas (Longhorn)
+                      replicaCount:
+                        default: 3
+                        description: |-
+                          ReplicaCount is the default replica count for Longhorn volumes
+                          For single-node topology, this is automatically set to 1
                         format: int32
                         type: integer
                       type:
@@ -314,7 +303,6 @@ spec:
                         description: Type is the storage type
                         enum:
                         - longhorn
-                        - linstor
                         - none
                         type: string
                       version:
@@ -373,7 +361,9 @@ spec:
                         minimum: 2048
                         type: integer
                       replicas:
-                        description: Replicas is the number of nodes in this pool
+                        description: |-
+                          Replicas is the number of nodes in this pool
+                          For single-node topology, controlPlane.replicas is forced to 1
                         format: int32
                         maximum: 10
                         minimum: 1
@@ -390,8 +380,20 @@ spec:
                     minLength: 1
                     pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
                     type: string
+                  topology:
+                    default: ha
+                    description: |-
+                      Topology defines the cluster topology
+                      - "single-node": Single control plane node that also runs workloads (no workers needed)
+                      - "ha": High-availability with separate control plane and worker nodes (default)
+                    enum:
+                    - single-node
+                    - ha
+                    type: string
                   workers:
-                    description: Workers defines worker node configuration
+                    description: |-
+                      Workers defines worker node configuration
+                      Ignored when topology is "single-node"
                     properties:
                       cpu:
                         description: CPU is the number of CPU cores per node
@@ -438,7 +440,9 @@ spec:
                         minimum: 2048
                         type: integer
                       replicas:
-                        description: Replicas is the number of nodes in this pool
+                        description: |-
+                          Replicas is the number of nodes in this pool
+                          For single-node topology, controlPlane.replicas is forced to 1
                         format: int32
                         maximum: 10
                         minimum: 1
@@ -486,6 +490,7 @@ spec:
                     description: |-
                       VIP is the virtual IP for the control plane endpoint (kube-vip)
                       This IP is used ONLY for kube-apiserver HA and must NOT be in LoadBalancerPool
+                      For single-node topology, the VIP still provides a stable endpoint for the API server
                     pattern: ^([0-9]{1,3}\.){3}[0-9]{1,3}$
                     type: string
                   vipInterface:
