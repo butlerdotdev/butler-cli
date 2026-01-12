@@ -22,6 +22,12 @@ jobs:
         with:
           go-version: '1.24'
 
+      - name: Set up Chocolatey
+        run: |
+          mkdir -p /opt/chocolatey
+          wget -q -O - "https://github.com/chocolatey/choco/releases/download/2.4.1/chocolatey.v2.4.1.tar.gz" | tar -xz -C "/opt/chocolatey"
+          echo "/opt/chocolatey" >> $GITHUB_PATH
+
       - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@v6
         with:
