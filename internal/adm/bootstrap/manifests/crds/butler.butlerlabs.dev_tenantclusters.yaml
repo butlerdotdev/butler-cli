@@ -252,6 +252,56 @@ spec:
                     - ClusterIP
                     type: string
                 type: object
+              infrastructureOverride:
+                description: |-
+                  InfrastructureOverride allows overriding provider-specific settings.
+                  These take precedence over ProviderConfig defaults.
+                properties:
+                  harvester:
+                    description: Harvester contains Harvester-specific overrides.
+                    properties:
+                      imageName:
+                        description: 'ImageName is the VM image to use (format: namespace/name).'
+                        type: string
+                      namespace:
+                        description: Namespace is the Harvester namespace for VMs.
+                        type: string
+                      networkName:
+                        description: 'NetworkName is the Harvester network to use
+                          (format: namespace/name).'
+                        type: string
+                    type: object
+                  nutanix:
+                    description: Nutanix contains Nutanix-specific overrides.
+                    properties:
+                      clusterUUID:
+                        description: ClusterUUID is the Nutanix cluster UUID.
+                        type: string
+                      imageUUID:
+                        description: ImageUUID is the Nutanix image UUID.
+                        type: string
+                      storageContainerUUID:
+                        description: StorageContainerUUID is the Nutanix storage container
+                          UUID.
+                        type: string
+                      subnetUUID:
+                        description: SubnetUUID is the Nutanix subnet UUID.
+                        type: string
+                    type: object
+                  proxmox:
+                    description: Proxmox contains Proxmox-specific overrides.
+                    properties:
+                      node:
+                        description: Node is the Proxmox node to deploy VMs on.
+                        type: string
+                      storage:
+                        description: Storage is the Proxmox storage to use.
+                        type: string
+                      templateID:
+                        description: TemplateID is the VM template ID.
+                        type: integer
+                    type: object
+                type: object
               kubernetesVersion:
                 description: KubernetesVersion is the target Kubernetes version.
                 pattern: ^v\d+\.\d+\.\d+$

@@ -1,0 +1,286 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.19.0
+  name: users.butler.butlerlabs.dev
+spec:
+  group: butler.butlerlabs.dev
+  names:
+    kind: User
+    listKind: UserList
+    plural: users
+    shortNames:
+    - usr
+    singular: user
+  scope: Cluster
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .spec.email
+      name: Email
+      type: string
+    - jsonPath: .spec.displayName
+      name: Display Name
+      type: string
+    - jsonPath: .spec.authType
+      name: Auth
+      type: string
+    - jsonPath: .status.phase
+      name: Phase
+      type: string
+    - jsonPath: .status.lastLoginTime
+      name: Last Login
+      type: date
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: |-
+          User represents a Butler user account.
+          Users can authenticate via SSO (OIDC) or with email/password (internal).
+
+          SSO User Flow:
+          1. User clicks "Sign in with Google/Okta/etc"
+          2. Butler creates User CRD automatically on first login
+          3. User is matched to Teams by email address
+
+          Internal User Flow:
+          1. Admin creates User with email (no password)
+          2. Butler generates invite token, returns URL to admin
+          3. Admin shares invite URL with user (via Slack, email, etc.)
+          4. User clicks link, sets their own password
+          5. Password is hashed (bcrypt) and stored in a Secret
+          6. User status changes from Pending to Active
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: |-
+              UserSpec defines the desired state of a Butler user.
+              Note: Passwords are NEVER stored in spec - users set their own via invite flow.
+            properties:
+              authType:
+                default: internal
+                description: |-
+                  AuthType indicates how this user authenticates.
+                  SSO users are created automatically on first login.
+                  Internal users are created by admins and use email/password.
+                enum:
+                - sso
+                - internal
+                type: string
+              avatar:
+                description: Avatar is an optional URL to the user's avatar image.
+                type: string
+              disabled:
+                default: false
+                description: Disabled prevents the user from logging in.
+                type: boolean
+              displayName:
+                description: DisplayName is the user's display name shown in the UI.
+                type: string
+              email:
+                description: Email is the user's email address, used for Team membership
+                  matching.
+                format: email
+                type: string
+              ssoProvider:
+                description: |-
+                  SSOProvider is the name of the SSO provider (e.g., "Google", "Okta").
+                  Only set for SSO users.
+                type: string
+              ssoSubject:
+                description: |-
+                  SSOSubject is the unique subject identifier from the SSO provider.
+                  This is the "sub" claim from the OIDC token.
+                  Only set for SSO users.
+                type: string
+            required:
+            - email
+            type: object
+          status:
+            description: UserStatus defines the observed state of User.
+            properties:
+              conditions:
+                description: Conditions represent the latest available observations.
+                items:
+                  description: Condition contains details for one aspect of the current
+                    state of this API Resource.
+                  properties:
+                    lastTransitionTime:
+                      description: |-
+                        lastTransitionTime is the last time the condition transitioned from one status to another.
+                        This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
+                      format: date-time
+                      type: string
+                    message:
+                      description: |-
+                        message is a human readable message indicating details about the transition.
+                        This may be an empty string.
+                      maxLength: 32768
+                      type: string
+                    observedGeneration:
+                      description: |-
+                        observedGeneration represents the .metadata.generation that the condition was set based upon.
+                        For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date
+                        with respect to the current state of the instance.
+                      format: int64
+                      minimum: 0
+                      type: integer
+                    reason:
+                      description: |-
+                        reason contains a programmatic identifier indicating the reason for the condition's last transition.
+                        Producers of specific condition types may define expected values and meanings for this field,
+                        and whether the values are considered a guaranteed API.
+                        The value should be a CamelCase string.
+                        This field may not be empty.
+                      maxLength: 1024
+                      minLength: 1
+                      pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                      type: string
+                    status:
+                      description: status of the condition, one of True, False, Unknown.
+                      enum:
+                      - "True"
+                      - "False"
+                      - Unknown
+                      type: string
+                    type:
+                      description: type of condition in CamelCase or in foo.example.com/CamelCase.
+                      maxLength: 316
+                      pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                      type: string
+                  required:
+                  - lastTransitionTime
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+              failedLoginAttempts:
+                description: |-
+                  FailedLoginAttempts is the number of consecutive failed login attempts.
+                  Resets to 0 on successful login.
+                  Only used for internal users.
+                format: int32
+                type: integer
+              inviteExpiresAt:
+                description: |-
+                  InviteExpiresAt is when the invite token expires.
+                  Only used for internal users.
+                format: date-time
+                type: string
+              inviteSentAt:
+                description: |-
+                  InviteSentAt is when the invite was generated.
+                  Only used for internal users.
+                format: date-time
+                type: string
+              inviteTokenHash:
+                description: |-
+                  InviteTokenHash is the SHA256 hash of the invite token.
+                  The raw token is only shown once when the user is created.
+                  Only used for internal users.
+                type: string
+              lastLoginTime:
+                description: LastLoginTime is when the user last successfully logged
+                  in.
+                format: date-time
+                type: string
+              lockedUntil:
+                description: |-
+                  LockedUntil is set when the account is temporarily locked due to failed attempts.
+                  Only used for internal users.
+                format: date-time
+                type: string
+              loginCount:
+                description: LoginCount is the total number of successful logins.
+                format: int64
+                type: integer
+              passwordChangedAt:
+                description: |-
+                  PasswordChangedAt is when the password was last set/changed.
+                  Only used for internal users.
+                format: date-time
+                type: string
+              passwordSecretRef:
+                description: |-
+                  PasswordSecretRef references the Secret containing the bcrypt password hash.
+                  This is automatically created when the user sets their password.
+                  Only used for internal users.
+                properties:
+                  key:
+                    description: |-
+                      Key is the key within the Secret to reference.
+                      If not specified, the entire Secret data is used.
+                    type: string
+                  name:
+                    description: Name is the name of the Secret.
+                    minLength: 1
+                    type: string
+                  namespace:
+                    description: |-
+                      Namespace is the namespace of the Secret.
+                      If not specified, the namespace of the referencing resource is used.
+                    type: string
+                required:
+                - name
+                type: object
+              phase:
+                allOf:
+                - enum:
+                  - Pending
+                  - Active
+                  - Disabled
+                  - Locked
+                - enum:
+                  - Pending
+                  - Active
+                  - Disabled
+                  - Locked
+                description: Phase represents the current state of the user.
+                type: string
+              teams:
+                description: |-
+                  Teams lists the teams this user belongs to (resolved from Team CRDs).
+                  This is informational and updated periodically.
+                items:
+                  description: UserTeamMembership represents a user's membership in
+                    a team.
+                  properties:
+                    name:
+                      description: Name is the team name.
+                      type: string
+                    role:
+                      description: Role is the user's role in the team.
+                      type: string
+                  required:
+                  - name
+                  - role
+                  type: object
+                type: array
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}
