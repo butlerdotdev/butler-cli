@@ -217,12 +217,13 @@ func (o *Orchestrator) Run(ctx context.Context, cfg *Config) error {
 	if creds.consoleURL != "" {
 		o.logger.Info("Butler Console:")
 		if strings.HasPrefix(creds.consoleURL, "kubectl") {
-			// It's a port-forward instruction
 			o.logger.Info("  Access via: " + creds.consoleURL)
 		} else {
 			o.logger.Info("  URL: " + creds.consoleURL)
 		}
-		o.logger.Info("  Credentials: admin / admin (change after first login)")
+		o.logger.Info("  Username: admin")
+		o.logger.Info("  Password: Run the following command to retrieve:")
+		o.logger.Info("    kubectl get secret butler-console-admin -n butler-system -o jsonpath='{.data.admin-password}' | base64 -d && echo")
 		o.logger.Info("")
 	}
 
