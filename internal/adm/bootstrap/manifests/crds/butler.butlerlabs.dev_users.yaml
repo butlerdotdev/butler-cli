@@ -26,6 +26,9 @@ spec:
     - jsonPath: .spec.authType
       name: Auth
       type: string
+    - jsonPath: .spec.isPlatformAdmin
+      name: Platform Admin
+      type: boolean
     - jsonPath: .status.phase
       name: Phase
       type: string
@@ -54,6 +57,10 @@ spec:
           4. User clicks link, sets their own password
           5. Password is hashed (bcrypt) and stored in a Secret
           6. User status changes from Pending to Active
+
+          Platform Admin:
+          Users with spec.isPlatformAdmin=true have full platform access,
+          bypassing team-based RBAC. This should be used sparingly.
         properties:
           apiVersion:
             description: |-
@@ -102,6 +109,16 @@ spec:
                   matching.
                 format: email
                 type: string
+              isPlatformAdmin:
+                default: false
+                description: |-
+                  IsPlatformAdmin grants full platform access, bypassing team-based RBAC.
+                  Platform admins can:
+                  - Manage all teams, users, clusters, and providers
+                  - Access all resources regardless of team membership
+                  - Configure platform-wide settings
+                  Use sparingly - most users should use team-based access control.
+                type: boolean
               ssoProvider:
                 description: |-
                   SSOProvider is the name of the SSO provider (e.g., "Google", "Okta").
