@@ -79,7 +79,7 @@ func NewStatusCmd(logger *log.Logger) *cobra.Command {
 Shows the status of:
   • Butler controllers (butler-controller, butler-bootstrap)
   • CAPI providers (capk, capx, capmox)
-  • Infrastructure addons (Kamaji, Cilium, Longhorn, MetalLB, cert-manager)
+  • Infrastructure addons (Steward, Cilium, Longhorn, MetalLB, cert-manager)
   • GitOps components (Flux)
   • Provider configurations
   • Tenant cluster summary
@@ -169,7 +169,7 @@ func runStatus(ctx context.Context, logger *log.Logger, opts *statusOptions) err
 		{capiSystem, "capk-controller-manager"},
 	})
 
-	checkDeployment(ctx, c, "kamaji-system", "kamaji", "Kamaji")
+	checkDeployment(ctx, c, "steward-system", "steward", "Steward")
 	fmt.Println()
 
 	// Check infrastructure

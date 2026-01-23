@@ -76,7 +76,7 @@ func NewDestroyCmd(logger *log.Logger) *cobra.Command {
 
 This will permanently delete:
   • All worker node VMs (data on local disks will be lost)
-  • The hosted control plane (Kamaji TenantControlPlane)
+  • The hosted control plane (Steward TenantControlPlane)
   • All Kubernetes resources in the tenant cluster
   • The tenant namespace and its contents
   • Associated secrets, PVCs, and configmaps

@@ -188,7 +188,7 @@ func NewCreateCmd(logger *log.Logger) *cobra.Command {
 		Long: `Create a new tenant Kubernetes cluster.
 
 Butler will provision the cluster using the specified provider configuration,
-including control plane (via Kamaji) and worker nodes.
+including control plane (via Steward) and worker nodes.
 
 The --lb-pool flag (or --lb-pool-start/--lb-pool-end) is required to configure
 the IP range for LoadBalancer services (MetalLB).
