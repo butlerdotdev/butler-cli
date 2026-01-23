@@ -35,7 +35,7 @@ func NewClusterCmd(logger *log.Logger) *cobra.Command {
 		Long: `Manage tenant Kubernetes clusters on the Butler platform.
 
 Tenant clusters are isolated Kubernetes environments for your workloads.
-Butler uses Kamaji for hosted control planes (resource-efficient) with
+Butler uses Steward for hosted control planes (resource-efficient) with
 worker nodes running on your infrastructure provider.
 
 Commands:

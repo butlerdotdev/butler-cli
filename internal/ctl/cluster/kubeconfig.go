@@ -110,7 +110,7 @@ func runKubeconfig(ctx context.Context, logger *log.Logger, clusterName string, 
 			clusterName, GetNestedString(tc.Object, "status", "phase"))
 	}
 
-	// The kubeconfig secret follows Kamaji's pattern: <name>-admin-kubeconfig
+	// The kubeconfig secret follows Steward's pattern: <name>-admin-kubeconfig
 	secretName := clusterName + "-admin-kubeconfig"
 
 	// Fetch the secret from the tenant namespace
@@ -119,7 +119,7 @@ func runKubeconfig(ctx context.Context, logger *log.Logger, clusterName string, 
 		return fmt.Errorf("getting kubeconfig secret %s/%s: %w", tenantNS, secretName, err)
 	}
 
-	// Kamaji stores kubeconfig in 'admin.conf' key
+	// Steward stores kubeconfig in 'admin.conf' key
 	kubeconfigData, ok := secret.Data["admin.conf"]
 	if !ok {
 		// Try alternative keys
@@ -207,7 +207,7 @@ func mergeKubeconfig(logger *log.Logger, clusterName string, kubeconfigData []by
 	clusterEntryName := clusterName
 	userName := clusterName + "-admin"
 
-	// Find the first cluster from tenant config (Kamaji typically creates one)
+	// Find the first cluster from tenant config (Steward typically creates one)
 	var tenantCluster *api.Cluster
 	for _, cluster := range tenantConfig.Clusters {
 		tenantCluster = cluster

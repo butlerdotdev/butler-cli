@@ -156,7 +156,7 @@ flowchart TD
     
     subgraph MC[Management Cluster]
         CAPI[Cluster API]
-        Kamaji[Kamaji]
+        Steward[Steward]
         Addons[Platform Addons]
     end
     
@@ -231,18 +231,18 @@ flowchart TD
     subgraph MC[Management Cluster]
         BC[butler-controller]
         CAPI[Cluster API]
-        Kamaji[Kamaji]
+        Steward[Steward]
     end
     
     TC[TenantCluster CR]
     
     TC --> BC
     BC -->|Creates| Cluster[CAPI Cluster]
-    BC -->|Creates| KCP[KamajiControlPlane]
+    BC -->|Creates| KCP[StewardControlPlane]
     BC -->|Creates| MD[MachineDeployment]
     
     Cluster --> CAPI
-    KCP --> Kamaji
+    KCP --> Steward
     MD --> CAPI
 ```
 

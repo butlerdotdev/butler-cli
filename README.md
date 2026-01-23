@@ -101,7 +101,7 @@ What happens:
 3. VMs are provisioned on your infrastructure
 4. Talos Linux is configured on each VM
 5. Kubernetes is bootstrapped
-6. Platform addons are installed (Cilium, Longhorn, MetalLB, Kamaji, CAPI)
+6. Platform addons are installed (Cilium, Longhorn, MetalLB, Steward, CAPI)
 7. Kubeconfig is saved locally
 8. KIND cluster is deleted
 

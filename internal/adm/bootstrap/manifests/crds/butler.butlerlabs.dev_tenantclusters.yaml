@@ -207,7 +207,7 @@ spec:
                     type: object
                 type: object
               controlPlane:
-                description: ControlPlane configures the Kamaji-hosted control plane.
+                description: ControlPlane configures the Steward-hosted control plane.
                 properties:
                   certSANs:
                     description: |-
@@ -218,7 +218,7 @@ spec:
                     type: array
                   dataStoreRef:
                     description: |-
-                      DataStoreRef references the Kamaji DataStore to use.
+                      DataStoreRef references the Steward DataStore to use.
                       If not specified, the default DataStore is used.
                     properties:
                       name:
@@ -238,7 +238,7 @@ spec:
                     default: 1
                     description: |-
                       Replicas is the number of API server replicas.
-                      Kamaji manages high availability automatically.
+                      Steward manages high availability automatically.
                     format: int32
                     maximum: 3
                     minimum: 1
@@ -590,7 +590,7 @@ spec:
                 - Failed
                 type: string
               tenantNamespace:
-                description: TenantNamespace is the namespace containing CAPI/Kamaji
+                description: TenantNamespace is the namespace containing CAPI/Steward
                   resources.
                 type: string
               workerNodesDesired:

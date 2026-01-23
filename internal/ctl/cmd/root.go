@@ -48,7 +48,7 @@ It is designed for developers and platform users who work with tenant clusters:
   • Get kubeconfig for cluster access
   • Export cluster configs for GitOps
 
-Butler provides Kubernetes-as-a-Service with hosted control planes (Kamaji)
+Butler provides Kubernetes-as-a-Service with hosted control planes (Steward)
 and infrastructure-agnostic worker provisioning.
 
 Examples:
