@@ -1,0 +1,69 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: butler-provider-proxmox
+  namespace: butler-system
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: butler-provider-proxmox
+  template:
+    metadata:
+      labels:
+        app: butler-provider-proxmox
+    spec:
+      serviceAccountName: butler-provider-proxmox
+      hostNetwork: true
+      dnsPolicy: ClusterFirstWithHostNet
+      containers:
+      - name: manager
+        image: ghcr.io/butlerdotdev/butler-provider-proxmox:latest
+        args:
+        - --leader-elect=false
+        env:
+        - name: GODEBUG
+          value: http2client=0
+        volumeMounts:
+        - name: ca-certs
+          mountPath: /etc/ssl/certs
+          readOnly: true
+      volumes:
+      - name: ca-certs
+        hostPath:
+          path: /etc/ssl/certs
+          type: Directory
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: butler-provider-proxmox
+  namespace: butler-system
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: butler-provider-proxmox
+rules:
+- apiGroups: ["butler.butlerlabs.dev"]
+  resources: ["machinerequests", "machinerequests/status"]
+  verbs: ["get", "list", "watch", "update", "patch"]
+- apiGroups: ["butler.butlerlabs.dev"]
+  resources: ["providerconfigs"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: [""]
+  resources: ["secrets"]
+  verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: butler-provider-proxmox
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: butler-provider-proxmox
+subjects:
+- kind: ServiceAccount
+  name: butler-provider-proxmox
+  namespace: butler-system
