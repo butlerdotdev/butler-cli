@@ -1,3 +1,6 @@
+---
+# Butler Provider Proxmox Controller
+# Provisions VMs in Proxmox VE from MachineRequest CRs
 apiVersion: apps/v1
 kind: Deployment
 metadata:
