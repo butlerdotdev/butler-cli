@@ -54,6 +54,7 @@ Example:
 	cmd.AddCommand(NewGCPCmd(logger))
 	cmd.AddCommand(NewAWSCmd(logger))
 	cmd.AddCommand(NewAzureCmd(logger))
+	cmd.AddCommand(NewProxmoxCmd(logger))
 
 	return cmd
 }
