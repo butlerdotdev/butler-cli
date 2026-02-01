@@ -738,8 +738,21 @@ func (o *Orchestrator) createNamespaceAndSecrets(ctx context.Context, clientset 
 		}
 
 	case "proxmox":
-		// TODO: Create Proxmox credentials secret
-		o.logger.Debug("Proxmox credentials not yet implemented")
+		secret := &corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      cfg.Cluster.Name + "-proxmox-credentials",
+				Namespace: butlerNamespace,
+			},
+			Type: corev1.SecretTypeOpaque,
+			StringData: map[string]string{
+				"tokenID":     cfg.ProviderConfig.Proxmox.TokenID,
+				"tokenSecret": cfg.ProviderConfig.Proxmox.TokenSecret,
+			},
+		}
+		_, err = clientset.CoreV1().Secrets(butlerNamespace).Create(ctx, secret, metav1.CreateOptions{})
+		if err != nil && !strings.Contains(err.Error(), "already exists") {
+			return fmt.Errorf("creating Proxmox secret: %w", err)
+		}
 
 	case "gcp":
 		// Read service account key file
@@ -887,8 +900,19 @@ func (o *Orchestrator) buildProviderConfigUnstructured(cfg *Config) *unstructure
 			"imageUUID":   cfg.ProviderConfig.Nutanix.ImageUUID,
 		}
 	case "proxmox":
-		// TODO: Proxmox ProviderConfig not yet implemented
-
+		spec["credentialsRef"] = map[string]interface{}{
+			"name":      cfg.Cluster.Name + "-proxmox-credentials",
+			"namespace": butlerNamespace,
+		}
+		spec["proxmox"] = map[string]interface{}{
+			"endpoint":   cfg.ProviderConfig.Proxmox.Endpoint,
+			"insecure":   cfg.ProviderConfig.Proxmox.Insecure,
+			"nodes":      cfg.ProviderConfig.Proxmox.Nodes,
+			"storage":    cfg.ProviderConfig.Proxmox.Storage,
+			"templateID": cfg.ProviderConfig.Proxmox.TemplateID,
+			"vmidStart":  cfg.ProviderConfig.Proxmox.VMIDStart,
+			"vmidEnd":    cfg.ProviderConfig.Proxmox.VMIDEnd,
+		}
 	case "gcp":
 		spec["credentialsRef"] = map[string]interface{}{
 			"name":      cfg.Cluster.Name + "-gcp-credentials",
