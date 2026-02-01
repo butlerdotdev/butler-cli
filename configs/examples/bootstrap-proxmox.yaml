@@ -1,0 +1,54 @@
+# Butler Management Cluster Bootstrap Configuration
+# Provider: Proxmox VE
+
+provider: proxmox
+
+cluster:
+  name: butler-mgmt
+  controlPlane:
+    replicas: 3
+    cpu: 4
+    memoryMB: 8192
+    diskGB: 50
+  workers:
+    replicas: 2
+    cpu: 8
+    memoryMB: 16384
+    diskGB: 100
+    extraDisks:
+      - sizeGB: 200  # For Longhorn storage
+
+network:
+  podCIDR: 10.244.0.0/16
+  serviceCIDR: 10.96.0.0/12
+  vip: 10.40.0.201
+
+talos:
+  version: v1.12.2
+  schematic: ce4c980550dd2ab1b17bbf2b08801c7eb59418eafe8f279833297925d67c7515
+
+addons:
+  cni:
+    type: cilium
+  storage:
+    type: longhorn
+  loadBalancer:
+    type: metallb
+    addressPool: 10.40.0.220-10.40.0.230
+  gitOps:
+    type: flux
+  
+providerConfig:
+  proxmox:
+    endpoint: https://pve.example.com:8006
+    insecure: true
+    nodes:
+      - pve1
+      - pve2
+      - pve3
+    storage: local-lvm
+    templateID: local:iso/metal-amd64.iso
+    vmidStart: 200
+    vmidEnd: 300
+    # Credentials loaded from file or environment
+    credentialsFile: ~/.butler/proxmox-credentials.yaml

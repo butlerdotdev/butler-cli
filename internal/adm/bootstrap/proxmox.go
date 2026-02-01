@@ -78,6 +78,7 @@ Local Development:
 			}()
 
 			// Load configuration
+			configFile, _ = cmd.Flags().GetString("config")
 			if configFile != "" {
 				viper.SetConfigFile(configFile)
 				if err := viper.ReadInConfig(); err != nil {

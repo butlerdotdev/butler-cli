@@ -289,11 +289,11 @@ type ProxmoxProviderConfig struct {
 	// Insecure allows insecure TLS connections
 	Insecure bool `mapstructure:"insecure"`
 
-	// Username is the Proxmox username
-	Username string `mapstructure:"username"`
+	// TokenID is the Proxmox token ID
+	TokenID string `mapstructure:"tokenID"`
 
-	// Password is the Proxmox password
-	Password string `mapstructure:"password"`
+	// TokenSecret is the Proxmox token secret
+	TokenSecret string `mapstructure:"tokenSecret"`
 
 	// Nodes is the list of Proxmox nodes available for VM placement
 	Nodes []string `mapstructure:"nodes"`
@@ -302,7 +302,7 @@ type ProxmoxProviderConfig struct {
 	Storage string `mapstructure:"storage"`
 
 	// TemplateID is the VM template ID to clone (optional)
-	TemplateID int32 `mapstructure:"templateID,omitempty"`
+	TemplateID string `mapstructure:"templateID,omitempty"`
 
 	// VMIDStart is the start of the VM ID range
 	VMIDStart int32 `mapstructure:"vmidStart,omitempty"`
