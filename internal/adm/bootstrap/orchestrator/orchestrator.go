@@ -839,8 +839,7 @@ func (o *Orchestrator) buildProviderConfigUnstructured(cfg *Config) *unstructure
 			"nodes":      cfg.ProviderConfig.Proxmox.Nodes,
 			"storage":    cfg.ProviderConfig.Proxmox.Storage,
 			"templateID": cfg.ProviderConfig.Proxmox.TemplateID,
-			"vmidStart":  cfg.ProviderConfig.Proxmox.VMIDStart,
-			"vmidEnd":    cfg.ProviderConfig.Proxmox.VMIDEnd,
+			"vmidRange":  cfg.ProviderConfig.Proxmox.VMIDRange,
 		}
 	}
 

@@ -310,8 +310,22 @@ type ProxmoxProviderConfig struct {
 	// VMIDEnd is the end of the VM ID range
 	VMIDEnd int32 `mapstructure:"vmidEnd,omitempty"`
 
+	// VMIDRange defines the range of VM IDs to use.
+	VMIDRange *VMIDRange `mapstructure:"vmidRange,omitempty"`
+
 	// HostAliases adds /etc/hosts entries to the KIND node for corporate DNS.
 	HostAliases []string `mapstructure:"hostAliases,omitempty"`
+}
+
+// VMIDRange defines a range of VM IDs.
+type VMIDRange struct {
+	// Start is the first VM ID in the range.
+	// +kubebuilder:validation:Minimum=100
+	Start int32 `json:"start"`
+
+	// End is the last VM ID in the range.
+	// +kubebuilder:validation:Minimum=100
+	End int32 `json:"end"`
 }
 
 // LoadConfig loads the bootstrap configuration from viper

@@ -22,6 +22,7 @@ spec:
       containers:
       - name: manager
         image: ghcr.io/butlerdotdev/butler-provider-proxmox:latest
+        imagePullPolicy: IfNotPresent
         args:
         - --leader-elect=false
         env:

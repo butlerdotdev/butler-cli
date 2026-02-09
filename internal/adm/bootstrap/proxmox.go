@@ -108,6 +108,11 @@ Local Development:
 				return fmt.Errorf("providerConfig.proxmox.nodes is required")
 			}
 
+			// TODO: Remove
+			localDev = true
+			repoRoot = "/home/ubuntu/code/butler"
+			skipCleanup = true
+
 			if localDev && repoRoot == "" {
 				// Try to find repo root automatically
 				home, _ := os.UserHomeDir()
