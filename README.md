@@ -54,6 +54,40 @@ Provider support is implemented through separate butler-provider-* controllers. 
 
 ## Installation
 
+### Homebrew (macOS / Linux)
+
+```sh
+brew install butlerdotdev/tap/butler
+```
+
+### Direct Download (macOS / Linux)
+
+```sh
+OS=$(uname -s | tr '[:upper:]' '[:lower:]')
+ARCH=$(uname -m)
+[[ "$ARCH" == "x86_64" ]] && ARCH="amd64"
+[[ "$ARCH" == "aarch64" ]] && ARCH="arm64"
+
+curl -sLO "https://github.com/butlerdotdev/butler-cli/releases/latest/download/butler_${OS}_${ARCH}.tar.gz"
+tar xzf "butler_${OS}_${ARCH}.tar.gz"
+sudo mv butleradm butlerctl /usr/local/bin/
+```
+
+### Chocolatey (Windows)
+
+```powershell
+choco install butler-cli
+```
+
+### Direct Download (Windows)
+
+```powershell
+$arch = if ($env:PROCESSOR_ARCHITECTURE -eq "ARM64") { "arm64" } else { "amd64" }
+Invoke-WebRequest -Uri "https://github.com/butlerdotdev/butler-cli/releases/latest/download/butler_windows_${arch}.tar.gz" -OutFile butler.tar.gz
+tar xzf butler.tar.gz
+Move-Item butleradm.exe, butlerctl.exe -Destination "$env:LOCALAPPDATA\Microsoft\WindowsApps\"
+```
+
 ### From Source
 
 ```sh
@@ -64,22 +98,11 @@ make build
 
 Binaries are placed in `./bin/`.
 
-### Install to PATH
+### Verify Installation
 
 ```sh
-# Install to ~/bin
-make install-local
-
-# Install to /usr/local/bin (requires sudo)
-sudo make install
-```
-
-### From Release
-
-```sh
-curl -LO https://github.com/butlerdotdev/butler-cli/releases/latest/download/butler-cli-linux-amd64.tar.gz
-tar xzf butler-cli-linux-amd64.tar.gz
-sudo mv butleradm butlerctl /usr/local/bin/
+butleradm version
+butlerctl version
 ```
 
 ## butleradm
