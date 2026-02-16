@@ -422,9 +422,10 @@ spec:
                     description: Storage is the storage location for VM disks.
                     type: string
                   templateID:
-                    description: TemplateID is the VM template ID to clone.
-                    format: int32
-                    type: integer
+                    description: |-
+                      TemplateID is the location of the ISO to use for VM creation
+                      i.e. local:iso/ubuntu-22.04.iso
+                    type: string
                   vmidRange:
                     description: VMIDRange defines the range of VM IDs to use.
                     properties:

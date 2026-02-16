@@ -25,6 +25,7 @@ spec:
         imagePullPolicy: IfNotPresent
         args:
         - --leader-elect=false
+        - --health-probe-bind-address=:8091
         env:
         - name: GODEBUG
           value: http2client=0

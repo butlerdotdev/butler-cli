@@ -451,7 +451,7 @@ spec:
                         type: string
                       templateID:
                         description: TemplateID is the VM template ID.
-                        type: integer
+                        type: string
                     type: object
                 type: object
               kubernetesVersion:
