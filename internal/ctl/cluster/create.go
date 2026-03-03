@@ -68,6 +68,20 @@ type CreateOptions struct {
 	// Control plane (optional)
 	ControlPlaneReplicas int32
 
+	// Control plane resource overrides (optional)
+	CPApiServerCPUReq string
+	CPApiServerMemReq string
+	CPApiServerCPULim string
+	CPApiServerMemLim string
+	CPCMCPUReq        string
+	CPCMMemReq        string
+	CPCMCPULim        string
+	CPCMMemLim        string
+	CPSchedulerCPUReq string
+	CPSchedulerMemReq string
+	CPSchedulerCPULim string
+	CPSchedulerMemLim string
+
 	// Behavior flags
 	Wait    bool
 	Timeout time.Duration
@@ -263,6 +277,20 @@ Examples:
 	cmd.Flags().BoolVar(&opts.Wait, "wait", false, "Wait for cluster to reach Ready status")
 	cmd.Flags().DurationVar(&opts.Timeout, "timeout", opts.Timeout, "Timeout when using --wait")
 	cmd.Flags().BoolVar(&opts.DryRun, "dry-run", false, "Preview the TenantCluster without creating it")
+
+	// Control plane resources (optional)
+	cmd.Flags().StringVar(&opts.CPApiServerCPUReq, "cp-apiserver-cpu-request", "", "API server CPU request (e.g., 100m, 1)")
+	cmd.Flags().StringVar(&opts.CPApiServerMemReq, "cp-apiserver-memory-request", "", "API server memory request (e.g., 256Mi, 1Gi)")
+	cmd.Flags().StringVar(&opts.CPApiServerCPULim, "cp-apiserver-cpu-limit", "", "API server CPU limit")
+	cmd.Flags().StringVar(&opts.CPApiServerMemLim, "cp-apiserver-memory-limit", "", "API server memory limit")
+	cmd.Flags().StringVar(&opts.CPCMCPUReq, "cp-controller-manager-cpu-request", "", "Controller manager CPU request")
+	cmd.Flags().StringVar(&opts.CPCMMemReq, "cp-controller-manager-memory-request", "", "Controller manager memory request")
+	cmd.Flags().StringVar(&opts.CPCMCPULim, "cp-controller-manager-cpu-limit", "", "Controller manager CPU limit")
+	cmd.Flags().StringVar(&opts.CPCMMemLim, "cp-controller-manager-memory-limit", "", "Controller manager memory limit")
+	cmd.Flags().StringVar(&opts.CPSchedulerCPUReq, "cp-scheduler-cpu-request", "", "Scheduler CPU request")
+	cmd.Flags().StringVar(&opts.CPSchedulerMemReq, "cp-scheduler-memory-request", "", "Scheduler memory request")
+	cmd.Flags().StringVar(&opts.CPSchedulerCPULim, "cp-scheduler-cpu-limit", "", "Scheduler CPU limit")
+	cmd.Flags().StringVar(&opts.CPSchedulerMemLim, "cp-scheduler-memory-limit", "", "Scheduler memory limit")
 
 	// File-based
 	cmd.Flags().StringVarP(&opts.Filename, "filename", "f", "", "Create from YAML file")
@@ -472,15 +500,59 @@ func buildTenantCluster(opts *CreateOptions) *unstructured.Unstructured {
 		spec["networking"] = networking
 	}
 
-	// Add control plane if non-default
+	// Build control plane section
+	controlPlane := map[string]interface{}{}
 	if opts.ControlPlaneReplicas != 1 {
-		spec["controlPlane"] = map[string]interface{}{
-			"replicas": int64(opts.ControlPlaneReplicas),
-		}
+		controlPlane["replicas"] = int64(opts.ControlPlaneReplicas)
+	}
+
+	// Add control plane resources if any flags set
+	cpResources := map[string]interface{}{}
+	if apiServer := buildCPComponentResources(opts.CPApiServerCPUReq, opts.CPApiServerMemReq, opts.CPApiServerCPULim, opts.CPApiServerMemLim); len(apiServer) > 0 {
+		cpResources["apiServer"] = apiServer
+	}
+	if cm := buildCPComponentResources(opts.CPCMCPUReq, opts.CPCMMemReq, opts.CPCMCPULim, opts.CPCMMemLim); len(cm) > 0 {
+		cpResources["controllerManager"] = cm
+	}
+	if sched := buildCPComponentResources(opts.CPSchedulerCPUReq, opts.CPSchedulerMemReq, opts.CPSchedulerCPULim, opts.CPSchedulerMemLim); len(sched) > 0 {
+		cpResources["scheduler"] = sched
+	}
+	if len(cpResources) > 0 {
+		controlPlane["resources"] = cpResources
+	}
+
+	if len(controlPlane) > 0 {
+		spec["controlPlane"] = controlPlane
 	}
 
 	tc.Object["spec"] = spec
 	return tc
+}
+
+// buildCPComponentResources builds the resource map for a control plane component.
+func buildCPComponentResources(cpuReq, memReq, cpuLim, memLim string) map[string]interface{} {
+	result := map[string]interface{}{}
+	requests := map[string]interface{}{}
+	if cpuReq != "" {
+		requests["cpu"] = cpuReq
+	}
+	if memReq != "" {
+		requests["memory"] = memReq
+	}
+	if len(requests) > 0 {
+		result["requests"] = requests
+	}
+	limits := map[string]interface{}{}
+	if cpuLim != "" {
+		limits["cpu"] = cpuLim
+	}
+	if memLim != "" {
+		limits["memory"] = memLim
+	}
+	if len(limits) > 0 {
+		result["limits"] = limits
+	}
+	return result
 }
 
 // printCreationSummary outputs what will be created.
