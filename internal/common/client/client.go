@@ -71,6 +71,11 @@ var (
 		Version:  ButlerAPIVersion,
 		Resource: "butlerconfigs",
 	}
+	ImageSyncGVR = schema.GroupVersionResource{
+		Group:    ButlerAPIGroup,
+		Version:  ButlerAPIVersion,
+		Resource: "imagesyncs",
+	}
 	// CAPI resources
 	MachineDeploymentGVR = schema.GroupVersionResource{
 		Group:    "cluster.x-k8s.io",

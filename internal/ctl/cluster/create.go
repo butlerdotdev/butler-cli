@@ -54,6 +54,10 @@ type CreateOptions struct {
 	// OS Image (provider-specific: UUID for Nutanix, namespace/name for Harvester)
 	ImageRef string
 
+	// SchematicID references a Butler Image Factory schematic for ImageSync-based provisioning.
+	// When set, the controller resolves the ImageSync and uses the provider image ref.
+	SchematicID string
+
 	// Kubernetes version
 	KubernetesVersion string
 
@@ -245,6 +249,7 @@ Examples:
 	cmd.Flags().StringVar(&memoryFlag, "memory", "8Gi", "Memory per worker (e.g., 8Gi, 16384Mi)")
 	cmd.Flags().StringVar(&diskFlag, "disk", "50Gi", "Disk size per worker (e.g., 50Gi, 100Gi)")
 	cmd.Flags().StringVar(&opts.ImageRef, "image", "", "OS image reference (UUID for Nutanix, namespace/name for Harvester)")
+	cmd.Flags().StringVar(&opts.SchematicID, "schematic-id", "", "Image Factory schematic ID (resolves via ImageSync)")
 
 	// Kubernetes version
 	cmd.Flags().StringVar(&opts.KubernetesVersion, "k8s-version", opts.KubernetesVersion, "Kubernetes version")
@@ -434,11 +439,16 @@ func buildTenantCluster(opts *CreateOptions) *unstructured.Unstructured {
 		"diskSize": fmt.Sprintf("%dGi", opts.DiskGB),
 	}
 
-	// Add OS imageRef if specified
+	// Add OS imageRef or schematicID if specified
+	osConfig := map[string]interface{}{}
 	if opts.ImageRef != "" {
-		machineTemplate["os"] = map[string]interface{}{
-			"imageRef": opts.ImageRef,
-		}
+		osConfig["imageRef"] = opts.ImageRef
+	}
+	if opts.SchematicID != "" {
+		osConfig["schematicID"] = opts.SchematicID
+	}
+	if len(osConfig) > 0 {
+		machineTemplate["os"] = osConfig
 	}
 
 	// Build spec
@@ -497,6 +507,9 @@ func printCreationSummary(opts *CreateOptions) {
 	}
 	if opts.ImageRef != "" {
 		fmt.Fprintf(opts.Output, "  Image:       %s\n", opts.ImageRef)
+	}
+	if opts.SchematicID != "" {
+		fmt.Fprintf(opts.Output, "  Schematic:   %s\n", opts.SchematicID)
 	}
 	fmt.Fprintln(opts.Output)
 }

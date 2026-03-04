@@ -84,3 +84,5 @@ require (
 // Uncomment when butler-api is ready and you want typed clients
 // require github.com/butlerdotdev/butler-api v0.0.0
 // replace github.com/butlerdotdev/butler-api => ../butler-api
+
+replace github.com/butlerdotdev/butler-api => ../butler-api
