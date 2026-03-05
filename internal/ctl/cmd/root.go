@@ -21,6 +21,7 @@ import (
 	"github.com/butlerdotdev/butler/internal/common/log"
 	"github.com/butlerdotdev/butler/internal/common/output"
 	"github.com/butlerdotdev/butler/internal/ctl/cluster"
+	"github.com/butlerdotdev/butler/internal/ctl/image"
 	"github.com/spf13/cobra"
 )
 
@@ -84,6 +85,7 @@ Examples:
 
 	// Register subcommands
 	cmd.AddCommand(cluster.NewClusterCmd(logger))
+	cmd.AddCommand(image.NewImageCmd(logger))
 	cmd.AddCommand(NewVersionCmd())
 
 	return cmd
