@@ -119,6 +119,39 @@ spec:
                   - Configure platform-wide settings
                   Use sparingly - most users should use team-based access control.
                 type: boolean
+              sshKeys:
+                description: |-
+                  SSHKeys are the user's saved SSH public keys for workspace access.
+                  Public keys are not sensitive — storing them in spec avoids Secret sprawl
+                  and makes them queryable. Matches how GitHub stores public keys.
+                items:
+                  description: SSHKeyEntry represents a named SSH public key in a
+                    user's profile.
+                  properties:
+                    addedAt:
+                      description: AddedAt is when this key was added.
+                      format: date-time
+                      type: string
+                    fingerprint:
+                      description: Fingerprint is the SHA256 fingerprint, computed
+                        by the server on upload.
+                      type: string
+                    name:
+                      description: Name is a user-friendly label for this key (e.g.,
+                        "macbook-pro", "work-laptop").
+                      maxLength: 63
+                      minLength: 1
+                      type: string
+                    publicKey:
+                      description: PublicKey is the SSH public key (e.g., "ssh-ed25519
+                        AAAA... user@host").
+                      minLength: 1
+                      type: string
+                  required:
+                  - name
+                  - publicKey
+                  type: object
+                type: array
               ssoProvider:
                 description: |-
                   SSOProvider is the name of the SSO provider (e.g., "Google", "Okta").

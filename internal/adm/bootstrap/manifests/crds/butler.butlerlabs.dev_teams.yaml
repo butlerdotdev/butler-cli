@@ -78,6 +78,12 @@ spec:
                     items:
                       description: TeamGroup represents a group with access to a Team.
                       properties:
+                        identityProvider:
+                          description: |-
+                            IdentityProvider is the name of the IdentityProvider CRD this group comes from.
+                            If specified, only users authenticating through this IdP will be matched.
+                            If not specified, the group name will be matched against groups from any IdP.
+                          type: string
                         name:
                           description: |-
                             Name is the group identifier (OIDC group, AD group DN, etc.).

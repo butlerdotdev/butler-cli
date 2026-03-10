@@ -1,0 +1,247 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.19.0
+  name: workspacetemplates.butler.butlerlabs.dev
+spec:
+  group: butler.butlerlabs.dev
+  names:
+    kind: WorkspaceTemplate
+    listKind: WorkspaceTemplateList
+    plural: workspacetemplates
+    shortNames:
+    - wst
+    singular: workspacetemplate
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - description: Template display name
+      jsonPath: .spec.displayName
+      name: Display Name
+      type: string
+    - description: Default workspace image
+      jsonPath: .spec.template.image
+      name: Image
+      type: string
+    - description: Template category
+      jsonPath: .spec.category
+      name: Category
+      type: string
+    - description: Visibility scope
+      jsonPath: .spec.scope
+      name: Scope
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: |-
+          WorkspaceTemplate is a pre-configured workspace specification for one-click creation.
+          Templates are data-only resources — no controller reconciliation is needed.
+          Cluster-scoped templates live in butler-system and are visible to all teams.
+          Team-scoped templates live in the team namespace and are visible only to that team.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: WorkspaceTemplateSpec defines the desired state of a WorkspaceTemplate.
+            properties:
+              category:
+                default: custom
+                description: Category groups templates in the picker UI.
+                enum:
+                - backend
+                - frontend
+                - data
+                - devops
+                - custom
+                type: string
+              description:
+                description: Description of what this template provides.
+                type: string
+              displayName:
+                description: DisplayName shown in the template picker.
+                minLength: 1
+                type: string
+              icon:
+                description: Icon is a Material UI icon name or URL for the template
+                  card.
+                type: string
+              scope:
+                default: team
+                description: |-
+                  Scope determines visibility.
+                  "cluster" templates are visible to all teams (created by platform admins).
+                  "team" templates are visible only to the team that owns them.
+                enum:
+                - cluster
+                - team
+                type: string
+              template:
+                description: |-
+                  Template is the workspace spec that gets applied when using this template.
+                  Owner and ClusterRef are set at creation time by the server.
+                properties:
+                  dotfiles:
+                    description: Dotfiles repo to clone and install.
+                    properties:
+                      installCommand:
+                        description: |-
+                          InstallCommand to run after cloning. If not specified, the controller
+                          looks for install.sh, install, bootstrap.sh, bootstrap, setup.sh, setup, or Makefile.
+                        type: string
+                      url:
+                        description: URL is the Git repository URL for dotfiles.
+                        type: string
+                    required:
+                    - url
+                    type: object
+                  envFrom:
+                    description: EnvFrom workload to copy environment variables from.
+                    properties:
+                      container:
+                        description: Container name within the workload. Defaults
+                          to first container.
+                        type: string
+                      kind:
+                        default: Deployment
+                        description: Kind of the source workload.
+                        enum:
+                        - Deployment
+                        - StatefulSet
+                        type: string
+                      name:
+                        description: Name of the workload to copy env from.
+                        type: string
+                      namespace:
+                        default: default
+                        description: Namespace of the workload in the tenant cluster.
+                          Defaults to "default".
+                        type: string
+                    required:
+                    - name
+                    type: object
+                  image:
+                    description: Image for the workspace container.
+                    type: string
+                  repositories:
+                    description: |-
+                      Repositories is a list of Git repositories to clone into the workspace.
+                      Each repository is cloned as a sibling directory under /workspace/{repo-name}/.
+                    items:
+                      description: WorkspaceRepository configures a Git repository
+                        to clone into the workspace.
+                      properties:
+                        branch:
+                          default: main
+                          description: Branch to checkout.
+                          type: string
+                        name:
+                          description: |-
+                            Name is the directory name under /workspace/ to clone into.
+                            If empty, derived from the repository URL (e.g., "butler-api" from
+                            "https://github.com/butlerdotdev/butler-api").
+                          type: string
+                        secretRef:
+                          description: |-
+                            SecretRef for Git credentials (SSH key or token).
+                            References a Secret in the team namespace on the management cluster.
+                            The controller copies it to the tenant cluster's workspaces namespace.
+                          properties:
+                            name:
+                              description: Name is the name of the resource.
+                              minLength: 1
+                              type: string
+                          required:
+                          - name
+                          type: object
+                        url:
+                          description: URL is the Git repository URL.
+                          type: string
+                      required:
+                      - url
+                      type: object
+                    type: array
+                  repository:
+                    description: |-
+                      Repository to clone into the workspace.
+                      Deprecated: Use Repositories for multi-repo support.
+                    properties:
+                      branch:
+                        default: main
+                        description: Branch to checkout.
+                        type: string
+                      name:
+                        description: |-
+                          Name is the directory name under /workspace/ to clone into.
+                          If empty, derived from the repository URL (e.g., "butler-api" from
+                          "https://github.com/butlerdotdev/butler-api").
+                        type: string
+                      secretRef:
+                        description: |-
+                          SecretRef for Git credentials (SSH key or token).
+                          References a Secret in the team namespace on the management cluster.
+                          The controller copies it to the tenant cluster's workspaces namespace.
+                        properties:
+                          name:
+                            description: Name is the name of the resource.
+                            minLength: 1
+                            type: string
+                        required:
+                        - name
+                        type: object
+                      url:
+                        description: URL is the Git repository URL.
+                        type: string
+                    required:
+                    - url
+                    type: object
+                  resources:
+                    description: Resources for the workspace pod.
+                    properties:
+                      cpu:
+                        default: "2"
+                        description: CPU request and limit for the workspace.
+                        type: string
+                      memory:
+                        default: 4Gi
+                        description: Memory request and limit for the workspace.
+                        type: string
+                    type: object
+                  storageSize:
+                    anyOf:
+                    - type: integer
+                    - type: string
+                    description: StorageSize for the workspace PVC.
+                    pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                    x-kubernetes-int-or-string: true
+                required:
+                - image
+                type: object
+            required:
+            - displayName
+            - template
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources: {}

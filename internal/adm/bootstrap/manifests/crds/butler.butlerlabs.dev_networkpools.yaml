@@ -1,0 +1,223 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.19.0
+  name: networkpools.butler.butlerlabs.dev
+spec:
+  group: butler.butlerlabs.dev
+  names:
+    kind: NetworkPool
+    listKind: NetworkPoolList
+    plural: networkpools
+    shortNames:
+    - np
+    singular: networkpool
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - description: Network CIDR
+      jsonPath: .spec.cidr
+      name: CIDR
+      type: string
+    - description: Available IPs
+      jsonPath: .status.availableIPs
+      name: Available
+      type: integer
+    - description: Allocated IPs
+      jsonPath: .status.allocatedIPs
+      name: Allocated
+      type: integer
+    - description: Total usable IPs
+      jsonPath: .status.totalIPs
+      name: Total
+      type: integer
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: NetworkPool defines a platform-level IP pool for on-prem IPAM.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: NetworkPoolSpec defines the desired state of NetworkPool.
+            properties:
+              cidr:
+                description: CIDR is the network range in CIDR notation.
+                pattern: ^(\d{1,3}\.){3}\d{1,3}/\d{1,2}$
+                type: string
+              reserved:
+                description: Reserved defines ranges excluded from allocation.
+                items:
+                  description: ReservedRange defines a range of IPs excluded from
+                    allocation.
+                  properties:
+                    cidr:
+                      description: CIDR is the reserved range in CIDR notation.
+                      pattern: ^(\d{1,3}\.){3}\d{1,3}/\d{1,2}$
+                      type: string
+                    description:
+                      description: Description explains why this range is reserved.
+                      type: string
+                  required:
+                  - cidr
+                  type: object
+                type: array
+              tenantAllocation:
+                description: |-
+                  TenantAllocation configures the allocatable sub-range and defaults.
+                  If not specified, the entire CIDR (minus reserved ranges) is allocatable.
+                properties:
+                  defaults:
+                    description: Defaults defines default allocation sizes per tenant.
+                    properties:
+                      lbPoolPerTenant:
+                        default: 8
+                        description: LBPoolPerTenant is the default number of load
+                          balancer IPs per tenant.
+                        format: int32
+                        minimum: 1
+                        type: integer
+                      nodesPerTenant:
+                        default: 5
+                        description: NodesPerTenant is the default number of node
+                          IPs per tenant.
+                        format: int32
+                        minimum: 1
+                        type: integer
+                    type: object
+                  end:
+                    description: End is the last allocatable IP address.
+                    type: string
+                  start:
+                    description: Start is the first allocatable IP address.
+                    type: string
+                required:
+                - end
+                - start
+                type: object
+            required:
+            - cidr
+            type: object
+          status:
+            description: NetworkPoolStatus defines the observed state of NetworkPool.
+            properties:
+              allocatedIPs:
+                description: AllocatedIPs is the number of currently allocated IPs.
+                format: int32
+                type: integer
+              allocationCount:
+                description: AllocationCount is the total number of IPAllocations
+                  from this pool.
+                format: int32
+                type: integer
+              availableIPs:
+                description: AvailableIPs is the number of available IPs.
+                format: int32
+                type: integer
+              conditions:
+                description: Conditions represent the latest available observations.
+                items:
+                  description: Condition contains details for one aspect of the current
+                    state of this API Resource.
+                  properties:
+                    lastTransitionTime:
+                      description: |-
+                        lastTransitionTime is the last time the condition transitioned from one status to another.
+                        This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
+                      format: date-time
+                      type: string
+                    message:
+                      description: |-
+                        message is a human readable message indicating details about the transition.
+                        This may be an empty string.
+                      maxLength: 32768
+                      type: string
+                    observedGeneration:
+                      description: |-
+                        observedGeneration represents the .metadata.generation that the condition was set based upon.
+                        For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date
+                        with respect to the current state of the instance.
+                      format: int64
+                      minimum: 0
+                      type: integer
+                    reason:
+                      description: |-
+                        reason contains a programmatic identifier indicating the reason for the condition's last transition.
+                        Producers of specific condition types may define expected values and meanings for this field,
+                        and whether the values are considered a guaranteed API.
+                        The value should be a CamelCase string.
+                        This field may not be empty.
+                      maxLength: 1024
+                      minLength: 1
+                      pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                      type: string
+                    status:
+                      description: status of the condition, one of True, False, Unknown.
+                      enum:
+                      - "True"
+                      - "False"
+                      - Unknown
+                      type: string
+                    type:
+                      description: type of condition in CamelCase or in foo.example.com/CamelCase.
+                      maxLength: 316
+                      pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                      type: string
+                  required:
+                  - lastTransitionTime
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+                x-kubernetes-list-map-keys:
+                - type
+                x-kubernetes-list-type: map
+              fragmentationPercent:
+                description: FragmentationPercent indicates how fragmented the free
+                  space is (0-100).
+                format: int32
+                maximum: 100
+                minimum: 0
+                type: integer
+              largestFreeBlock:
+                description: LargestFreeBlock is the size of the largest contiguous
+                  free block.
+                format: int32
+                type: integer
+              observedGeneration:
+                description: ObservedGeneration is the last observed generation.
+                format: int64
+                type: integer
+              totalIPs:
+                description: TotalIPs is the total number of usable IPs (excluding
+                  reserved).
+                format: int32
+                type: integer
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

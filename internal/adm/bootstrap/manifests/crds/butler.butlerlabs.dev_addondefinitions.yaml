@@ -87,6 +87,10 @@ spec:
                 - backup
                 - gitops
                 - security
+                - dns
+                - database
+                - messaging
+                - service-mesh
                 - other
                 type: string
               chart:
