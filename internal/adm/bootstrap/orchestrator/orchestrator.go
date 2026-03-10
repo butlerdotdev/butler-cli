@@ -1273,16 +1273,22 @@ func (o *Orchestrator) buildAndLoadImages(ctx context.Context, provider string) 
 		return fmt.Errorf("repo root not set - use --repo-root flag")
 	}
 
-	// Define images to build
+	// Define images to build.
+	// useParentContext signals that the repo's go.mod has a replace directive
+	// pointing to a sibling repo (e.g., replace ../butler-api). In that case
+	// the Docker build context must be the parent directory so the sibling
+	// is accessible, and -f points to the repo's Dockerfile.
 	images := []struct {
-		name    string
-		repoDir string
-		image   string
+		name             string
+		repoDir          string
+		image            string
+		useParentContext bool
 	}{
 		{
-			name:    "butler-bootstrap",
-			repoDir: filepath.Join(o.options.RepoRoot, "butler-bootstrap"),
-			image:   "ghcr.io/butlerdotdev/butler-bootstrap:latest",
+			name:             "butler-bootstrap",
+			repoDir:          filepath.Join(o.options.RepoRoot, "butler-bootstrap"),
+			image:            "ghcr.io/butlerdotdev/butler-bootstrap:latest",
+			useParentContext: true,
 		},
 		{
 			name:    fmt.Sprintf("butler-provider-%s", provider),
@@ -1297,10 +1303,36 @@ func (o *Orchestrator) buildAndLoadImages(ctx context.Context, provider string) 
 			return fmt.Errorf("repo directory not found: %s", img.repoDir)
 		}
 
-		// Build Docker image
-		o.logger.Info("building image", "name", img.name, "dir", img.repoDir)
-		buildCmd := exec.CommandContext(ctx, "docker", "build", "-t", img.image, ".")
-		buildCmd.Dir = img.repoDir
+		// Build Docker image. When useParentContext is true, set the build
+		// context to the repo root (parent of all sibling repos) so that
+		// go.mod replace directives like ../butler-api resolve correctly.
+		// A temporary .dockerignore limits the context to only the needed repos.
+		var buildCmd *exec.Cmd
+		if img.useParentContext {
+			repoName := filepath.Base(img.repoDir)
+			dockerfile := filepath.Join(img.repoDir, "Dockerfile")
+
+			// Create a temporary .dockerignore to limit context size.
+			// Only include the target repo and butler-api (for replace directive).
+			dockerignorePath := filepath.Join(o.options.RepoRoot, ".dockerignore")
+			dockerignore := fmt.Sprintf("*\n!%s\n!butler-api\n**/.git\n**/bin\n", repoName)
+			if err := os.WriteFile(dockerignorePath, []byte(dockerignore), 0644); err != nil {
+				return fmt.Errorf("creating .dockerignore: %w", err)
+			}
+			defer os.Remove(dockerignorePath)
+
+			o.logger.Info("building image (parent context)", "name", img.name, "context", o.options.RepoRoot)
+			buildCmd = exec.CommandContext(ctx, "docker", "build",
+				"-t", img.image,
+				"-f", dockerfile,
+				"--build-arg", fmt.Sprintf("REPO_DIR=%s", repoName),
+				".")
+			buildCmd.Dir = o.options.RepoRoot
+		} else {
+			o.logger.Info("building image", "name", img.name, "dir", img.repoDir)
+			buildCmd = exec.CommandContext(ctx, "docker", "build", "-t", img.image, ".")
+			buildCmd.Dir = img.repoDir
+		}
 		buildCmd.Stdout = os.Stdout
 		buildCmd.Stderr = os.Stderr
 
