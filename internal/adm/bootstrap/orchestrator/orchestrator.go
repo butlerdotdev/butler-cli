@@ -188,6 +188,31 @@ func (o *Orchestrator) Run(ctx context.Context, cfg *Config) error {
 		return fmt.Errorf("creating ProviderConfig: %w", err)
 	}
 
+	// For cloud HA: create a load balancer and use its IP as the VIP.
+	// The LB distributes traffic to all CP nodes for true HA.
+	var lbResources *cloudLBResources
+	bootstrapSucceeded := false
+	if isCloudProvider(cfg.Provider) && cfg.Cluster.Topology == "ha" {
+		o.logger.Phase("Creating cloud load balancer for HA control plane")
+		lbIP, res, lbErr := o.createCloudLoadBalancer(ctx, cfg)
+		if lbErr != nil {
+			if res != nil {
+				o.cleanupCloudLoadBalancer(ctx, res)
+			}
+			return fmt.Errorf("creating cloud load balancer: %w", lbErr)
+		}
+		lbResources = res
+		cfg.Network.VIP = lbIP
+		o.logger.Info("Cloud LB endpoint will be used as control plane VIP", "vip", lbIP)
+
+		// Clean up LB if bootstrap fails (LB persists on success)
+		defer func() {
+			if !bootstrapSucceeded && lbResources != nil && !o.options.SkipCleanup {
+				o.cleanupCloudLoadBalancer(ctx, lbResources)
+			}
+		}()
+	}
+
 	// Create ClusterBootstrap CR
 	o.logger.Phase("Creating ClusterBootstrap")
 	if err := o.createClusterBootstrap(ctx, dynamicClient, cfg); err != nil {
@@ -207,6 +232,7 @@ func (o *Orchestrator) Run(ctx context.Context, cfg *Config) error {
 		return fmt.Errorf("saving cluster credentials: %w", err)
 	}
 
+	bootstrapSucceeded = true
 	o.logger.Success("Bootstrap complete!")
 	o.logger.Info("")
 	o.logger.Info("Cluster credentials saved to:")
