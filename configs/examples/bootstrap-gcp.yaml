@@ -1,0 +1,96 @@
+# Butler Management Cluster Bootstrap Configuration
+# Provider: Google Cloud Platform (GCP Compute Engine)
+#
+# Prerequisites:
+#   1. GCP project with Compute Engine API enabled
+#   2. Service account with roles: Compute Admin, Service Account User
+#   3. Service account key JSON file downloaded
+#   4. VPC network and subnet created (or use "default")
+#   5. Firewall rules:
+#      - Allow TCP 6443 (kube-apiserver) between nodes
+#      - Allow TCP 10250 (kubelet) between nodes
+#      - Allow TCP 50000-50001 (Talos apid/trustd) between nodes
+#      - Allow TCP/UDP 4240,8472 (Cilium VXLAN) between nodes
+#      - Allow ICMP between nodes
+#   6. Docker running locally
+
+provider: gcp
+
+cluster:
+  name: butler-gcp-dev
+  topology: single-node    # single-node for initial testing (avoids VIP/MetalLB cloud issues)
+  controlPlane:
+    replicas: 1
+    cpu: 4
+    memoryMB: 8192
+    diskGB: 50
+    extraDisks:
+      - sizeGB: 100         # For Longhorn storage
+
+# For single-node topology, workers are ignored
+# Uncomment for HA topology:
+# workers:
+#   replicas: 2
+#   cpu: 4
+#   memoryMB: 8192
+#   diskGB: 50
+#   extraDisks:
+#     - sizeGB: 100
+
+network:
+  podCIDR: 10.244.0.0/16
+  serviceCIDR: 10.96.0.0/12
+  # VIP: For single-node, this will be the node's internal IP.
+  # For HA topology on GCP, reserve a static internal IP in your subnet
+  # via: gcloud compute addresses create butler-vip --region=us-central1 --subnet=default --addresses=10.128.0.100
+  vip: 10.128.0.100
+
+talos:
+  version: v1.9.0
+  # Talos schematic for GCP - needs platform-specific extensions
+  # Generate at factory.talos.dev with "gcp" platform preset
+  # This is a placeholder - replace with your actual schematic ID
+  schematic: ""
+
+addons:
+  cni:
+    type: cilium
+  storage:
+    type: longhorn
+  loadBalancer:
+    type: metallb
+    # For single-node: use a range within your GCP subnet for internal LB services
+    # These IPs should be reserved/unused in your subnet
+    # Note: MetalLB L2 mode does NOT work on GCP (no gratuitous ARP).
+    # This is a known limitation for the bootstrap phase.
+    # Post-bootstrap, switch to GCP cloud LB for production workloads.
+    addressPool: 10.128.0.200-10.128.0.210
+  gitOps:
+    type: flux
+  capi:
+    enabled: true
+    version: v1.9.0
+  butlerController:
+    enabled: true
+    image: ghcr.io/butlerdotdev/butler-controller
+
+providerConfig:
+  gcp:
+    # Path to GCP service account key JSON file
+    serviceAccountKeyPath: ~/.butler/gcp-sa-key.json
+
+    # GCP project ID
+    projectID: ""            # REQUIRED: your GCP project ID
+
+    # Region and zone
+    region: us-central1
+    zone: us-central1-a      # Defaults to {region}-a if omitted
+
+    # VPC networking
+    network: default          # VPC network name
+    subnetwork: default       # Subnet name (same as network for auto-mode VPCs)
+
+    # VM configuration (optional - defaults used by provider controller)
+    # machineType: n2-standard-4
+    # imageProject: ubuntu-os-cloud
+    # imageFamily: ubuntu-2204-lts

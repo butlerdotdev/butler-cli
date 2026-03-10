@@ -51,6 +51,7 @@ Example:
 	// Register provider subcommands
 	cmd.AddCommand(NewHarvesterCmd(logger))
 	cmd.AddCommand(NewNutanixCmd(logger))
+	cmd.AddCommand(NewGCPCmd(logger))
 	// TODO: Add proxmox commands
 
 	return cmd

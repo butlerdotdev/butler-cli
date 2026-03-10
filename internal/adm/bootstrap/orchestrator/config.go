@@ -231,6 +231,9 @@ type ProviderConfig struct {
 
 	// Proxmox contains Proxmox-specific settings
 	Proxmox *ProxmoxProviderConfig `mapstructure:"proxmox,omitempty"`
+
+	// GCP contains GCP-specific settings
+	GCP *GCPProviderConfig `mapstructure:"gcp,omitempty"`
 }
 
 // HarvesterProviderConfig contains Harvester-specific settings
@@ -314,6 +317,36 @@ type ProxmoxProviderConfig struct {
 	HostAliases []string `mapstructure:"hostAliases,omitempty"`
 }
 
+// GCPProviderConfig contains GCP-specific settings
+type GCPProviderConfig struct {
+	// ServiceAccountKeyPath is the path to the GCP service account key JSON file
+	ServiceAccountKeyPath string `mapstructure:"serviceAccountKeyPath"`
+
+	// ProjectID is the GCP project ID
+	ProjectID string `mapstructure:"projectID"`
+
+	// Region is the GCP region (e.g., "us-central1")
+	Region string `mapstructure:"region"`
+
+	// Zone is the GCP zone (e.g., "us-central1-a"). Defaults to "{region}-a"
+	Zone string `mapstructure:"zone,omitempty"`
+
+	// Network is the VPC network name
+	Network string `mapstructure:"network"`
+
+	// Subnetwork is the VPC subnetwork name
+	Subnetwork string `mapstructure:"subnetwork,omitempty"`
+
+	// MachineType is the default GCE machine type (e.g., "n2-standard-4")
+	MachineType string `mapstructure:"machineType,omitempty"`
+
+	// ImageProject is the GCP project containing the source image
+	ImageProject string `mapstructure:"imageProject,omitempty"`
+
+	// ImageFamily is the image family (e.g., "ubuntu-2204-lts")
+	ImageFamily string `mapstructure:"imageFamily,omitempty"`
+}
+
 // LoadConfig loads the bootstrap configuration from viper
 func LoadConfig() (*Config, error) {
 	var cfg Config
@@ -383,6 +416,16 @@ func LoadConfig() (*Config, error) {
 	if cfg.Provider == "nutanix" && cfg.ProviderConfig.Nutanix != nil {
 		if cfg.ProviderConfig.Nutanix.Port == 0 {
 			cfg.ProviderConfig.Nutanix.Port = 9440
+		}
+	}
+
+	// GCP defaults
+	if cfg.Provider == "gcp" && cfg.ProviderConfig.GCP != nil {
+		if cfg.ProviderConfig.GCP.Zone == "" && cfg.ProviderConfig.GCP.Region != "" {
+			cfg.ProviderConfig.GCP.Zone = cfg.ProviderConfig.GCP.Region + "-a"
+		}
+		if cfg.ProviderConfig.GCP.ServiceAccountKeyPath != "" {
+			cfg.ProviderConfig.GCP.ServiceAccountKeyPath = expandPath(cfg.ProviderConfig.GCP.ServiceAccountKeyPath)
 		}
 	}
 

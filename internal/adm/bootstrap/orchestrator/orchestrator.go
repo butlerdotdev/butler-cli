@@ -730,6 +730,28 @@ func (o *Orchestrator) createNamespaceAndSecrets(ctx context.Context, clientset 
 	case "proxmox":
 		// TODO: Create Proxmox credentials secret
 		o.logger.Debug("Proxmox credentials not yet implemented")
+
+	case "gcp":
+		// Read service account key file
+		saKeyData, err := os.ReadFile(cfg.ProviderConfig.GCP.ServiceAccountKeyPath)
+		if err != nil {
+			return fmt.Errorf("reading GCP service account key: %w", err)
+		}
+
+		secret := &corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      cfg.Cluster.Name + "-gcp-credentials",
+				Namespace: butlerNamespace,
+			},
+			Type: corev1.SecretTypeOpaque,
+			Data: map[string][]byte{
+				"serviceAccountKey": saKeyData,
+			},
+		}
+		_, err = clientset.CoreV1().Secrets(butlerNamespace).Create(ctx, secret, metav1.CreateOptions{})
+		if err != nil && !strings.Contains(err.Error(), "already exists") {
+			return fmt.Errorf("creating GCP secret: %w", err)
+		}
 	}
 
 	o.logger.Success("Namespace and secrets created")
@@ -816,6 +838,33 @@ func (o *Orchestrator) buildProviderConfigUnstructured(cfg *Config) *unstructure
 		}
 	case "proxmox":
 		// TODO: Proxmox ProviderConfig not yet implemented
+
+	case "gcp":
+		spec["credentialsRef"] = map[string]interface{}{
+			"name":      cfg.Cluster.Name + "-gcp-credentials",
+			"namespace": butlerNamespace,
+		}
+		gcpSpec := map[string]interface{}{
+			"projectID": cfg.ProviderConfig.GCP.ProjectID,
+			"region":    cfg.ProviderConfig.GCP.Region,
+			"network":   cfg.ProviderConfig.GCP.Network,
+		}
+		if cfg.ProviderConfig.GCP.Subnetwork != "" {
+			gcpSpec["subnetwork"] = cfg.ProviderConfig.GCP.Subnetwork
+		}
+		if cfg.ProviderConfig.GCP.Zone != "" {
+			gcpSpec["zone"] = cfg.ProviderConfig.GCP.Zone
+		}
+		if cfg.ProviderConfig.GCP.MachineType != "" {
+			gcpSpec["machineType"] = cfg.ProviderConfig.GCP.MachineType
+		}
+		if cfg.ProviderConfig.GCP.ImageProject != "" {
+			gcpSpec["imageProject"] = cfg.ProviderConfig.GCP.ImageProject
+		}
+		if cfg.ProviderConfig.GCP.ImageFamily != "" {
+			gcpSpec["imageFamily"] = cfg.ProviderConfig.GCP.ImageFamily
+		}
+		spec["gcp"] = gcpSpec
 	}
 
 	pc := &unstructured.Unstructured{
