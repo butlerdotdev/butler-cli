@@ -52,7 +52,8 @@ Example:
 	cmd.AddCommand(NewHarvesterCmd(logger))
 	cmd.AddCommand(NewNutanixCmd(logger))
 	cmd.AddCommand(NewGCPCmd(logger))
-	// TODO: Add proxmox commands
+	cmd.AddCommand(NewAWSCmd(logger))
+	cmd.AddCommand(NewAzureCmd(logger))
 
 	return cmd
 }

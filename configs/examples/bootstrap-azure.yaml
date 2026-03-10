@@ -1,0 +1,49 @@
+# Bootstrap configuration for Azure
+# Usage: butleradm bootstrap azure --config bootstrap-azure.yaml
+
+provider: azure
+
+cluster:
+  name: butler-mgmt
+  topology: single-node
+  controlPlane:
+    replicas: 1
+    cpu: 4
+    memoryMB: 16384
+    diskGB: 100
+
+network:
+  # No VIP for cloud providers — first CP node's public IP is used
+  podCIDR: "10.244.0.0/16"
+  serviceCIDR: "10.96.0.0/12"
+
+talos:
+  version: v1.9.0
+
+addons:
+  cni:
+    type: cilium
+  storage:
+    type: longhorn
+  # No loadBalancer block — cloud providers don't use MetalLB
+  gitops:
+    type: flux
+
+providerConfig:
+  azure:
+    # Azure service principal credentials
+    clientID: "00000000-0000-0000-0000-000000000000"
+    clientSecret: "your-client-secret"
+    tenantID: "00000000-0000-0000-0000-000000000000"
+    subscriptionID: "00000000-0000-0000-0000-000000000000"
+
+    # Resource group and location (must be pre-provisioned)
+    resourceGroup: "butler-rg"
+    location: "eastus"
+
+    # Networking (must be pre-provisioned)
+    vnetName: "butler-vnet"
+    subnetName: "default"
+
+    # Optional: override VM size (default: Standard_D4s_v3)
+    # vmSize: "Standard_D4s_v3"

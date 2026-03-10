@@ -752,6 +752,42 @@ func (o *Orchestrator) createNamespaceAndSecrets(ctx context.Context, clientset 
 		if err != nil && !strings.Contains(err.Error(), "already exists") {
 			return fmt.Errorf("creating GCP secret: %w", err)
 		}
+
+	case "aws":
+		secret := &corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      cfg.Cluster.Name + "-aws-credentials",
+				Namespace: butlerNamespace,
+			},
+			Type: corev1.SecretTypeOpaque,
+			StringData: map[string]string{
+				"accessKeyID":     cfg.ProviderConfig.AWS.AccessKeyID,
+				"secretAccessKey": cfg.ProviderConfig.AWS.SecretAccessKey,
+			},
+		}
+		_, err = clientset.CoreV1().Secrets(butlerNamespace).Create(ctx, secret, metav1.CreateOptions{})
+		if err != nil && !strings.Contains(err.Error(), "already exists") {
+			return fmt.Errorf("creating AWS secret: %w", err)
+		}
+
+	case "azure":
+		secret := &corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      cfg.Cluster.Name + "-azure-credentials",
+				Namespace: butlerNamespace,
+			},
+			Type: corev1.SecretTypeOpaque,
+			StringData: map[string]string{
+				"clientID":       cfg.ProviderConfig.Azure.ClientID,
+				"clientSecret":   cfg.ProviderConfig.Azure.ClientSecret,
+				"tenantID":       cfg.ProviderConfig.Azure.TenantID,
+				"subscriptionID": cfg.ProviderConfig.Azure.SubscriptionID,
+			},
+		}
+		_, err = clientset.CoreV1().Secrets(butlerNamespace).Create(ctx, secret, metav1.CreateOptions{})
+		if err != nil && !strings.Contains(err.Error(), "already exists") {
+			return fmt.Errorf("creating Azure secret: %w", err)
+		}
 	}
 
 	o.logger.Success("Namespace and secrets created")
@@ -865,6 +901,45 @@ func (o *Orchestrator) buildProviderConfigUnstructured(cfg *Config) *unstructure
 			gcpSpec["imageFamily"] = cfg.ProviderConfig.GCP.ImageFamily
 		}
 		spec["gcp"] = gcpSpec
+
+	case "aws":
+		spec["credentialsRef"] = map[string]interface{}{
+			"name":      cfg.Cluster.Name + "-aws-credentials",
+			"namespace": butlerNamespace,
+		}
+		awsSpec := map[string]interface{}{
+			"region": cfg.ProviderConfig.AWS.Region,
+		}
+		if cfg.ProviderConfig.AWS.VPCID != "" {
+			awsSpec["vpcID"] = cfg.ProviderConfig.AWS.VPCID
+		}
+		if cfg.ProviderConfig.AWS.SubnetID != "" {
+			awsSpec["subnetIDs"] = []interface{}{cfg.ProviderConfig.AWS.SubnetID}
+		}
+		if cfg.ProviderConfig.AWS.SecurityGroupID != "" {
+			awsSpec["securityGroupIDs"] = []interface{}{cfg.ProviderConfig.AWS.SecurityGroupID}
+		}
+		spec["aws"] = awsSpec
+
+	case "azure":
+		spec["credentialsRef"] = map[string]interface{}{
+			"name":      cfg.Cluster.Name + "-azure-credentials",
+			"namespace": butlerNamespace,
+		}
+		azureSpec := map[string]interface{}{
+			"subscriptionID": cfg.ProviderConfig.Azure.SubscriptionID,
+			"resourceGroup":  cfg.ProviderConfig.Azure.ResourceGroup,
+		}
+		if cfg.ProviderConfig.Azure.Location != "" {
+			azureSpec["location"] = cfg.ProviderConfig.Azure.Location
+		}
+		if cfg.ProviderConfig.Azure.VNetName != "" {
+			azureSpec["vnetName"] = cfg.ProviderConfig.Azure.VNetName
+		}
+		if cfg.ProviderConfig.Azure.SubnetName != "" {
+			azureSpec["subnetName"] = cfg.ProviderConfig.Azure.SubnetName
+		}
+		spec["azure"] = azureSpec
 	}
 
 	pc := &unstructured.Unstructured{
@@ -951,11 +1026,16 @@ func (o *Orchestrator) buildClusterBootstrapUnstructured(cfg *Config) *unstructu
 					"namespace": butlerNamespace,
 				},
 				"cluster": clusterSpec,
-				"network": map[string]interface{}{
-					"podCIDR":     cfg.Network.PodCIDR,
-					"serviceCIDR": cfg.Network.ServiceCIDR,
-					"vip":         cfg.Network.VIP,
-				},
+				"network": func() map[string]interface{} {
+					n := map[string]interface{}{
+						"podCIDR":     cfg.Network.PodCIDR,
+						"serviceCIDR": cfg.Network.ServiceCIDR,
+					}
+					if cfg.Network.VIP != "" {
+						n["vip"] = cfg.Network.VIP
+					}
+					return n
+				}(),
 				"talos": map[string]interface{}{
 					"version":   cfg.Talos.Version,
 					"schematic": cfg.Talos.Schematic,
