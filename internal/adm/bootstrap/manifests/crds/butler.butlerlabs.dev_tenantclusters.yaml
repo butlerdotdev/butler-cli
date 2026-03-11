@@ -389,6 +389,26 @@ spec:
                   InfrastructureOverride allows overriding provider-specific settings.
                   These take precedence over ProviderConfig defaults.
                 properties:
+                  gcp:
+                    description: GCP contains GCP-specific overrides.
+                    properties:
+                      image:
+                        description: Image overrides the default image.
+                        type: string
+                      imageFamily:
+                        description: ImageFamily overrides the default image family.
+                        type: string
+                      machineType:
+                        description: MachineType overrides the default GCE machine
+                          type.
+                        type: string
+                      subnetwork:
+                        description: Subnetwork overrides the default subnetwork.
+                        type: string
+                      zone:
+                        description: Zone overrides the default GCP compute zone.
+                        type: string
+                    type: object
                   harvester:
                     description: Harvester contains Harvester-specific overrides.
                     properties:

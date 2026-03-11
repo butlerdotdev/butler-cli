@@ -27,13 +27,13 @@ rules:
     verbs: ["get", "list", "watch"]
   # Butler CRDs
   - apiGroups: ["butler.butlerlabs.dev"]
-    resources: ["machinerequests", "providerconfigs"]
+    resources: ["machinerequests", "providerconfigs", "butlerconfigs", "imagesyncs"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
   - apiGroups: ["butler.butlerlabs.dev"]
-    resources: ["machinerequests/status"]
+    resources: ["machinerequests/status", "imagesyncs/status"]
     verbs: ["get", "update", "patch"]
   - apiGroups: ["butler.butlerlabs.dev"]
-    resources: ["machinerequests/finalizers"]
+    resources: ["machinerequests/finalizers", "imagesyncs/finalizers"]
     verbs: ["update"]
   # Coordination for leader election
   - apiGroups: ["coordination.k8s.io"]

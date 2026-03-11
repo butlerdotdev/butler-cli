@@ -920,12 +920,18 @@ func (o *Orchestrator) buildProviderConfigUnstructured(cfg *Config) *unstructure
 		if cfg.ProviderConfig.GCP.MachineType != "" {
 			gcpSpec["machineType"] = cfg.ProviderConfig.GCP.MachineType
 		}
-		if cfg.ProviderConfig.GCP.ImageProject != "" {
-			gcpSpec["imageProject"] = cfg.ProviderConfig.GCP.ImageProject
+		// Default to official Talos cloud images for bootstrap
+		imageProject := cfg.ProviderConfig.GCP.ImageProject
+		if imageProject == "" {
+			imageProject = "talos-cloud"
 		}
-		if cfg.ProviderConfig.GCP.ImageFamily != "" {
-			gcpSpec["imageFamily"] = cfg.ProviderConfig.GCP.ImageFamily
+		gcpSpec["imageProject"] = imageProject
+
+		imageFamily := cfg.ProviderConfig.GCP.ImageFamily
+		if imageFamily == "" {
+			imageFamily = "talos-stable"
 		}
+		gcpSpec["imageFamily"] = imageFamily
 		spec["gcp"] = gcpSpec
 
 	case "aws":
@@ -1066,31 +1072,7 @@ func (o *Orchestrator) buildClusterBootstrapUnstructured(cfg *Config) *unstructu
 					"version":   cfg.Talos.Version,
 					"schematic": cfg.Talos.Schematic,
 				},
-				"addons": map[string]interface{}{
-					"cni": map[string]interface{}{
-						"type": cfg.Addons.CNI.Type,
-					},
-					"storage": map[string]interface{}{
-						"type": cfg.Addons.Storage.Type,
-					},
-					"loadBalancer": map[string]interface{}{
-						"type":        cfg.Addons.LoadBalancer.Type,
-						"addressPool": cfg.Addons.LoadBalancer.AddressPool,
-					},
-					"gitOps": map[string]interface{}{
-						"type": cfg.Addons.GitOps.Type,
-					},
-					"capi": map[string]interface{}{
-						"enabled": cfg.Addons.CAPI.Enabled,
-						"version": cfg.Addons.CAPI.Version,
-					},
-					"butlerController": map[string]interface{}{
-						"enabled": cfg.Addons.ButlerController.Enabled,
-						"version": cfg.Addons.ButlerController.Version,
-						"image":   cfg.Addons.ButlerController.Image,
-					},
-					"console": buildConsoleConfig(cfg.Addons.Console),
-				},
+				"addons": buildAddonsConfig(cfg),
 			},
 		},
 	}
@@ -1357,6 +1339,41 @@ func (o *Orchestrator) buildAndLoadImages(ctx context.Context, provider string) 
 }
 
 // buildConsoleConfig builds the console addon config for the ClusterBootstrap CR
+func buildAddonsConfig(cfg *Config) map[string]interface{} {
+	addons := map[string]interface{}{
+		"cni": map[string]interface{}{
+			"type": cfg.Addons.CNI.Type,
+		},
+		"storage": map[string]interface{}{
+			"type": cfg.Addons.Storage.Type,
+		},
+		"loadBalancer": map[string]interface{}{
+			"type":        cfg.Addons.LoadBalancer.Type,
+			"addressPool": cfg.Addons.LoadBalancer.AddressPool,
+		},
+		"capi": map[string]interface{}{
+			"enabled": cfg.Addons.CAPI.Enabled,
+			"version": cfg.Addons.CAPI.Version,
+		},
+		"butlerController": map[string]interface{}{
+			"enabled": cfg.Addons.ButlerController.Enabled,
+			"version": cfg.Addons.ButlerController.Version,
+			"image":   cfg.Addons.ButlerController.Image,
+		},
+		"console": buildConsoleConfig(cfg.Addons.Console),
+	}
+
+	// Only include gitOps if explicitly configured
+	if cfg.Addons.GitOps.Type != "" {
+		addons["gitOps"] = map[string]interface{}{
+			"type":    cfg.Addons.GitOps.Type,
+			"enabled": true,
+		}
+	}
+
+	return addons
+}
+
 func buildConsoleConfig(cfg ConsoleConfig) map[string]interface{} {
 	if !cfg.Enabled {
 		return map[string]interface{}{

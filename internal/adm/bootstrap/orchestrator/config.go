@@ -436,9 +436,8 @@ func LoadConfig() (*Config, error) {
 	if cfg.Addons.LoadBalancer.Type == "" {
 		cfg.Addons.LoadBalancer.Type = "metallb"
 	}
-	if cfg.Addons.GitOps.Type == "" {
-		cfg.Addons.GitOps.Type = "flux"
-	}
+	// GitOps is not enabled during bootstrap. It can be configured
+	// post-bootstrap via ButlerConfig or TenantCluster addons.
 
 	// Topology defaults and validation
 	if cfg.Cluster.Topology == "" {

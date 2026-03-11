@@ -119,6 +119,7 @@ spec:
                   - harvester: "kubeconfig" (Harvester kubeconfig)
                   - nutanix: "username", "password"
                   - proxmox: "username", "password" or "token"
+                  - gcp: "serviceAccountKey" (JSON service account key)
                 properties:
                   key:
                     description: |-
@@ -142,6 +143,24 @@ spec:
                   GCP contains GCP-specific configuration.
                   Required when provider is "gcp".
                 properties:
+                  image:
+                    description: |-
+                      Image is the specific image name to use.
+                      Takes precedence over ImageFamily.
+                    type: string
+                  imageFamily:
+                    description: |-
+                      ImageFamily is the image family to use (e.g., "ubuntu-2204-lts").
+                      Ignored if Image is specified.
+                    type: string
+                  imageProject:
+                    description: ImageProject is the GCP project containing the source
+                      image (e.g., "ubuntu-os-cloud").
+                    type: string
+                  machineType:
+                    description: MachineType is the default GCE machine type (e.g.,
+                      "n2-standard-4").
+                    type: string
                   network:
                     description: Network is the VPC network name.
                     type: string
@@ -149,10 +168,25 @@ spec:
                     description: ProjectID is the GCP project identifier.
                     type: string
                   region:
-                    description: Region is the GCP region.
+                    description: Region is the GCP region (e.g., "us-central1").
+                    type: string
+                  serviceAccount:
+                    description: ServiceAccount is the GCE service account email for
+                      VM instances.
                     type: string
                   subnetwork:
                     description: Subnetwork is the subnetwork name.
+                    type: string
+                  tags:
+                    description: Tags are network tags applied to VM instances for
+                      firewall rules.
+                    items:
+                      type: string
+                    type: array
+                  zone:
+                    description: |-
+                      Zone is the GCP compute zone (e.g., "us-central1-a").
+                      If not specified, defaults to "{region}-a".
                     type: string
                 required:
                 - projectID
