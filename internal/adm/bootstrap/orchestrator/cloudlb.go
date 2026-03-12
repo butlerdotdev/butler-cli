@@ -94,8 +94,6 @@ func (o *Orchestrator) cleanupCloudLoadBalancer(ctx context.Context, res *cloudL
 	}
 }
 
-// --- GCP Load Balancer ---
-
 func (o *Orchestrator) createGCPLoadBalancer(ctx context.Context, cfg *Config) (string, *cloudLBResources, error) {
 	gcp := cfg.ProviderConfig.GCP
 	if gcp == nil {
@@ -208,8 +206,6 @@ func (o *Orchestrator) cleanupGCPLoadBalancer(ctx context.Context, res *cloudLBR
 			"--region", res.gcpRegion, "--project", res.gcpProject, "--quiet")
 	}
 }
-
-// --- AWS Load Balancer ---
 
 func (o *Orchestrator) createAWSLoadBalancer(ctx context.Context, cfg *Config) (string, *cloudLBResources, error) {
 	aws := cfg.ProviderConfig.AWS
@@ -336,8 +332,6 @@ func (o *Orchestrator) cleanupAWSLoadBalancer(ctx context.Context, res *cloudLBR
 	}
 }
 
-// --- Azure Load Balancer ---
-
 func (o *Orchestrator) createAzureLoadBalancer(ctx context.Context, cfg *Config) (string, *cloudLBResources, error) {
 	az := cfg.ProviderConfig.Azure
 	if az == nil {
@@ -437,8 +431,6 @@ func (o *Orchestrator) cleanupAzureLoadBalancer(ctx context.Context, res *cloudL
 			"--name", res.publicIPName, "--resource-group", res.azureResourceGroup, "--yes")
 	}
 }
-
-// --- CLI Helpers ---
 
 func (o *Orchestrator) runCloudCLI(ctx context.Context, name string, args ...string) error {
 	cmd := exec.CommandContext(ctx, name, args...)
