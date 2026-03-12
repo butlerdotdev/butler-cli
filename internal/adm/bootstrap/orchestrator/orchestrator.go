@@ -920,18 +920,15 @@ func (o *Orchestrator) buildProviderConfigUnstructured(cfg *Config) *unstructure
 		if cfg.ProviderConfig.GCP.MachineType != "" {
 			gcpSpec["machineType"] = cfg.ProviderConfig.GCP.MachineType
 		}
-		// Default to official Talos cloud images for bootstrap
-		imageProject := cfg.ProviderConfig.GCP.ImageProject
-		if imageProject == "" {
-			imageProject = "talos-cloud"
+		if cfg.ProviderConfig.GCP.ImageProject != "" {
+			gcpSpec["imageProject"] = cfg.ProviderConfig.GCP.ImageProject
 		}
-		gcpSpec["imageProject"] = imageProject
-
-		imageFamily := cfg.ProviderConfig.GCP.ImageFamily
-		if imageFamily == "" {
-			imageFamily = "talos-stable"
+		if cfg.ProviderConfig.GCP.ImageFamily != "" {
+			gcpSpec["imageFamily"] = cfg.ProviderConfig.GCP.ImageFamily
 		}
-		gcpSpec["imageFamily"] = imageFamily
+		if cfg.ProviderConfig.GCP.Image != "" {
+			gcpSpec["image"] = cfg.ProviderConfig.GCP.Image
+		}
 		spec["gcp"] = gcpSpec
 
 	case "aws":
@@ -1338,7 +1335,10 @@ func (o *Orchestrator) buildAndLoadImages(ctx context.Context, provider string) 
 	return nil
 }
 
-// buildConsoleConfig builds the console addon config for the ClusterBootstrap CR
+// buildAddonsConfig builds the addons config for the ClusterBootstrap CR.
+// Fields with CRD-level defaults (butlerController, capi) are only included
+// when explicitly configured. Omitting them lets the CRD *bool defaults
+// (nil = enabled) take effect instead of writing Go's bool zero value (false).
 func buildAddonsConfig(cfg *Config) map[string]interface{} {
 	addons := map[string]interface{}{
 		"cni": map[string]interface{}{
@@ -1351,16 +1351,38 @@ func buildAddonsConfig(cfg *Config) map[string]interface{} {
 			"type":        cfg.Addons.LoadBalancer.Type,
 			"addressPool": cfg.Addons.LoadBalancer.AddressPool,
 		},
-		"capi": map[string]interface{}{
-			"enabled": cfg.Addons.CAPI.Enabled,
+	}
+
+	// Only include console when the user explicitly configured it.
+	// The CRD defaults Enabled to true via *bool, so omitting this section
+	// enables butler-console by default.
+	if cfg.Addons.Console.Enabled || cfg.Addons.Console.Version != "" {
+		addons["console"] = buildConsoleConfig(cfg.Addons.Console)
+	}
+
+	// Only include butlerController when the user explicitly configured it.
+	// The CRD defaults Enabled to true via *bool, so omitting this section
+	// enables butler-controller by default.
+	if cfg.Addons.ButlerController.Version != "" || cfg.Addons.ButlerController.Image != "" {
+		bc := map[string]interface{}{
+			"enabled": true,
+		}
+		if cfg.Addons.ButlerController.Version != "" {
+			bc["version"] = cfg.Addons.ButlerController.Version
+		}
+		if cfg.Addons.ButlerController.Image != "" {
+			bc["image"] = cfg.Addons.ButlerController.Image
+		}
+		addons["butlerController"] = bc
+	}
+
+	// Only include capi when the user explicitly configured it.
+	// The CRD defaults Enabled to true via *bool.
+	if cfg.Addons.CAPI.Version != "" {
+		addons["capi"] = map[string]interface{}{
+			"enabled": true,
 			"version": cfg.Addons.CAPI.Version,
-		},
-		"butlerController": map[string]interface{}{
-			"enabled": cfg.Addons.ButlerController.Enabled,
-			"version": cfg.Addons.ButlerController.Version,
-			"image":   cfg.Addons.ButlerController.Image,
-		},
-		"console": buildConsoleConfig(cfg.Addons.Console),
+		}
 	}
 
 	// Only include gitOps if explicitly configured

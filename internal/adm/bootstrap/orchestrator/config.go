@@ -351,6 +351,9 @@ type GCPProviderConfig struct {
 
 	// ImageFamily is the image family (e.g., "ubuntu-2204-lts")
 	ImageFamily string `mapstructure:"imageFamily,omitempty"`
+
+	// Image is the specific image name. Takes precedence over ImageFamily.
+	Image string `mapstructure:"image,omitempty"`
 }
 
 // AWSProviderConfig contains AWS-specific settings
