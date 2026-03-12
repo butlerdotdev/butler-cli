@@ -38,10 +38,12 @@ type cloudLBResources struct {
 	fwdRule     string
 
 	// AWS resources
-	awsRegion      string
-	nlbARN         string
-	targetGroupARN string
-	listenerARN    string
+	awsRegion         string
+	awsAccessKeyID    string
+	awsSecretAccessKey string
+	nlbARN            string
+	targetGroupARN    string
+	listenerARN       string
 
 	// Azure resources
 	azureResourceGroup string
@@ -216,9 +218,11 @@ func (o *Orchestrator) createAWSLoadBalancer(ctx context.Context, cfg *Config) (
 	}
 
 	res := &cloudLBResources{
-		provider:    "aws",
-		clusterName: cfg.Cluster.Name,
-		awsRegion:   aws.Region,
+		provider:           "aws",
+		clusterName:        cfg.Cluster.Name,
+		awsRegion:          aws.Region,
+		awsAccessKeyID:     aws.AccessKeyID,
+		awsSecretAccessKey: aws.SecretAccessKey,
 	}
 
 	name := cfg.Cluster.Name
@@ -310,6 +314,8 @@ func (o *Orchestrator) createAWSLoadBalancer(ctx context.Context, cfg *Config) (
 
 func (o *Orchestrator) cleanupAWSLoadBalancer(ctx context.Context, res *cloudLBResources) {
 	envPrefix := []string{
+		"AWS_ACCESS_KEY_ID=" + res.awsAccessKeyID,
+		"AWS_SECRET_ACCESS_KEY=" + res.awsSecretAccessKey,
 		"AWS_DEFAULT_REGION=" + res.awsRegion,
 	}
 

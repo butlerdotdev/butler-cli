@@ -48,10 +48,11 @@ func NewGCPCmd(logger *log.Logger) *cobra.Command {
 GCP Compute Engine provides scalable virtual machines for running
 Kubernetes clusters. Butler provisions Talos Linux VMs with:
   - Cilium CNI (kube-proxy replacement)
-  - kube-vip for control plane HA
   - Longhorn distributed storage
-  - MetalLB for LoadBalancer services
   - FluxCD for GitOps
+
+Cloud providers do NOT use kube-vip or MetalLB. The first control plane
+node's public IP serves as the API endpoint.
 
 Prerequisites:
   - Docker running locally
