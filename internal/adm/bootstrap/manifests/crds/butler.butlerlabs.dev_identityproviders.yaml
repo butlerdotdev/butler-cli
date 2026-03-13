@@ -109,6 +109,44 @@ spec:
                       EmailClaim is the JWT claim containing the user's email.
                       Defaults to "email".
                     type: string
+                  googleWorkspace:
+                    description: |-
+                      GoogleWorkspace contains optional Google Workspace Admin SDK configuration
+                      for fetching user group memberships. Required because Google OIDC tokens
+                      don't include groups by default.
+                    properties:
+                      adminEmail:
+                        description: |-
+                          AdminEmail is the email address of a Google Workspace super admin.
+                          The service account will impersonate this user to access the Admin SDK.
+                        format: email
+                        type: string
+                      serviceAccountSecretRef:
+                        description: |-
+                          ServiceAccountSecretRef references a Secret containing the service account
+                          JSON key file. The Secret must contain a key named "service-account.json".
+                        properties:
+                          key:
+                            description: |-
+                              Key is the key within the Secret to reference.
+                              If not specified, the entire Secret data is used.
+                            type: string
+                          name:
+                            description: Name is the name of the Secret.
+                            minLength: 1
+                            type: string
+                          namespace:
+                            description: |-
+                              Namespace is the namespace of the Secret.
+                              If not specified, the namespace of the referencing resource is used.
+                            type: string
+                        required:
+                        - name
+                        type: object
+                    required:
+                    - adminEmail
+                    - serviceAccountSecretRef
+                    type: object
                   groupsClaim:
                     default: groups
                     description: |-

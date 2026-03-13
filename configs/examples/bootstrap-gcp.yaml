@@ -1,0 +1,66 @@
+# Bootstrap configuration for GCP
+# Usage: butleradm bootstrap gcp --config bootstrap-gcp.yaml
+#
+# Prerequisites:
+#   1. GCP project with Compute Engine API enabled
+#   2. Service account with roles: Compute Admin, Service Account User
+#   3. Service account key JSON file downloaded
+#   4. VPC network and subnet created (or use "default")
+#   5. Firewall rules allowing between nodes:
+#      - TCP 6443 (kube-apiserver)
+#      - TCP 50000-50001 (Talos apid/trustd)
+#      - TCP 4240, UDP 8472 (Cilium)
+#      - ICMP
+#   6. Docker running locally
+
+provider: gcp
+
+cluster:
+  name: butler-gcp-dev
+  topology: single-node
+  controlPlane:
+    replicas: 1
+    cpu: 4
+    memoryMB: 8192
+    diskGB: 50
+    extraDisks:
+      - sizeGB: 100         # For Longhorn storage
+
+network:
+  # No VIP for cloud providers — first CP node's public IP is used.
+  # Cloud networks don't support gratuitous ARP (kube-vip is skipped).
+  podCIDR: 10.244.0.0/16
+  serviceCIDR: 10.96.0.0/12
+
+talos:
+  version: v1.9.0
+
+addons:
+  cni:
+    type: cilium
+  storage:
+    type: longhorn
+  # No loadBalancer block — cloud providers don't use MetalLB
+  gitOps:
+    type: flux
+
+providerConfig:
+  gcp:
+    # Path to GCP service account key JSON file
+    serviceAccountKeyPath: ~/.butler/gcp-sa-key.json
+
+    # GCP project ID
+    projectID: ""            # REQUIRED: your GCP project ID
+
+    # Region and zone
+    region: us-central1
+    zone: us-central1-a      # Defaults to {region}-a if omitted
+
+    # VPC networking
+    network: default          # VPC network name
+    subnetwork: default       # Subnet name (same as network for auto-mode VPCs)
+
+    # Optional: override VM configuration
+    # machineType: n2-standard-4
+    # imageProject: ubuntu-os-cloud
+    # imageFamily: ubuntu-2204-lts

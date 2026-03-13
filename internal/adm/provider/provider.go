@@ -127,6 +127,10 @@ func runList(ctx context.Context, logger *log.Logger, opts *listOptions) error {
 			endpoint = "(in-cluster)"
 		case "proxmox":
 			endpoint = getNestedString(pc.Object, "spec", "proxmox", "endpoint")
+		case "gcp":
+			projectID := getNestedString(pc.Object, "spec", "gcp", "projectID")
+			region := getNestedString(pc.Object, "spec", "gcp", "region")
+			endpoint = fmt.Sprintf("%s/%s", projectID, region)
 		default:
 			endpoint = "-"
 		}
@@ -212,6 +216,8 @@ func runValidate(ctx context.Context, logger *log.Logger, name string, opts *val
 		validationErr = validateHarvester(ctx, c, pc, opts, logger)
 	case "proxmox":
 		validationErr = validateProxmox(ctx, c, pc, opts, logger)
+	case "gcp":
+		validationErr = validateGCP(ctx, c, pc, opts, logger)
 	default:
 		return fmt.Errorf("unknown provider type: %s", provider)
 	}
@@ -420,6 +426,41 @@ func validateProxmox(ctx context.Context, c *client.Client, pc *unstructured.Uns
 	return nil
 }
 
+func validateGCP(ctx context.Context, c *client.Client, pc *unstructured.Unstructured, opts *validateOptions, logger *log.Logger) error {
+	projectID := getNestedString(pc.Object, "spec", "gcp", "projectID")
+	region := getNestedString(pc.Object, "spec", "gcp", "region")
+	if projectID == "" {
+		return fmt.Errorf("gcp projectID not configured")
+	}
+	if region == "" {
+		return fmt.Errorf("gcp region not configured")
+	}
+
+	// Get credentials from secret
+	secretName := getNestedString(pc.Object, "spec", "credentialsRef", "name")
+	if secretName == "" {
+		return fmt.Errorf("credentials secret not configured (spec.credentialsRef.name)")
+	}
+
+	secret, err := c.Clientset.CoreV1().Secrets(butlerSystem).Get(ctx, secretName, metav1.GetOptions{})
+	if err != nil {
+		return fmt.Errorf("getting credentials secret %s: %w", secretName, err)
+	}
+
+	saKey := secret.Data["serviceAccountKey"]
+	if len(saKey) == 0 {
+		return fmt.Errorf("credentials secret %s missing serviceAccountKey", secretName)
+	}
+
+	// Validate the service account key is valid JSON
+	if !json.Valid(saKey) {
+		return fmt.Errorf("serviceAccountKey is not valid JSON")
+	}
+
+	logger.Success("GCP credentials validated", "project", projectID, "region", region)
+	return nil
+}
+
 func updateProviderConfigStatus(ctx context.Context, c *client.Client, pc *unstructured.Unstructured, validationErr error) error {
 	// Get current status or create new
 	currentStatus, _, _ := unstructured.NestedMap(pc.Object, "status")
@@ -523,6 +564,10 @@ func extractProviderInfo(pc *unstructured.Unstructured) ProviderInfo {
 		endpoint = "(in-cluster)"
 	case "proxmox":
 		endpoint = getNestedString(pc.Object, "spec", "proxmox", "endpoint")
+	case "gcp":
+		projectID := getNestedString(pc.Object, "spec", "gcp", "projectID")
+		region := getNestedString(pc.Object, "spec", "gcp", "region")
+		endpoint = fmt.Sprintf("%s/%s", projectID, region)
 	}
 
 	return ProviderInfo{

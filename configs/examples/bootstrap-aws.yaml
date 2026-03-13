@@ -1,0 +1,50 @@
+# Bootstrap configuration for AWS
+# Usage: butleradm bootstrap aws --config bootstrap-aws.yaml
+
+provider: aws
+
+cluster:
+  name: butler-mgmt
+  topology: single-node
+  controlPlane:
+    replicas: 1
+    cpu: 4
+    memoryMB: 16384
+    diskGB: 100
+
+network:
+  # No VIP for cloud providers — first CP node's public IP is used
+  podCIDR: "10.244.0.0/16"
+  serviceCIDR: "10.96.0.0/12"
+
+talos:
+  version: v1.9.0
+
+addons:
+  cni:
+    type: cilium
+  storage:
+    type: longhorn
+  # No loadBalancer block — cloud providers don't use MetalLB
+  gitops:
+    type: flux
+
+providerConfig:
+  aws:
+    # AWS credentials (IAM user with EC2 permissions)
+    accessKeyID: "AKIAIOSFODNN7EXAMPLE"
+    secretAccessKey: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
+
+    # AWS region for EC2 instances
+    region: "us-east-1"
+
+    # VPC and networking (must be pre-provisioned)
+    vpcID: "vpc-0123456789abcdef0"
+    subnetID: "subnet-0123456789abcdef0"
+    securityGroupID: "sg-0123456789abcdef0"
+
+    # Optional: override instance type (default: m5.xlarge)
+    # instanceType: "m5.xlarge"
+
+    # Optional: custom AMI (default: Talos Linux AMI for region)
+    # ami: "ami-0123456789abcdef0"

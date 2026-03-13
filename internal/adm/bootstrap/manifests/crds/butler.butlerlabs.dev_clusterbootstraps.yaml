@@ -122,6 +122,9 @@ spec:
                               - harvester
                               - nutanix
                               - proxmox
+                              - gcp
+                              - aws
+                              - azure
                               type: string
                             version:
                               description: Version overrides the default provider
@@ -458,6 +461,56 @@ spec:
                 - controlPlane
                 - name
                 type: object
+              controlPlaneExposure:
+                description: |-
+                  ControlPlaneExposure configures how tenant control planes are exposed.
+                  This is a platform-level setting written to ButlerConfig after bootstrap
+                  and inherited by all TenantClusters.
+                  Defaults to LoadBalancer mode if not specified.
+                properties:
+                  controllerType:
+                    description: |-
+                      ControllerType specifies the ingress controller type for automatic TLS passthrough.
+                      Used when Mode is Ingress. Supported values:
+                      - "haproxy": Uses haproxy.org/ssl-passthrough annotation
+                      - "nginx": Uses nginx.ingress.kubernetes.io/ssl-passthrough annotation
+                      - "traefik": Creates IngressRouteTCP instead of standard Ingress
+                      - "generic": No automatic annotations, use custom annotations in Steward config
+                    enum:
+                    - haproxy
+                    - nginx
+                    - traefik
+                    - generic
+                    type: string
+                  gatewayRef:
+                    description: |-
+                      GatewayRef references the Gateway resource when Mode is Gateway.
+                      Format: "namespace/name"
+                    type: string
+                  hostname:
+                    description: |-
+                      Hostname is the wildcard domain for tenant API servers.
+                      Required when Mode is Ingress or Gateway.
+                      Example: "*.k8s.platform.example.com"
+                      Tenant clusters get: "{cluster}.{namespace}.k8s.platform.example.com"
+                    type: string
+                  ingressClassName:
+                    description: IngressClassName specifies the Ingress class when
+                      Mode is Ingress.
+                    type: string
+                  mode:
+                    default: LoadBalancer
+                    description: |-
+                      Mode determines how tenant API servers are exposed.
+                      LoadBalancer: 1 IP per tenant, direct access (default)
+                      Ingress: L7 proxy via Ingress controller with TLS passthrough, shared IP
+                      Gateway: L4/L7 via Gateway API TLSRoute, shared IP
+                    enum:
+                    - LoadBalancer
+                    - Ingress
+                    - Gateway
+                    type: string
+                type: object
               network:
                 description: Network defines network configuration for the cluster
                 properties:
@@ -489,9 +542,10 @@ spec:
                     type: string
                   vip:
                     description: |-
-                      VIP is the virtual IP for the control plane endpoint (kube-vip)
-                      This IP is used ONLY for kube-apiserver HA and must NOT be in LoadBalancerPool
-                      For single-node topology, the VIP still provides a stable endpoint for the API server
+                      VIP is the virtual IP for the control plane endpoint (kube-vip).
+                      Required for on-prem providers (harvester, nutanix, proxmox).
+                      Optional for cloud providers (gcp, aws, azure) where the first
+                      control plane node IP is used as the endpoint instead.
                     pattern: ^([0-9]{1,3}\.){3}[0-9]{1,3}$
                     type: string
                   vipInterface:
@@ -501,18 +555,19 @@ spec:
                 required:
                 - podCIDR
                 - serviceCIDR
-                - vip
                 type: object
               paused:
                 description: Paused can be set to true to pause reconciliation
                 type: boolean
               provider:
-                description: Provider is the infrastructure provider type (harvester,
-                  nutanix, proxmox)
+                description: Provider is the infrastructure provider type.
                 enum:
                 - harvester
                 - nutanix
                 - proxmox
+                - gcp
+                - aws
+                - azure
                 type: string
               providerRef:
                 description: |-
@@ -710,6 +765,16 @@ spec:
                 type: string
             type: object
         type: object
+        x-kubernetes-validations:
+        - message: hostname is required when controlPlaneExposure.mode is Ingress
+          rule: '!has(self.spec.controlPlaneExposure) || self.spec.controlPlaneExposure.mode
+            != ''Ingress'' || self.spec.controlPlaneExposure.hostname != '''''
+        - message: hostname is required when controlPlaneExposure.mode is Gateway
+          rule: '!has(self.spec.controlPlaneExposure) || self.spec.controlPlaneExposure.mode
+            != ''Gateway'' || self.spec.controlPlaneExposure.hostname != '''''
+        - message: gatewayRef is required when controlPlaneExposure.mode is Gateway
+          rule: '!has(self.spec.controlPlaneExposure) || self.spec.controlPlaneExposure.mode
+            != ''Gateway'' || self.spec.controlPlaneExposure.gatewayRef != '''''
     served: true
     storage: true
     subresources:

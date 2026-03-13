@@ -1,21 +1,21 @@
 ---
-# Butler Provider Nutanix Controller
-# Provisions VMs in Nutanix AHV from MachineRequest CRs
+# Butler Provider Azure Controller
+# Provisions VMs in Microsoft Azure from MachineRequest CRs
 apiVersion: v1
 kind: ServiceAccount
 metadata:
-  name: butler-provider-nutanix
+  name: butler-provider-azure
   namespace: butler-system
   labels:
-    app.kubernetes.io/name: butler-provider-nutanix
+    app.kubernetes.io/name: butler-provider-azure
     app.kubernetes.io/component: controller
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
-  name: butler-provider-nutanix
+  name: butler-provider-azure
   labels:
-    app.kubernetes.io/name: butler-provider-nutanix
+    app.kubernetes.io/name: butler-provider-azure
     app.kubernetes.io/component: controller
 rules:
   # Core resources
@@ -43,77 +43,74 @@ rules:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
-  name: butler-provider-nutanix
+  name: butler-provider-azure
   labels:
-    app.kubernetes.io/name: butler-provider-nutanix
+    app.kubernetes.io/name: butler-provider-azure
     app.kubernetes.io/component: controller
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
-  name: butler-provider-nutanix
+  name: butler-provider-azure
 subjects:
   - kind: ServiceAccount
-    name: butler-provider-nutanix
+    name: butler-provider-azure
     namespace: butler-system
 ---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: butler-provider-nutanix
+  name: butler-provider-azure
   namespace: butler-system
   labels:
-    app.kubernetes.io/name: butler-provider-nutanix
+    app.kubernetes.io/name: butler-provider-azure
     app.kubernetes.io/component: controller
     control-plane: controller-manager
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app.kubernetes.io/name: butler-provider-nutanix
+      app.kubernetes.io/name: butler-provider-azure
       control-plane: controller-manager
   template:
     metadata:
       labels:
-        app.kubernetes.io/name: butler-provider-nutanix
+        app.kubernetes.io/name: butler-provider-azure
         control-plane: controller-manager
     spec:
-      serviceAccountName: butler-provider-nutanix
-      hostNetwork: true
-      dnsPolicy: ClusterFirstWithHostNet
+      serviceAccountName: butler-provider-azure
+      hostNetwork: true  # Use host network for access to external networks (VPN, Tailscale, etc.)
+      dnsPolicy: ClusterFirstWithHostNet  # Required when using hostNetwork
       securityContext:
         runAsNonRoot: true
         seccompProfile:
           type: RuntimeDefault
       containers:
         - name: manager
-          image: ghcr.io/butlerdotdev/butler-provider-nutanix:latest
+          image: ghcr.io/butlerdotdev/butler-provider-azure:latest
           imagePullPolicy: IfNotPresent
           command:
             - /manager
           args:
             - --leader-elect=false
-            - --health-probe-bind-address=:8084
-            - --metrics-bind-address=:8085
-          env:
-            - name: GODEBUG
-              value: "http2client=0"
+            - --health-probe-bind-address=:8090
+            - --metrics-bind-address=:8091
           ports:
-            - containerPort: 8085
+            - containerPort: 8091
               name: metrics
               protocol: TCP
-            - containerPort: 8084
+            - containerPort: 8090
               name: health
               protocol: TCP
           livenessProbe:
             httpGet:
               path: /healthz
-              port: 8084
+              port: 8090
             initialDelaySeconds: 15
             periodSeconds: 20
           readinessProbe:
             httpGet:
               path: /readyz
-              port: 8084
+              port: 8090
             initialDelaySeconds: 5
             periodSeconds: 10
           resources:
@@ -128,13 +125,4 @@ spec:
             capabilities:
               drop:
                 - ALL
-          volumeMounts:
-            - name: ca-certs
-              mountPath: /etc/ssl/certs
-              readOnly: true
-      volumes:
-        - name: ca-certs
-          hostPath:
-            path: /etc/ssl/certs
-            type: Directory
       terminationGracePeriodSeconds: 10

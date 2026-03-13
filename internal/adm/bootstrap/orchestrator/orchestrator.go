@@ -188,6 +188,31 @@ func (o *Orchestrator) Run(ctx context.Context, cfg *Config) error {
 		return fmt.Errorf("creating ProviderConfig: %w", err)
 	}
 
+	// For cloud HA: create a load balancer and use its IP as the VIP.
+	// The LB distributes traffic to all CP nodes for true HA.
+	var lbResources *cloudLBResources
+	bootstrapSucceeded := false
+	if isCloudProvider(cfg.Provider) && cfg.Cluster.Topology == "ha" {
+		o.logger.Phase("Creating cloud load balancer for HA control plane")
+		lbIP, res, lbErr := o.createCloudLoadBalancer(ctx, cfg)
+		if lbErr != nil {
+			if res != nil {
+				o.cleanupCloudLoadBalancer(ctx, res)
+			}
+			return fmt.Errorf("creating cloud load balancer: %w", lbErr)
+		}
+		lbResources = res
+		cfg.Network.VIP = lbIP
+		o.logger.Info("Cloud LB endpoint will be used as control plane VIP", "vip", lbIP)
+
+		// Clean up LB if bootstrap fails (LB persists on success)
+		defer func() {
+			if !bootstrapSucceeded && lbResources != nil && !o.options.SkipCleanup {
+				o.cleanupCloudLoadBalancer(ctx, lbResources)
+			}
+		}()
+	}
+
 	// Create ClusterBootstrap CR
 	o.logger.Phase("Creating ClusterBootstrap")
 	if err := o.createClusterBootstrap(ctx, dynamicClient, cfg); err != nil {
@@ -207,6 +232,7 @@ func (o *Orchestrator) Run(ctx context.Context, cfg *Config) error {
 		return fmt.Errorf("saving cluster credentials: %w", err)
 	}
 
+	bootstrapSucceeded = true
 	o.logger.Success("Bootstrap complete!")
 	o.logger.Info("")
 	o.logger.Info("Cluster credentials saved to:")
@@ -730,6 +756,64 @@ func (o *Orchestrator) createNamespaceAndSecrets(ctx context.Context, clientset 
 	case "proxmox":
 		// TODO: Create Proxmox credentials secret
 		o.logger.Debug("Proxmox credentials not yet implemented")
+
+	case "gcp":
+		// Read service account key file
+		saKeyData, err := os.ReadFile(cfg.ProviderConfig.GCP.ServiceAccountKeyPath)
+		if err != nil {
+			return fmt.Errorf("reading GCP service account key: %w", err)
+		}
+
+		secret := &corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      cfg.Cluster.Name + "-gcp-credentials",
+				Namespace: butlerNamespace,
+			},
+			Type: corev1.SecretTypeOpaque,
+			Data: map[string][]byte{
+				"serviceAccountKey": saKeyData,
+			},
+		}
+		_, err = clientset.CoreV1().Secrets(butlerNamespace).Create(ctx, secret, metav1.CreateOptions{})
+		if err != nil && !strings.Contains(err.Error(), "already exists") {
+			return fmt.Errorf("creating GCP secret: %w", err)
+		}
+
+	case "aws":
+		secret := &corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      cfg.Cluster.Name + "-aws-credentials",
+				Namespace: butlerNamespace,
+			},
+			Type: corev1.SecretTypeOpaque,
+			StringData: map[string]string{
+				"accessKeyID":     cfg.ProviderConfig.AWS.AccessKeyID,
+				"secretAccessKey": cfg.ProviderConfig.AWS.SecretAccessKey,
+			},
+		}
+		_, err = clientset.CoreV1().Secrets(butlerNamespace).Create(ctx, secret, metav1.CreateOptions{})
+		if err != nil && !strings.Contains(err.Error(), "already exists") {
+			return fmt.Errorf("creating AWS secret: %w", err)
+		}
+
+	case "azure":
+		secret := &corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      cfg.Cluster.Name + "-azure-credentials",
+				Namespace: butlerNamespace,
+			},
+			Type: corev1.SecretTypeOpaque,
+			StringData: map[string]string{
+				"clientID":       cfg.ProviderConfig.Azure.ClientID,
+				"clientSecret":   cfg.ProviderConfig.Azure.ClientSecret,
+				"tenantID":       cfg.ProviderConfig.Azure.TenantID,
+				"subscriptionID": cfg.ProviderConfig.Azure.SubscriptionID,
+			},
+		}
+		_, err = clientset.CoreV1().Secrets(butlerNamespace).Create(ctx, secret, metav1.CreateOptions{})
+		if err != nil && !strings.Contains(err.Error(), "already exists") {
+			return fmt.Errorf("creating Azure secret: %w", err)
+		}
 	}
 
 	o.logger.Success("Namespace and secrets created")
@@ -816,6 +900,75 @@ func (o *Orchestrator) buildProviderConfigUnstructured(cfg *Config) *unstructure
 		}
 	case "proxmox":
 		// TODO: Proxmox ProviderConfig not yet implemented
+
+	case "gcp":
+		spec["credentialsRef"] = map[string]interface{}{
+			"name":      cfg.Cluster.Name + "-gcp-credentials",
+			"namespace": butlerNamespace,
+		}
+		gcpSpec := map[string]interface{}{
+			"projectID": cfg.ProviderConfig.GCP.ProjectID,
+			"region":    cfg.ProviderConfig.GCP.Region,
+			"network":   cfg.ProviderConfig.GCP.Network,
+		}
+		if cfg.ProviderConfig.GCP.Subnetwork != "" {
+			gcpSpec["subnetwork"] = cfg.ProviderConfig.GCP.Subnetwork
+		}
+		if cfg.ProviderConfig.GCP.Zone != "" {
+			gcpSpec["zone"] = cfg.ProviderConfig.GCP.Zone
+		}
+		if cfg.ProviderConfig.GCP.MachineType != "" {
+			gcpSpec["machineType"] = cfg.ProviderConfig.GCP.MachineType
+		}
+		if cfg.ProviderConfig.GCP.ImageProject != "" {
+			gcpSpec["imageProject"] = cfg.ProviderConfig.GCP.ImageProject
+		}
+		if cfg.ProviderConfig.GCP.ImageFamily != "" {
+			gcpSpec["imageFamily"] = cfg.ProviderConfig.GCP.ImageFamily
+		}
+		if cfg.ProviderConfig.GCP.Image != "" {
+			gcpSpec["image"] = cfg.ProviderConfig.GCP.Image
+		}
+		spec["gcp"] = gcpSpec
+
+	case "aws":
+		spec["credentialsRef"] = map[string]interface{}{
+			"name":      cfg.Cluster.Name + "-aws-credentials",
+			"namespace": butlerNamespace,
+		}
+		awsSpec := map[string]interface{}{
+			"region": cfg.ProviderConfig.AWS.Region,
+		}
+		if cfg.ProviderConfig.AWS.VPCID != "" {
+			awsSpec["vpcID"] = cfg.ProviderConfig.AWS.VPCID
+		}
+		if cfg.ProviderConfig.AWS.SubnetID != "" {
+			awsSpec["subnetIDs"] = []interface{}{cfg.ProviderConfig.AWS.SubnetID}
+		}
+		if cfg.ProviderConfig.AWS.SecurityGroupID != "" {
+			awsSpec["securityGroupIDs"] = []interface{}{cfg.ProviderConfig.AWS.SecurityGroupID}
+		}
+		spec["aws"] = awsSpec
+
+	case "azure":
+		spec["credentialsRef"] = map[string]interface{}{
+			"name":      cfg.Cluster.Name + "-azure-credentials",
+			"namespace": butlerNamespace,
+		}
+		azureSpec := map[string]interface{}{
+			"subscriptionID": cfg.ProviderConfig.Azure.SubscriptionID,
+			"resourceGroup":  cfg.ProviderConfig.Azure.ResourceGroup,
+		}
+		if cfg.ProviderConfig.Azure.Location != "" {
+			azureSpec["location"] = cfg.ProviderConfig.Azure.Location
+		}
+		if cfg.ProviderConfig.Azure.VNetName != "" {
+			azureSpec["vnetName"] = cfg.ProviderConfig.Azure.VNetName
+		}
+		if cfg.ProviderConfig.Azure.SubnetName != "" {
+			azureSpec["subnetName"] = cfg.ProviderConfig.Azure.SubnetName
+		}
+		spec["azure"] = azureSpec
 	}
 
 	pc := &unstructured.Unstructured{
@@ -902,40 +1055,21 @@ func (o *Orchestrator) buildClusterBootstrapUnstructured(cfg *Config) *unstructu
 					"namespace": butlerNamespace,
 				},
 				"cluster": clusterSpec,
-				"network": map[string]interface{}{
-					"podCIDR":     cfg.Network.PodCIDR,
-					"serviceCIDR": cfg.Network.ServiceCIDR,
-					"vip":         cfg.Network.VIP,
-				},
+				"network": func() map[string]interface{} {
+					n := map[string]interface{}{
+						"podCIDR":     cfg.Network.PodCIDR,
+						"serviceCIDR": cfg.Network.ServiceCIDR,
+					}
+					if cfg.Network.VIP != "" {
+						n["vip"] = cfg.Network.VIP
+					}
+					return n
+				}(),
 				"talos": map[string]interface{}{
 					"version":   cfg.Talos.Version,
 					"schematic": cfg.Talos.Schematic,
 				},
-				"addons": map[string]interface{}{
-					"cni": map[string]interface{}{
-						"type": cfg.Addons.CNI.Type,
-					},
-					"storage": map[string]interface{}{
-						"type": cfg.Addons.Storage.Type,
-					},
-					"loadBalancer": map[string]interface{}{
-						"type":        cfg.Addons.LoadBalancer.Type,
-						"addressPool": cfg.Addons.LoadBalancer.AddressPool,
-					},
-					"gitOps": map[string]interface{}{
-						"type": cfg.Addons.GitOps.Type,
-					},
-					"capi": map[string]interface{}{
-						"enabled": cfg.Addons.CAPI.Enabled,
-						"version": cfg.Addons.CAPI.Version,
-					},
-					"butlerController": map[string]interface{}{
-						"enabled": cfg.Addons.ButlerController.Enabled,
-						"version": cfg.Addons.ButlerController.Version,
-						"image":   cfg.Addons.ButlerController.Image,
-					},
-					"console": buildConsoleConfig(cfg.Addons.Console),
-				},
+				"addons": buildAddonsConfig(cfg),
 			},
 		},
 	}
@@ -1118,16 +1252,22 @@ func (o *Orchestrator) buildAndLoadImages(ctx context.Context, provider string) 
 		return fmt.Errorf("repo root not set - use --repo-root flag")
 	}
 
-	// Define images to build
+	// Define images to build.
+	// useParentContext signals that the repo's go.mod has a replace directive
+	// pointing to a sibling repo (e.g., replace ../butler-api). In that case
+	// the Docker build context must be the parent directory so the sibling
+	// is accessible, and -f points to the repo's Dockerfile.
 	images := []struct {
-		name    string
-		repoDir string
-		image   string
+		name             string
+		repoDir          string
+		image            string
+		useParentContext bool
 	}{
 		{
-			name:    "butler-bootstrap",
-			repoDir: filepath.Join(o.options.RepoRoot, "butler-bootstrap"),
-			image:   "ghcr.io/butlerdotdev/butler-bootstrap:latest",
+			name:             "butler-bootstrap",
+			repoDir:          filepath.Join(o.options.RepoRoot, "butler-bootstrap"),
+			image:            "ghcr.io/butlerdotdev/butler-bootstrap:latest",
+			useParentContext: true,
 		},
 		{
 			name:    fmt.Sprintf("butler-provider-%s", provider),
@@ -1142,10 +1282,36 @@ func (o *Orchestrator) buildAndLoadImages(ctx context.Context, provider string) 
 			return fmt.Errorf("repo directory not found: %s", img.repoDir)
 		}
 
-		// Build Docker image
-		o.logger.Info("building image", "name", img.name, "dir", img.repoDir)
-		buildCmd := exec.CommandContext(ctx, "docker", "build", "-t", img.image, ".")
-		buildCmd.Dir = img.repoDir
+		// Build Docker image. When useParentContext is true, set the build
+		// context to the repo root (parent of all sibling repos) so that
+		// go.mod replace directives like ../butler-api resolve correctly.
+		// A temporary .dockerignore limits the context to only the needed repos.
+		var buildCmd *exec.Cmd
+		if img.useParentContext {
+			repoName := filepath.Base(img.repoDir)
+			dockerfile := filepath.Join(img.repoDir, "Dockerfile")
+
+			// Create a temporary .dockerignore to limit context size.
+			// Only include the target repo and butler-api (for replace directive).
+			dockerignorePath := filepath.Join(o.options.RepoRoot, ".dockerignore")
+			dockerignore := fmt.Sprintf("*\n!%s\n!butler-api\n**/.git\n**/bin\n", repoName)
+			if err := os.WriteFile(dockerignorePath, []byte(dockerignore), 0644); err != nil {
+				return fmt.Errorf("creating .dockerignore: %w", err)
+			}
+			defer os.Remove(dockerignorePath)
+
+			o.logger.Info("building image (parent context)", "name", img.name, "context", o.options.RepoRoot)
+			buildCmd = exec.CommandContext(ctx, "docker", "build",
+				"-t", img.image,
+				"-f", dockerfile,
+				"--build-arg", fmt.Sprintf("REPO_DIR=%s", repoName),
+				".")
+			buildCmd.Dir = o.options.RepoRoot
+		} else {
+			o.logger.Info("building image", "name", img.name, "dir", img.repoDir)
+			buildCmd = exec.CommandContext(ctx, "docker", "build", "-t", img.image, ".")
+			buildCmd.Dir = img.repoDir
+		}
 		buildCmd.Stdout = os.Stdout
 		buildCmd.Stderr = os.Stderr
 
@@ -1169,7 +1335,67 @@ func (o *Orchestrator) buildAndLoadImages(ctx context.Context, provider string) 
 	return nil
 }
 
-// buildConsoleConfig builds the console addon config for the ClusterBootstrap CR
+// buildAddonsConfig builds the addons config for the ClusterBootstrap CR.
+// Fields with CRD-level defaults (butlerController, capi) are only included
+// when explicitly configured. Omitting them lets the CRD *bool defaults
+// (nil = enabled) take effect instead of writing Go's bool zero value (false).
+func buildAddonsConfig(cfg *Config) map[string]interface{} {
+	addons := map[string]interface{}{
+		"cni": map[string]interface{}{
+			"type": cfg.Addons.CNI.Type,
+		},
+		"storage": map[string]interface{}{
+			"type": cfg.Addons.Storage.Type,
+		},
+		"loadBalancer": map[string]interface{}{
+			"type":        cfg.Addons.LoadBalancer.Type,
+			"addressPool": cfg.Addons.LoadBalancer.AddressPool,
+		},
+	}
+
+	// Only include console when the user explicitly configured it.
+	// The CRD defaults Enabled to true via *bool, so omitting this section
+	// enables butler-console by default.
+	if cfg.Addons.Console.Enabled || cfg.Addons.Console.Version != "" {
+		addons["console"] = buildConsoleConfig(cfg.Addons.Console)
+	}
+
+	// Only include butlerController when the user explicitly configured it.
+	// The CRD defaults Enabled to true via *bool, so omitting this section
+	// enables butler-controller by default.
+	if cfg.Addons.ButlerController.Version != "" || cfg.Addons.ButlerController.Image != "" {
+		bc := map[string]interface{}{
+			"enabled": true,
+		}
+		if cfg.Addons.ButlerController.Version != "" {
+			bc["version"] = cfg.Addons.ButlerController.Version
+		}
+		if cfg.Addons.ButlerController.Image != "" {
+			bc["image"] = cfg.Addons.ButlerController.Image
+		}
+		addons["butlerController"] = bc
+	}
+
+	// Only include capi when the user explicitly configured it.
+	// The CRD defaults Enabled to true via *bool.
+	if cfg.Addons.CAPI.Version != "" {
+		addons["capi"] = map[string]interface{}{
+			"enabled": true,
+			"version": cfg.Addons.CAPI.Version,
+		}
+	}
+
+	// Only include gitOps if explicitly configured
+	if cfg.Addons.GitOps.Type != "" {
+		addons["gitOps"] = map[string]interface{}{
+			"type":    cfg.Addons.GitOps.Type,
+			"enabled": true,
+		}
+	}
+
+	return addons
+}
+
 func buildConsoleConfig(cfg ConsoleConfig) map[string]interface{} {
 	if !cfg.Enabled {
 		return map[string]interface{}{

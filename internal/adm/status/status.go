@@ -168,6 +168,18 @@ func runStatus(ctx context.Context, logger *log.Logger, opts *statusOptions) err
 		{"capk-system", "capk-controller-manager"},
 		{capiSystem, "capk-controller-manager"},
 	})
+	checkCAPIProvider(ctx, c, "gcp", []providerCheck{
+		{"capg-system", "capg-controller-manager"},
+		{capiSystem, "capg-controller-manager"},
+	})
+	checkCAPIProvider(ctx, c, "aws", []providerCheck{
+		{"capa-system", "capa-controller-manager"},
+		{capiSystem, "capa-controller-manager"},
+	})
+	checkCAPIProvider(ctx, c, "azure", []providerCheck{
+		{"capz-system", "capz-controller-manager"},
+		{capiSystem, "capz-controller-manager"},
+	})
 
 	checkDeployment(ctx, c, "steward-system", "steward", "Steward")
 	fmt.Println()
@@ -404,6 +416,7 @@ func checkCAPIProvider(ctx context.Context, c *client.Client, providerName strin
 		"harvester": "CAPI Harvester",
 		"kubevirt":  "CAPI KubeVirt",
 		"proxmox":   "CAPI Proxmox",
+		"gcp":       "CAPI GCP",
 	}
 	displayName := displayNames[providerName]
 	if displayName == "" {
@@ -473,6 +486,17 @@ func listProviderConfigs(ctx context.Context, c *client.Client) error {
 			endpoint, _, _ = unstructured.NestedString(pc.Object, "spec", "nutanix", "endpoint")
 		case "harvester":
 			endpoint = "(in-cluster)"
+		case "gcp":
+			projectID, _, _ := unstructured.NestedString(pc.Object, "spec", "gcp", "projectID")
+			region, _, _ := unstructured.NestedString(pc.Object, "spec", "gcp", "region")
+			endpoint = fmt.Sprintf("%s/%s", projectID, region)
+		case "aws":
+			region, _, _ := unstructured.NestedString(pc.Object, "spec", "aws", "region")
+			endpoint = fmt.Sprintf("aws/%s", region)
+		case "azure":
+			sub, _, _ := unstructured.NestedString(pc.Object, "spec", "azure", "subscriptionID")
+			rg, _, _ := unstructured.NestedString(pc.Object, "spec", "azure", "resourceGroup")
+			endpoint = fmt.Sprintf("%s/%s", sub, rg)
 		}
 
 		if endpoint != "" {
