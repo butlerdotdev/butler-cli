@@ -51,8 +51,8 @@ Kubernetes clusters. Butler provisions Talos Linux VMs with:
   - Longhorn distributed storage
   - FluxCD for GitOps
 
-Cloud providers do NOT use kube-vip or MetalLB. The first control plane
-node's public IP serves as the API endpoint.
+Cloud providers use a cloud-native load balancer for the control plane
+endpoint instead of kube-vip. MetalLB is not installed on cloud.
 
 Prerequisites:
   - Docker running locally
@@ -130,7 +130,7 @@ Local Development:
 			orch := orchestrator.New(logger, orchestrator.Options{
 				DryRun:      dryRun,
 				SkipCleanup: skipCleanup,
-				Timeout:     45 * time.Minute,
+				Timeout:     60 * time.Minute,
 				LocalDev:    localDev,
 				RepoRoot:    repoRoot,
 			})
