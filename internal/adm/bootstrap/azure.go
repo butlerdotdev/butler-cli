@@ -124,7 +124,7 @@ Local Development:
 			orch := orchestrator.New(logger, orchestrator.Options{
 				DryRun:      dryRun,
 				SkipCleanup: skipCleanup,
-				Timeout:     45 * time.Minute,
+				Timeout:     60 * time.Minute,
 				LocalDev:    localDev,
 				RepoRoot:    repoRoot,
 			})
