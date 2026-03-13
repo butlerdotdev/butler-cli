@@ -38,6 +38,7 @@ func NewGCPCmd(logger *log.Logger) *cobra.Command {
 		skipCleanup bool
 		localDev    bool
 		repoRoot    string
+		credentials string
 	)
 
 	cmd := &cobra.Command{
@@ -98,6 +99,14 @@ Local Development:
 				return fmt.Errorf("provider must be 'gcp', got %q", cfg.Provider)
 			}
 
+			// Apply CLI flag overrides
+			if credentials != "" {
+				if cfg.ProviderConfig.GCP == nil {
+					cfg.ProviderConfig.GCP = &orchestrator.GCPProviderConfig{}
+				}
+				cfg.ProviderConfig.GCP.ServiceAccountKeyPath = credentials
+			}
+
 			// Validate required GCP config
 			if cfg.ProviderConfig.GCP == nil {
 				return fmt.Errorf("providerConfig.gcp is required")
@@ -149,6 +158,7 @@ Local Development:
 	cmd.Flags().BoolVar(&skipCleanup, "skip-cleanup", false, "don't delete KIND cluster on failure (for debugging)")
 	cmd.Flags().BoolVar(&localDev, "local", false, "local development mode - build and load images from source")
 	cmd.Flags().StringVar(&repoRoot, "repo-root", "", "path to butlerdotdev repos (default: ~/code/github.com/butlerdotdev)")
+	cmd.Flags().StringVar(&credentials, "credentials", "", "path to GCP service account JSON key (overrides config file)")
 
 	cmd.MarkFlagRequired("config")
 

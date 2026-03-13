@@ -33,11 +33,13 @@ import (
 // NewAWSCmd creates the aws bootstrap subcommand
 func NewAWSCmd(logger *log.Logger) *cobra.Command {
 	var (
-		configFile  string
-		dryRun      bool
-		skipCleanup bool
-		localDev    bool
-		repoRoot    string
+		configFile     string
+		dryRun         bool
+		skipCleanup    bool
+		localDev       bool
+		repoRoot       string
+		accessKeyID    string
+		secretAccessKey string
 	)
 
 	cmd := &cobra.Command{
@@ -94,6 +96,19 @@ Local Development:
 				return fmt.Errorf("provider must be 'aws', got %q", cfg.Provider)
 			}
 
+			// Apply CLI flag overrides
+			if accessKeyID != "" || secretAccessKey != "" {
+				if cfg.ProviderConfig.AWS == nil {
+					cfg.ProviderConfig.AWS = &orchestrator.AWSProviderConfig{}
+				}
+				if accessKeyID != "" {
+					cfg.ProviderConfig.AWS.AccessKeyID = accessKeyID
+				}
+				if secretAccessKey != "" {
+					cfg.ProviderConfig.AWS.SecretAccessKey = secretAccessKey
+				}
+			}
+
 			if cfg.ProviderConfig.AWS == nil {
 				return fmt.Errorf("providerConfig.aws is required")
 			}
@@ -133,6 +148,8 @@ Local Development:
 	cmd.Flags().BoolVar(&skipCleanup, "skip-cleanup", false, "don't delete KIND cluster on failure (for debugging)")
 	cmd.Flags().BoolVar(&localDev, "local", false, "local development mode - build and load images from source")
 	cmd.Flags().StringVar(&repoRoot, "repo-root", "", "path to butlerdotdev repos (default: ~/code/github.com/butlerdotdev)")
+	cmd.Flags().StringVar(&accessKeyID, "access-key-id", "", "AWS access key ID (overrides config file)")
+	cmd.Flags().StringVar(&secretAccessKey, "secret-access-key", "", "AWS secret access key (overrides config file)")
 
 	cmd.MarkFlagRequired("config")
 

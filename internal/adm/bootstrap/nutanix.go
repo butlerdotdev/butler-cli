@@ -33,11 +33,14 @@ import (
 // NewNutanixCmd creates the nutanix bootstrap subcommand
 func NewNutanixCmd(logger *log.Logger) *cobra.Command {
 	var (
-		configFile  string
-		dryRun      bool
-		skipCleanup bool
-		localDev    bool
-		repoRoot    string
+		configFile    string
+		dryRun        bool
+		skipCleanup   bool
+		localDev      bool
+		repoRoot      string
+		prismEndpoint string
+		prismUsername  string
+		prismPassword string
 	)
 
 	cmd := &cobra.Command{
@@ -97,6 +100,22 @@ Local Development:
 				return fmt.Errorf("provider must be 'nutanix', got %q", cfg.Provider)
 			}
 
+			// Apply CLI flag overrides
+			if prismEndpoint != "" || prismUsername != "" || prismPassword != "" {
+				if cfg.ProviderConfig.Nutanix == nil {
+					cfg.ProviderConfig.Nutanix = &orchestrator.NutanixProviderConfig{}
+				}
+				if prismEndpoint != "" {
+					cfg.ProviderConfig.Nutanix.Endpoint = prismEndpoint
+				}
+				if prismUsername != "" {
+					cfg.ProviderConfig.Nutanix.Username = prismUsername
+				}
+				if prismPassword != "" {
+					cfg.ProviderConfig.Nutanix.Password = prismPassword
+				}
+			}
+
 			// Validate required Nutanix config
 			if cfg.ProviderConfig.Nutanix == nil {
 				return fmt.Errorf("providerConfig.nutanix is required")
@@ -147,6 +166,9 @@ Local Development:
 	cmd.Flags().BoolVar(&skipCleanup, "skip-cleanup", false, "don't delete KIND cluster on failure (for debugging)")
 	cmd.Flags().BoolVar(&localDev, "local", false, "local development mode - build and load images from source")
 	cmd.Flags().StringVar(&repoRoot, "repo-root", "", "path to butlerdotdev repos (default: ~/code/github.com/butlerdotdev)")
+	cmd.Flags().StringVar(&prismEndpoint, "prism-endpoint", "", "Nutanix Prism Central endpoint (overrides config file)")
+	cmd.Flags().StringVar(&prismUsername, "prism-username", "", "Nutanix Prism Central username (overrides config file)")
+	cmd.Flags().StringVar(&prismPassword, "prism-password", "", "Nutanix Prism Central password (overrides config file)")
 
 	cmd.MarkFlagRequired("config")
 
