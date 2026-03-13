@@ -35,13 +35,13 @@ rules:
     verbs: ["get", "list", "watch"]
   # Butler CRDs
   - apiGroups: ["butler.butlerlabs.dev"]
-    resources: ["clusterbootstraps", "machinerequests", "providerconfigs", "butlerconfigs", "imagesyncs"]
+    resources: ["clusterbootstraps", "machinerequests", "providerconfigs", "butlerconfigs", "imagesyncs", "loadbalancerrequests"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
   - apiGroups: ["butler.butlerlabs.dev"]
-    resources: ["clusterbootstraps/status", "machinerequests/status", "imagesyncs/status"]
+    resources: ["clusterbootstraps/status", "machinerequests/status", "imagesyncs/status", "loadbalancerrequests/status"]
     verbs: ["get", "update", "patch"]
   - apiGroups: ["butler.butlerlabs.dev"]
-    resources: ["clusterbootstraps/finalizers", "machinerequests/finalizers", "imagesyncs/finalizers"]
+    resources: ["clusterbootstraps/finalizers", "machinerequests/finalizers", "imagesyncs/finalizers", "loadbalancerrequests/finalizers"]
     verbs: ["update"]
   # Coordination for leader election
   - apiGroups: ["coordination.k8s.io"]

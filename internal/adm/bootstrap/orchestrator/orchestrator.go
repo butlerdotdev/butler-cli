@@ -666,6 +666,7 @@ func (o *Orchestrator) deployCRDs(ctx context.Context, clientset *kubernetes.Cli
 		"machinerequests.butler.butlerlabs.dev",
 		"providerconfigs.butler.butlerlabs.dev",
 		"clusterbootstraps.butler.butlerlabs.dev",
+		"loadbalancerrequests.butler.butlerlabs.dev",
 	}
 
 	// Create a timeout context for waiting
@@ -1252,9 +1253,10 @@ func (o *Orchestrator) buildAndLoadImages(ctx context.Context, provider string) 
 			useParentContext: true,
 		},
 		{
-			name:    fmt.Sprintf("butler-provider-%s", provider),
-			repoDir: filepath.Join(o.options.RepoRoot, fmt.Sprintf("butler-provider-%s", provider)),
-			image:   fmt.Sprintf("ghcr.io/butlerdotdev/butler-provider-%s:latest", provider),
+			name:             fmt.Sprintf("butler-provider-%s", provider),
+			repoDir:          filepath.Join(o.options.RepoRoot, fmt.Sprintf("butler-provider-%s", provider)),
+			image:            fmt.Sprintf("ghcr.io/butlerdotdev/butler-provider-%s:latest", provider),
+			useParentContext: true,
 		},
 	}
 
