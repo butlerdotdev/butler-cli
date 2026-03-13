@@ -33,11 +33,12 @@ import (
 // NewHarvesterCmd creates the harvester bootstrap subcommand
 func NewHarvesterCmd(logger *log.Logger) *cobra.Command {
 	var (
-		configFile  string
-		dryRun      bool
-		skipCleanup bool
-		localDev    bool
-		repoRoot    string
+		configFile           string
+		dryRun               bool
+		skipCleanup          bool
+		localDev             bool
+		repoRoot             string
+		harvesterKubeconfig  string
 	)
 
 	cmd := &cobra.Command{
@@ -96,6 +97,14 @@ Local Development:
 				return fmt.Errorf("provider must be 'harvester', got %q", cfg.Provider)
 			}
 
+			// Apply CLI flag overrides
+			if harvesterKubeconfig != "" {
+				if cfg.ProviderConfig.Harvester == nil {
+					cfg.ProviderConfig.Harvester = &orchestrator.HarvesterProviderConfig{}
+				}
+				cfg.ProviderConfig.Harvester.KubeconfigPath = harvesterKubeconfig
+			}
+
 			// Determine repo root for local dev
 			if localDev && repoRoot == "" {
 				// Try to find repo root automatically
@@ -126,6 +135,7 @@ Local Development:
 	cmd.Flags().BoolVar(&skipCleanup, "skip-cleanup", false, "don't delete KIND cluster on failure (for debugging)")
 	cmd.Flags().BoolVar(&localDev, "local", false, "local development mode - build and load images from source")
 	cmd.Flags().StringVar(&repoRoot, "repo-root", "", "path to butlerdotdev repos (default: ~/code/github.com/butlerdotdev)")
+	cmd.Flags().StringVar(&harvesterKubeconfig, "harvester-kubeconfig", "", "path to Harvester kubeconfig (overrides config file)")
 
 	cmd.MarkFlagRequired("config")
 

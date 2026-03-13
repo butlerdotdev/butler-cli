@@ -33,11 +33,15 @@ import (
 // NewAzureCmd creates the azure bootstrap subcommand
 func NewAzureCmd(logger *log.Logger) *cobra.Command {
 	var (
-		configFile  string
-		dryRun      bool
-		skipCleanup bool
-		localDev    bool
-		repoRoot    string
+		configFile     string
+		dryRun         bool
+		skipCleanup    bool
+		localDev       bool
+		repoRoot       string
+		clientID       string
+		clientSecret   string
+		tenantID       string
+		subscriptionID string
 	)
 
 	cmd := &cobra.Command{
@@ -94,6 +98,25 @@ Local Development:
 				return fmt.Errorf("provider must be 'azure', got %q", cfg.Provider)
 			}
 
+			// Apply CLI flag overrides
+			if clientID != "" || clientSecret != "" || tenantID != "" || subscriptionID != "" {
+				if cfg.ProviderConfig.Azure == nil {
+					cfg.ProviderConfig.Azure = &orchestrator.AzureProviderConfig{}
+				}
+				if clientID != "" {
+					cfg.ProviderConfig.Azure.ClientID = clientID
+				}
+				if clientSecret != "" {
+					cfg.ProviderConfig.Azure.ClientSecret = clientSecret
+				}
+				if tenantID != "" {
+					cfg.ProviderConfig.Azure.TenantID = tenantID
+				}
+				if subscriptionID != "" {
+					cfg.ProviderConfig.Azure.SubscriptionID = subscriptionID
+				}
+			}
+
 			if cfg.ProviderConfig.Azure == nil {
 				return fmt.Errorf("providerConfig.azure is required")
 			}
@@ -142,6 +165,10 @@ Local Development:
 	cmd.Flags().BoolVar(&skipCleanup, "skip-cleanup", false, "don't delete KIND cluster on failure (for debugging)")
 	cmd.Flags().BoolVar(&localDev, "local", false, "local development mode - build and load images from source")
 	cmd.Flags().StringVar(&repoRoot, "repo-root", "", "path to butlerdotdev repos (default: ~/code/github.com/butlerdotdev)")
+	cmd.Flags().StringVar(&clientID, "client-id", "", "Azure service principal app ID (overrides config file)")
+	cmd.Flags().StringVar(&clientSecret, "client-secret", "", "Azure service principal password (overrides config file)")
+	cmd.Flags().StringVar(&tenantID, "tenant-id", "", "Azure tenant ID (overrides config file)")
+	cmd.Flags().StringVar(&subscriptionID, "subscription-id", "", "Azure subscription ID (overrides config file)")
 
 	cmd.MarkFlagRequired("config")
 
