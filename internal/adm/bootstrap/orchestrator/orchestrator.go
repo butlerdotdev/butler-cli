@@ -663,6 +663,7 @@ func (o *Orchestrator) deployCRDs(ctx context.Context, clientset *kubernetes.Cli
 	// Wait for CRDs to be established
 	o.logger.Debug("waiting for CRDs to be established")
 	crdNames := []string{
+		"butlerconfigs.butler.butlerlabs.dev",
 		"machinerequests.butler.butlerlabs.dev",
 		"providerconfigs.butler.butlerlabs.dev",
 		"clusterbootstraps.butler.butlerlabs.dev",
@@ -1403,4 +1404,13 @@ func buildConsoleConfig(cfg ConsoleConfig) map[string]interface{} {
 	}
 
 	return result
+}
+
+// isCloudProvider returns true for cloud providers that need a load balancer for HA.
+func isCloudProvider(provider string) bool {
+	switch provider {
+	case "gcp", "aws", "azure":
+		return true
+	}
+	return false
 }
