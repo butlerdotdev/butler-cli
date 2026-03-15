@@ -1,0 +1,55 @@
+/*
+Copyright 2026 The Butler Authors.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
+package wizard
+
+import (
+	"github.com/charmbracelet/huh"
+	"github.com/charmbracelet/lipgloss"
+)
+
+// Butler brand colors matching butler-console and tui/styles.go.
+var (
+	brandGreen = lipgloss.Color("#22c55e")
+	brandBlue  = lipgloss.Color("#3b82f6")
+	brandRed   = lipgloss.Color("#ef4444")
+	brandGray  = lipgloss.Color("#a3a3a3")
+	brandText  = lipgloss.Color("#fafafa")
+	brandBg    = lipgloss.Color("#0a0a0a")
+	brandBgAlt = lipgloss.Color("#171717")
+)
+
+// butlerTheme returns a huh theme using the Butler brand palette.
+func butlerTheme() *huh.Theme {
+	t := huh.ThemeCharm()
+
+	// Focused field styles
+	t.Focused.Title = t.Focused.Title.Foreground(brandBlue).Bold(true)
+	t.Focused.Description = t.Focused.Description.Foreground(brandGray)
+	t.Focused.Base = t.Focused.Base.BorderForeground(brandGreen)
+	t.Focused.TextInput.Cursor = t.Focused.TextInput.Cursor.Foreground(brandGreen)
+	t.Focused.TextInput.Prompt = t.Focused.TextInput.Prompt.Foreground(brandGreen)
+	t.Focused.SelectSelector = t.Focused.SelectSelector.Foreground(brandGreen)
+	t.Focused.SelectedOption = t.Focused.SelectedOption.Foreground(brandGreen)
+	t.Focused.FocusedButton = t.Focused.FocusedButton.Background(brandGreen).Foreground(brandBg)
+	t.Focused.BlurredButton = t.Focused.BlurredButton.Foreground(brandGray)
+
+	// Blurred field styles
+	t.Blurred.Title = t.Blurred.Title.Foreground(brandGray)
+	t.Blurred.TextInput.Prompt = t.Blurred.TextInput.Prompt.Foreground(brandGray)
+
+	return t
+}
