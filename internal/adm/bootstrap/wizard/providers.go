@@ -20,48 +20,34 @@ import (
 	"github.com/charmbracelet/huh"
 )
 
-// harvesterStep builds the Harvester provider credentials step.
-func harvesterStep(s *wizardState) *huh.Group {
+// harvesterCredGroup builds the Harvester credential fields.
+// Hidden unless provider == "harvester".
+func harvesterCredGroup(s *wizardState) *huh.Group {
 	return huh.NewGroup(
 		huh.NewNote().
 			Title("Harvester Provider").
-			Description("Connect to your Harvester HCI cluster. These credentials are used\nto provision VMs for the management cluster."),
+			Description("Connect to your Harvester HCI cluster."),
 
 		huh.NewInput().
-			Title("Harvester Kubeconfig Path").
+			Title("Kubeconfig Path").
 			Description("Path to the Harvester cluster kubeconfig file").
 			Value(&s.harvKubeconfig).
 			Validate(validateNotEmpty),
-
-		huh.NewInput().
-			Title("VM Namespace").
-			Description("Namespace for VMs in Harvester").
-			Value(&s.harvNamespace).
-			Validate(validateNotEmpty),
-
-		huh.NewInput().
-			Title("Network Name").
-			Description("Harvester network (namespace/name format)").
-			Value(&s.harvNetwork).
-			Validate(validateNotEmpty),
-
-		huh.NewInput().
-			Title("Talos Image Name").
-			Description("Talos image in Harvester (namespace/name format)").
-			Value(&s.harvImage).
-			Validate(validateNotEmpty),
-	)
+	).WithHideFunc(func() bool {
+		return s.provider != "harvester"
+	})
 }
 
-// nutanixStep builds the Nutanix provider credentials step.
-func nutanixStep(s *wizardState) *huh.Group {
+// nutanixCredGroup builds the Nutanix credential fields.
+// Hidden unless provider == "nutanix".
+func nutanixCredGroup(s *wizardState) *huh.Group {
 	if s.nutPort == "" {
 		s.nutPort = "9440"
 	}
 	return huh.NewGroup(
 		huh.NewNote().
 			Title("Nutanix Provider").
-			Description("Connect to Prism Central. These credentials are used to provision\nAHV VMs for the management cluster."),
+			Description("Connect to Prism Central."),
 
 		huh.NewInput().
 			Title("Prism Central Endpoint").
@@ -89,33 +75,18 @@ func nutanixStep(s *wizardState) *huh.Group {
 			Value(&s.nutPassword).
 			EchoMode(huh.EchoModePassword).
 			Validate(validateNotEmpty),
-
-		huh.NewInput().
-			Title("Cluster UUID").
-			Description("Target Nutanix cluster").
-			Value(&s.nutClusterUUID).
-			Validate(validateNotEmpty),
-
-		huh.NewInput().
-			Title("Subnet UUID").
-			Description("Network subnet for VMs").
-			Value(&s.nutSubnetUUID).
-			Validate(validateNotEmpty),
-
-		huh.NewInput().
-			Title("Image UUID").
-			Description("Talos image in Prism Central").
-			Value(&s.nutImageUUID).
-			Validate(validateNotEmpty),
-	)
+	).WithHideFunc(func() bool {
+		return s.provider != "nutanix"
+	})
 }
 
-// gcpStep builds the GCP provider credentials step.
-func gcpStep(s *wizardState) *huh.Group {
+// gcpCredGroup builds the GCP credential fields.
+// Hidden unless provider == "gcp".
+func gcpCredGroup(s *wizardState) *huh.Group {
 	return huh.NewGroup(
 		huh.NewNote().
 			Title("GCP Provider").
-			Description("Connect to Google Cloud Platform. These credentials are used to\nprovision Compute Engine VMs for the management cluster."),
+			Description("Connect to Google Cloud Platform."),
 
 		huh.NewInput().
 			Title("Service Account Key Path").
@@ -127,36 +98,18 @@ func gcpStep(s *wizardState) *huh.Group {
 			Title("Project ID").
 			Value(&s.gcpProjectID).
 			Validate(validateNotEmpty),
-
-		huh.NewInput().
-			Title("Region").
-			Description("e.g., us-central1").
-			Value(&s.gcpRegion).
-			Validate(validateNotEmpty),
-
-		huh.NewInput().
-			Title("Zone").
-			Description("e.g., us-central1-a (defaults to {region}-a)").
-			Value(&s.gcpZone),
-
-		huh.NewInput().
-			Title("VPC Network").
-			Value(&s.gcpNetwork).
-			Validate(validateNotEmpty),
-
-		huh.NewInput().
-			Title("Subnetwork").
-			Description("Optional").
-			Value(&s.gcpSubnetwork),
-	)
+	).WithHideFunc(func() bool {
+		return s.provider != "gcp"
+	})
 }
 
-// awsStep builds the AWS provider credentials step.
-func awsStep(s *wizardState) *huh.Group {
+// awsCredGroup builds the AWS credential fields.
+// Hidden unless provider == "aws".
+func awsCredGroup(s *wizardState) *huh.Group {
 	return huh.NewGroup(
 		huh.NewNote().
 			Title("AWS Provider").
-			Description("Connect to Amazon Web Services. These credentials are used to\nprovision EC2 instances for the management cluster."),
+			Description("Connect to Amazon Web Services."),
 
 		huh.NewInput().
 			Title("Access Key ID").
@@ -168,36 +121,18 @@ func awsStep(s *wizardState) *huh.Group {
 			Value(&s.awsSecretKey).
 			EchoMode(huh.EchoModePassword).
 			Validate(validateNotEmpty),
-
-		huh.NewInput().
-			Title("Region").
-			Description("e.g., us-east-1").
-			Value(&s.awsRegion).
-			Validate(validateNotEmpty),
-
-		huh.NewInput().
-			Title("VPC ID").
-			Description("Optional").
-			Value(&s.awsVPCID),
-
-		huh.NewInput().
-			Title("Subnet ID").
-			Description("Optional").
-			Value(&s.awsSubnetID),
-
-		huh.NewInput().
-			Title("Security Group ID").
-			Description("Optional").
-			Value(&s.awsSecGroupID),
-	)
+	).WithHideFunc(func() bool {
+		return s.provider != "aws"
+	})
 }
 
-// azureStep builds the Azure provider credentials step.
-func azureStep(s *wizardState) *huh.Group {
+// azureCredGroup builds the Azure credential fields.
+// Hidden unless provider == "azure".
+func azureCredGroup(s *wizardState) *huh.Group {
 	return huh.NewGroup(
 		huh.NewNote().
 			Title("Azure Provider").
-			Description("Connect to Microsoft Azure. These credentials are used to\nprovision VMs for the management cluster."),
+			Description("Connect to Microsoft Azure."),
 
 		huh.NewInput().
 			Title("Client ID").
@@ -220,16 +155,7 @@ func azureStep(s *wizardState) *huh.Group {
 			Title("Subscription ID").
 			Value(&s.azSubscriptionID).
 			Validate(validateNotEmpty),
-
-		huh.NewInput().
-			Title("Resource Group").
-			Value(&s.azResourceGroup).
-			Validate(validateNotEmpty),
-
-		huh.NewInput().
-			Title("Location").
-			Description("e.g., eastus").
-			Value(&s.azLocation).
-			Validate(validateNotEmpty),
-	)
+	).WithHideFunc(func() bool {
+		return s.provider != "azure"
+	})
 }

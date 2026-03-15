@@ -53,3 +53,10 @@ func butlerTheme() *huh.Theme {
 
 	return t
 }
+
+// vimKeyMap returns a huh KeyMap with vim-style navigation. huh v1
+// already includes j/k bindings in its default keymap; this function
+// makes the intent explicit and provides a single place to customize.
+func vimKeyMap() *huh.KeyMap {
+	return huh.NewDefaultKeyMap()
+}

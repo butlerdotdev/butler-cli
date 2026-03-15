@@ -18,12 +18,21 @@ limitations under the License.
 package bootstrap
 
 import (
+	"context"
+	"fmt"
+	"time"
+
+	"github.com/butlerdotdev/butler/internal/adm/bootstrap/orchestrator"
+	"github.com/butlerdotdev/butler/internal/adm/bootstrap/tui"
+	"github.com/butlerdotdev/butler/internal/adm/bootstrap/wizard"
 	"github.com/butlerdotdev/butler/internal/common/log"
 	"github.com/spf13/cobra"
 )
 
-// NewBootstrapCmd creates the bootstrap parent command
+// NewBootstrapCmd creates the bootstrap parent command.
 func NewBootstrapCmd(logger *log.Logger) *cobra.Command {
+	var interactive bool
+
 	cmd := &cobra.Command{
 		Use:   "bootstrap",
 		Short: "Bootstrap a Butler management cluster",
@@ -40,13 +49,22 @@ The bootstrap process:
 
 The management cluster runs on your infrastructure and becomes self-managing.
 
+Use --interactive to launch the guided wizard, or use a provider
+subcommand with --config for file-based configuration.
+
 Example:
+  butleradm bootstrap --interactive
   butleradm bootstrap harvester --config bootstrap.yaml`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			cmd.Help()
-			return nil
+			if interactive {
+				return runInteractiveBootstrap(cmd, logger)
+			}
+			return cmd.Help()
 		},
 	}
+
+	cmd.Flags().BoolVarP(&interactive, "interactive", "i", false,
+		"launch interactive bootstrap wizard")
 
 	// Register provider subcommands
 	cmd.AddCommand(NewHarvesterCmd(logger))
@@ -56,4 +74,34 @@ Example:
 	cmd.AddCommand(NewAzureCmd(logger))
 
 	return cmd
+}
+
+// runInteractiveBootstrap launches the wizard and then runs the TUI
+// bootstrap flow with the wizard-produced config.
+func runInteractiveBootstrap(cmd *cobra.Command, logger *log.Logger) error {
+	cfg, err := wizard.Run()
+	if err != nil {
+		return err
+	}
+
+	if cfg == nil {
+		return fmt.Errorf("wizard returned no configuration")
+	}
+
+	ctx, cancel := context.WithCancel(cmd.Context())
+	defer cancel()
+
+	orchOptions := orchestrator.Options{
+		Timeout: 60 * time.Minute,
+	}
+
+	return tui.Run(tui.RunConfig{
+		Ctx:              ctx,
+		Cancel:           cancel,
+		Cfg:              cfg,
+		OrcOptions:       orchOptions,
+		LoggerName:       logger.Name(),
+		LogLevel:         logger.Level(),
+		SkipPreBootstrap: true,
+	})
 }

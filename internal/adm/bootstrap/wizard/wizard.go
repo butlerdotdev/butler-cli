@@ -27,6 +27,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/butlerdotdev/butler/internal/adm/bootstrap/orchestrator"
+	"github.com/butlerdotdev/butler/internal/adm/bootstrap/wizard/discovery"
 	"github.com/butlerdotdev/butler/internal/common/version"
 )
 
@@ -50,7 +51,7 @@ const butlerLogo = `
  ╚═════╝  ╚══════╝`
 
 // printBanner displays the branded header before the wizard starts.
-func printBanner(provider string) {
+func printBanner() {
 	green := lipgloss.NewStyle().Foreground(brandGreen).Bold(true)
 	dim := lipgloss.NewStyle().Foreground(brandGray)
 	blue := lipgloss.NewStyle().Foreground(brandBlue)
@@ -60,60 +61,59 @@ func printBanner(provider string) {
 	fmt.Println(green.Render("  B U T L E R"))
 	fmt.Println(blue.Render("  Bootstrap Wizard"))
 	fmt.Println()
-
-	info := []string{
-		dim.Render("  Version:  ") + version.Full(),
-		dim.Render("  Provider: ") + green.Render(strings.ToUpper(provider)),
-	}
-	for _, line := range info {
-		fmt.Println(line)
-	}
+	fmt.Println(dim.Render("  Version: ") + version.Full())
 	fmt.Println()
 }
 
-// Run launches the interactive bootstrap wizard for the given provider.
-// It walks the user through all configuration steps and returns a
-// fully populated Config ready for the orchestrator.
+// Run launches the interactive bootstrap wizard. The user selects a
+// provider, enters credentials, and the wizard connects to the provider
+// to discover available resources. A second form presents the discovered
+// resources as selectable options alongside cluster configuration.
 //
 // The wizard flow is:
-//  1. Provider credentials (authenticate first for potential dynamic lookups)
-//  2. Cluster identity + control plane sizing
-//  3. Workers + networking (or just networking for single-node)
-//  4. Platform config (Talos, addons, Butler components)
-//  5. Console details (if enabled)
-//  6. Confirm
-func Run(provider string) (*orchestrator.Config, error) {
-	printBanner(provider)
+//  1. Form 1: Provider selection + credentials
+//  2. Async discovery phase (bubbletea model with concurrent resource fetches)
+//  3. Form 2: Resource selection + cluster config + addons + confirm
+func Run() (*orchestrator.Config, error) {
+	printBanner()
 
 	s := newWizardState()
-	onPrem := isOnPrem(provider)
 
-	// Step 1: Provider credentials first -- authenticate early so future
-	// steps could dynamically pull options from the platform.
-	var providerGroup *huh.Group
-	switch provider {
-	case "harvester":
-		providerGroup = harvesterStep(s)
-	case "nutanix":
-		providerGroup = nutanixStep(s)
-	case "gcp":
-		providerGroup = gcpStep(s)
-	case "aws":
-		providerGroup = awsStep(s)
-	case "azure":
-		providerGroup = azureStep(s)
-	default:
-		return nil, fmt.Errorf("unsupported provider: %s", provider)
+	// Form 1: Provider selection and credentials.
+	form1 := huh.NewForm(
+		providerSelectGroup(s),
+		harvesterCredGroup(s),
+		nutanixCredGroup(s),
+		gcpCredGroup(s),
+		awsCredGroup(s),
+		azureCredGroup(s),
+	).WithTheme(butlerTheme()).WithKeyMap(vimKeyMap())
+
+	if err := form1.Run(); err != nil {
+		return nil, fmt.Errorf("wizard cancelled: %w", err)
 	}
 
-	groups := []*huh.Group{
-		providerGroup,                           // 1. Auth
-		clusterAndSizingStep(s),                 // 2. Cluster + CP sizing
-		workersAndNetworkStep(s, onPrem),         // 3a. Workers + network (HA only)
-		networkOnlyStep(s, onPrem),               // 3b. Network only (single-node only)
-		platformStep(s, onPrem),                  // 4. Talos + addons
-		consoleStep(s),                           // 5. Console (if enabled)
-		huh.NewGroup(                             // 6. Confirm
+	// Connect to provider and discover resources.
+	creds := &stateCredentials{s: s}
+	disc, err := discovery.NewDiscovery(s.provider, creds)
+	if err != nil {
+		return nil, fmt.Errorf("creating discovery client: %w", err)
+	}
+
+	resources, err := runDiscovery(s.provider, disc)
+	if err != nil {
+		return nil, err
+	}
+
+	// Form 2: Resource selection and cluster configuration.
+	form2 := huh.NewForm(
+		resourceSelectGroup(s, disc, resources),
+		clusterAndSizingStep(s),
+		workersAndNetworkStep(s),
+		networkOnlyStep(s),
+		platformStep(s),
+		consoleStep(s),
+		huh.NewGroup(
 			huh.NewConfirm().
 				Title("Start Bootstrap?").
 				Description("Review complete. Begin provisioning the management cluster?").
@@ -121,11 +121,9 @@ func Run(provider string) (*orchestrator.Config, error) {
 				Negative("Cancel").
 				Value(&s.confirmed),
 		),
-	}
+	).WithTheme(butlerTheme()).WithKeyMap(vimKeyMap())
 
-	form := huh.NewForm(groups...).WithTheme(butlerTheme())
-
-	if err := form.Run(); err != nil {
+	if err := form2.Run(); err != nil {
 		return nil, fmt.Errorf("wizard cancelled: %w", err)
 	}
 
@@ -133,11 +131,11 @@ func Run(provider string) (*orchestrator.Config, error) {
 		return nil, fmt.Errorf("bootstrap cancelled by user")
 	}
 
-	return buildConfig(provider, s)
+	return buildConfig(s)
 }
 
 // buildConfig converts the wizard state into an orchestrator.Config.
-func buildConfig(provider string, s *wizardState) (*orchestrator.Config, error) {
+func buildConfig(s *wizardState) (*orchestrator.Config, error) {
 	cpReplicas, err := parseInt32(s.cpReplicas)
 	if err != nil {
 		return nil, fmt.Errorf("control plane replicas: %w", err)
@@ -156,7 +154,7 @@ func buildConfig(provider string, s *wizardState) (*orchestrator.Config, error) 
 	}
 
 	cfg := &orchestrator.Config{
-		Provider: provider,
+		Provider: s.provider,
 		Cluster: orchestrator.ClusterConfig{
 			Name:     s.clusterName,
 			Topology: s.topology,
@@ -211,7 +209,7 @@ func buildConfig(provider string, s *wizardState) (*orchestrator.Config, error) 
 	}
 
 	// Load balancer (on-prem only)
-	if isOnPrem(provider) {
+	if isOnPrem(s.provider) && s.lbType != "none" {
 		cfg.Addons.LoadBalancer = orchestrator.LoadBalancerConfig{
 			Type:        s.lbType,
 			AddressPool: s.lbPool,
@@ -253,7 +251,7 @@ func buildConfig(provider string, s *wizardState) (*orchestrator.Config, error) 
 	}
 
 	// Provider-specific config
-	switch provider {
+	switch s.provider {
 	case "harvester":
 		cfg.ProviderConfig.Harvester = &orchestrator.HarvesterProviderConfig{
 			KubeconfigPath: s.harvKubeconfig,
@@ -284,11 +282,11 @@ func buildConfig(provider string, s *wizardState) (*orchestrator.Config, error) 
 		}
 	case "aws":
 		cfg.ProviderConfig.AWS = &orchestrator.AWSProviderConfig{
-			AccessKeyID:    s.awsAccessKey,
-			SecretAccessKey: s.awsSecretKey,
-			Region:         s.awsRegion,
-			VPCID:          s.awsVPCID,
-			SubnetID:       s.awsSubnetID,
+			AccessKeyID:     s.awsAccessKey,
+			SecretAccessKey:  s.awsSecretKey,
+			Region:          s.awsRegion,
+			VPCID:           s.awsVPCID,
+			SubnetID:        s.awsSubnetID,
 			SecurityGroupID: s.awsSecGroupID,
 		}
 	case "azure":
@@ -307,7 +305,7 @@ func buildConfig(provider string, s *wizardState) (*orchestrator.Config, error) 
 
 // parseInt32 parses a string to int32.
 func parseInt32(s string) (int32, error) {
-	v, err := strconv.ParseInt(s, 10, 32)
+	v, err := strconv.ParseInt(strings.TrimSpace(s), 10, 32)
 	if err != nil {
 		return 0, err
 	}

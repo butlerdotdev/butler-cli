@@ -26,18 +26,16 @@ import (
 
 	"github.com/butlerdotdev/butler/internal/adm/bootstrap/orchestrator"
 	"github.com/butlerdotdev/butler/internal/adm/bootstrap/tui"
-	"github.com/butlerdotdev/butler/internal/adm/bootstrap/wizard"
 	"github.com/butlerdotdev/butler/internal/common/log"
 	"github.com/butlerdotdev/butler/internal/common/output"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
 
-// NewNutanixCmd creates the nutanix bootstrap subcommand
+// NewNutanixCmd creates the nutanix bootstrap subcommand.
 func NewNutanixCmd(logger *log.Logger) *cobra.Command {
 	var (
 		configFile    string
-		interactive   bool
 		dryRun        bool
 		skipCleanup   bool
 		localDev      bool
@@ -55,57 +53,39 @@ func NewNutanixCmd(logger *log.Logger) *cobra.Command {
 
 Nutanix AHV is an enterprise hypervisor built into the Nutanix platform.
 Butler provisions Talos Linux VMs running Kubernetes with:
-  • Cilium CNI (kube-proxy replacement)
-  • kube-vip for control plane HA
-  • Longhorn distributed storage
-  • MetalLB for LoadBalancer services
-  • FluxCD for GitOps
+  - Cilium CNI (kube-proxy replacement)
+  - kube-vip for control plane HA
+  - Longhorn distributed storage
+  - MetalLB for LoadBalancer services
+  - FluxCD for GitOps
 
 Prerequisites:
-  • Docker running locally
-  • Nutanix Prism Central access (endpoint, username, password)
-  • Talos image uploaded to Prism Central
-  • Network subnet configured for VMs
+  - Docker running locally
+  - Nutanix Prism Central access (endpoint, username, password)
+  - Talos image uploaded to Prism Central
+  - Network subnet configured for VMs
 
 Example:
   butleradm bootstrap nutanix --config bootstrap-nutanix.yaml
-  
-Local Development:
-  butleradm bootstrap nutanix --config bootstrap-nutanix.yaml --local
-  butleradm bootstrap nutanix --config bootstrap-nutanix.yaml --local --repo-root ~/code/github.com/butlerdotdev`,
-		RunE: func(cmd *cobra.Command, args []string) error {
-			if !interactive && configFile == "" {
-				return fmt.Errorf("must provide --config or use --interactive (-i)")
-			}
 
+Local Development:
+  butleradm bootstrap nutanix --config bootstrap-nutanix.yaml --local`,
+		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx, cancel := context.WithCancel(cmd.Context())
 			defer cancel()
 
-			var cfg *orchestrator.Config
-			skipPreBootstrap := false
+			viper.SetConfigFile(configFile)
+			if err := viper.ReadInConfig(); err != nil {
+				return fmt.Errorf("reading config file: %w", err)
+			}
 
-			if interactive {
-				var err error
-				cfg, err = wizard.Run("nutanix")
-				if err != nil {
-					return err
-				}
-				skipPreBootstrap = true
-			} else {
-				viper.SetConfigFile(configFile)
-				if err := viper.ReadInConfig(); err != nil {
-					return fmt.Errorf("reading config file: %w", err)
-				}
+			cfg, err := orchestrator.LoadConfig()
+			if err != nil {
+				return fmt.Errorf("parsing config: %w", err)
+			}
 
-				var err error
-				cfg, err = orchestrator.LoadConfig()
-				if err != nil {
-					return fmt.Errorf("parsing config: %w", err)
-				}
-
-				if cfg.Provider != "nutanix" {
-					return fmt.Errorf("provider must be 'nutanix', got %q", cfg.Provider)
-				}
+			if cfg.Provider != "nutanix" {
+				return fmt.Errorf("provider must be 'nutanix', got %q", cfg.Provider)
 			}
 
 			// Apply CLI flag overrides
@@ -144,7 +124,6 @@ Local Development:
 				return fmt.Errorf("providerConfig.nutanix.subnetUUID is required")
 			}
 
-			// Determine repo root for local dev
 			if localDev && repoRoot == "" {
 				home, _ := os.UserHomeDir()
 				repoRoot = home + "/code/github.com/butlerdotdev"
@@ -158,20 +137,17 @@ Local Development:
 				RepoRoot:    repoRoot,
 			}
 
-			// Use TUI when stdout is a terminal and not explicitly disabled
 			if output.IsTTY() && !noTUI && !dryRun {
 				return tui.Run(tui.RunConfig{
-					Ctx:              ctx,
-					Cancel:           cancel,
-					Cfg:              cfg,
-					OrcOptions:       orchOptions,
-					LoggerName:       logger.Name(),
-					LogLevel:         logger.Level(),
-					SkipPreBootstrap: skipPreBootstrap,
+					Ctx:        ctx,
+					Cancel:     cancel,
+					Cfg:        cfg,
+					OrcOptions: orchOptions,
+					LoggerName: logger.Name(),
+					LogLevel:   logger.Level(),
 				})
 			}
 
-			// Non-interactive mode: handle signals directly
 			sigCh := make(chan os.Signal, 1)
 			signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
 			go func() {
@@ -181,16 +157,11 @@ Local Development:
 			}()
 
 			orch := orchestrator.New(logger, orchOptions)
-			if err := orch.Run(ctx, cfg); err != nil {
-				return err
-			}
-
-			return nil
+			return orch.Run(ctx, cfg)
 		},
 	}
 
 	cmd.Flags().StringVarP(&configFile, "config", "c", "", "path to bootstrap config file")
-	cmd.Flags().BoolVarP(&interactive, "interactive", "i", false, "configure bootstrap interactively via wizard")
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "show what would be created without executing")
 	cmd.Flags().BoolVar(&skipCleanup, "skip-cleanup", false, "don't delete KIND cluster on failure (for debugging)")
 	cmd.Flags().BoolVar(&localDev, "local", false, "local development mode - build and load images from source")
@@ -199,7 +170,7 @@ Local Development:
 	cmd.Flags().StringVar(&prismUsername, "prism-username", "", "Nutanix Prism Central username (overrides config file)")
 	cmd.Flags().StringVar(&prismPassword, "prism-password", "", "Nutanix Prism Central password (overrides config file)")
 	cmd.Flags().BoolVar(&noTUI, "no-tui", false, "disable interactive TUI (use line-by-line output)")
-	cmd.MarkFlagsMutuallyExclusive("config", "interactive")
+	_ = cmd.MarkFlagRequired("config")
 
 	return cmd
 }
