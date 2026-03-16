@@ -20,13 +20,14 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/spf13/viper"
 )
 
 // Config represents the bootstrap configuration
 type Config struct {
-	// Provider is the infrastructure provider (harvester, nutanix, proxmox)
+	// Provider is the infrastructure provider (harvester, nutanix, proxmox, gcp, aws, azure)
 	Provider string `mapstructure:"provider"`
 
 	// Cluster defines the management cluster configuration
@@ -43,6 +44,49 @@ type Config struct {
 
 	// ProviderConfig contains provider-specific settings
 	ProviderConfig ProviderConfig `mapstructure:"providerConfig"`
+
+	// ControlPlaneExposure configures how tenant control planes are exposed.
+	// Set on ClusterBootstrap; the bootstrap controller copies it to ButlerConfig.
+	ControlPlaneExposure ControlPlaneExposureConfig `mapstructure:"controlPlaneExposure"`
+
+	// ProviderNetwork configures IPAM and networking on the ProviderConfig CRD.
+	ProviderNetwork ProviderNetworkConfig `mapstructure:"providerNetwork"`
+}
+
+// ControlPlaneExposureConfig defines how tenant API servers are exposed.
+type ControlPlaneExposureConfig struct {
+	// Mode: LoadBalancer (1 IP per tenant), Ingress (shared IP via SNI), Gateway (shared IP via Gateway API)
+	Mode string `mapstructure:"mode"`
+
+	// Hostname is the wildcard domain for tenant API servers (required for Ingress/Gateway)
+	Hostname string `mapstructure:"hostname"`
+
+	// IngressClassName specifies the Ingress class (Ingress mode only)
+	IngressClassName string `mapstructure:"ingressClassName"`
+
+	// ControllerType specifies the ingress controller type: haproxy, nginx, traefik, generic
+	ControllerType string `mapstructure:"controllerType"`
+
+	// GatewayRef references the Gateway resource (Gateway mode only, format: namespace/name)
+	GatewayRef string `mapstructure:"gatewayRef"`
+}
+
+// ProviderNetworkConfig configures IPAM and networking on the ProviderConfig CRD.
+type ProviderNetworkConfig struct {
+	// Mode: "ipam" for on-prem (NetworkPool-based), "cloud" for cloud-native networking
+	Mode string `mapstructure:"mode"`
+
+	// Gateway is the network gateway address
+	Gateway string `mapstructure:"gateway"`
+
+	// DNSServers are the DNS server addresses
+	DNSServers []string `mapstructure:"dnsServers"`
+
+	// LBAllocMode controls how tenant LB IPs are allocated: "static" (fixed pool) or "elastic" (grow/shrink)
+	LBAllocMode string `mapstructure:"lbAllocMode"`
+
+	// LBPoolSize is the default number of LB IPs allocated per tenant (static mode) or initial size (elastic mode)
+	LBPoolSize int32 `mapstructure:"lbPoolSize"`
 }
 
 // ClusterConfig defines cluster specifications
@@ -152,8 +196,14 @@ type LoadBalancerConfig struct {
 	// Type is the load balancer type (metallb)
 	Type string `mapstructure:"type"`
 
-	// AddressPool is the IP address range for LoadBalancer services
+	// AddressPool is the IP address range for LoadBalancer services (deprecated, use Start/End)
 	AddressPool string `mapstructure:"addressPool"`
+
+	// Start is the first IP in the MetalLB address pool (preferred over AddressPool)
+	Start string `mapstructure:"start"`
+
+	// End is the last IP in the MetalLB address pool (preferred over AddressPool)
+	End string `mapstructure:"end"`
 }
 
 // GitOpsConfig defines GitOps configuration
@@ -411,6 +461,9 @@ type AzureProviderConfig struct {
 
 	// VMSize is the Azure VM size (e.g., "Standard_D4s_v3")
 	VMSize string `mapstructure:"vmSize,omitempty"`
+
+	// Image is the VM image reference (Shared Gallery ID, URN, or managed image ID)
+	Image string `mapstructure:"image,omitempty"`
 }
 
 // LoadConfig loads the bootstrap configuration from viper
@@ -428,7 +481,7 @@ func LoadConfig() (*Config, error) {
 		cfg.Network.ServiceCIDR = "10.96.0.0/12"
 	}
 	if cfg.Talos.Version == "" {
-		cfg.Talos.Version = "v1.9.0"
+		cfg.Talos.Version = "v1.12.2"
 	}
 	if cfg.Addons.CNI.Type == "" {
 		cfg.Addons.CNI.Type = "cilium"
@@ -441,6 +494,39 @@ func LoadConfig() (*Config, error) {
 	}
 	// GitOps is not enabled during bootstrap. It can be configured
 	// post-bootstrap via ButlerConfig or TenantCluster addons.
+
+	// Control plane exposure defaults
+	if cfg.ControlPlaneExposure.Mode == "" {
+		cfg.ControlPlaneExposure.Mode = "LoadBalancer"
+	}
+
+	// Parse deprecated addressPool into structured Start/End
+	if cfg.Addons.LoadBalancer.Start == "" && cfg.Addons.LoadBalancer.End == "" && cfg.Addons.LoadBalancer.AddressPool != "" {
+		if parts := strings.SplitN(cfg.Addons.LoadBalancer.AddressPool, "-", 2); len(parts) == 2 {
+			cfg.Addons.LoadBalancer.Start = strings.TrimSpace(parts[0])
+			cfg.Addons.LoadBalancer.End = strings.TrimSpace(parts[1])
+		}
+	}
+
+	// Auto-set provider network mode based on provider type
+	if cfg.ProviderNetwork.Mode == "" {
+		switch cfg.Provider {
+		case "harvester", "nutanix", "proxmox":
+			cfg.ProviderNetwork.Mode = "ipam"
+		case "gcp", "aws", "azure":
+			cfg.ProviderNetwork.Mode = "cloud"
+		}
+	}
+
+	// IPAM defaults for on-prem
+	if cfg.ProviderNetwork.Mode == "ipam" {
+		if cfg.ProviderNetwork.LBAllocMode == "" {
+			cfg.ProviderNetwork.LBAllocMode = "static"
+		}
+		if cfg.ProviderNetwork.LBPoolSize == 0 {
+			cfg.ProviderNetwork.LBPoolSize = 8
+		}
+	}
 
 	// Topology defaults and validation
 	if cfg.Cluster.Topology == "" {

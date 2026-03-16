@@ -19,6 +19,7 @@ package wizard
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/charmbracelet/huh"
@@ -31,7 +32,8 @@ import (
 // parsed to int32 when building the final Config.
 type wizardState struct {
 	// Provider selection
-	provider string
+	provider    string
+	imageSource string // "factory" or "existing"
 
 	// Cluster basics
 	clusterName string
@@ -58,12 +60,26 @@ type wizardState struct {
 	talosVersion   string
 	talosSchematic string
 
+	// Control plane exposure
+	exposureMode           string
+	exposureHostname       string
+	exposureIngressClass   string
+	exposureControllerType string
+	exposureGatewayRef     string
+
+	// Provider network / IPAM (on-prem)
+	providerGateway string
+	providerDNS     string
+	lbAllocMode     string
+	lbPoolSize      string
+
 	// Addons
-	cniType      string
-	storageType  string
-	lbType       string
-	lbPool       string
-	capiEnabled  bool
+	cniType     string
+	storageType string
+	lbType      string
+	lbStart     string
+	lbEnd       string
+	capiEnabled bool
 	capiVersion  string
 	ctrlEnabled  bool
 	ctrlVersion  string
@@ -125,6 +141,7 @@ type wizardState struct {
 
 func newWizardState() *wizardState {
 	return &wizardState{
+		imageSource:    "factory",
 		topology:       "ha",
 		cpReplicas:     "3",
 		cpCPU:          "4",
@@ -136,16 +153,21 @@ func newWizardState() *wizardState {
 		workerDiskGB:   "100",
 		podCIDR:        "10.244.0.0/16",
 		serviceCIDR:    "10.96.0.0/12",
-		talosVersion:   "v1.9.0",
+		talosVersion:   "v1.12.2",
+		talosSchematic: discovery.DefaultTalosSchematic,
+		exposureMode:   "LoadBalancer",
+		lbAllocMode:    "static",
+		lbPoolSize:     "1",
 		cniType:        "cilium",
 		storageType:    "longhorn",
 		lbType:         "metallb",
 		capiEnabled:    true,
-		capiVersion:    "v1.9.0",
+		capiVersion:    "v1.9.4",
 		ctrlEnabled:    true,
 		ctrlVersion:    "latest",
 		consEnabled:    true,
 		consVersion:    "latest",
+		consPassword:   "admin",
 	}
 }
 
@@ -240,7 +262,7 @@ func resourceSelectGroup(s *wizardState, disc discovery.ProviderDiscovery, resou
 	case "harvester":
 		return harvesterResourceGroup(s, disc, resources)
 	case "nutanix":
-		return nutanixResourceGroup(s, disc, resources)
+		return nutanixResourceGroup(s, resources)
 	case "gcp":
 		return gcpResourceGroup(s, disc, resources)
 	case "aws":
@@ -308,19 +330,34 @@ func harvesterResourceGroup(s *wizardState, disc discovery.ProviderDiscovery, re
 			Value(&s.harvNetwork),
 
 		huh.NewSelect[string]().
+			Title("Image Source").
+			Description("Sync the latest Talos image from Butler Image Factory,\nor pick an image already uploaded to Harvester.").
+			Options(
+				huh.NewOption("Sync from Image Factory (recommended)", "factory"),
+				huh.NewOption("Use existing provider image", "existing"),
+			).
+			Value(&s.imageSource),
+
+		huh.NewSelect[string]().
 			Title("Image").
-			Description("Select a Talos image or sync a new one").
-			OptionsFunc(fetchOptions(disc, discovery.ResourceImages, &s.harvNamespace), &s.harvNamespace).
+			Description("Talos image for VM boot disks").
+			OptionsFunc(func() []huh.Option[string] {
+				if s.imageSource == "factory" {
+					return []huh.Option[string]{
+						huh.NewOption("(will sync after configuration)", "factory-pending"),
+					}
+				}
+				return fetchOptions(disc, discovery.ResourceImages, &s.harvNamespace)()
+			}, &s.imageSource).
 			Value(&s.harvImage),
 	)
 }
 
 // nutanixResourceGroup builds resource selection for Nutanix.
 // All resources are top-level (no cascading).
-func nutanixResourceGroup(s *wizardState, _ discovery.ProviderDiscovery, resources map[string][]discovery.ProviderResource) *huh.Group {
+func nutanixResourceGroup(s *wizardState, resources map[string][]discovery.ProviderResource) *huh.Group {
 	clusterOpts := resourcesToOptions(resources[discovery.ResourceClusters])
 	subnetOpts := resourcesToOptions(resources[discovery.ResourceSubnets])
-	imageOpts := resourcesToOptions(resources[discovery.ResourceImages])
 
 	return huh.NewGroup(
 		huh.NewNote().
@@ -338,9 +375,25 @@ func nutanixResourceGroup(s *wizardState, _ discovery.ProviderDiscovery, resourc
 			Value(&s.nutSubnetUUID),
 
 		huh.NewSelect[string]().
+			Title("Image Source").
+			Description("Sync the latest Talos image from Butler Image Factory,\nor pick an image already uploaded to Nutanix.").
+			Options(
+				huh.NewOption("Sync from Image Factory (recommended)", "factory"),
+				huh.NewOption("Use existing provider image", "existing"),
+			).
+			Value(&s.imageSource),
+
+		huh.NewSelect[string]().
 			Title("Image").
-			Description("Select a Talos image or sync a new one").
-			Options(imageOpts...).
+			Description("Talos image for VM boot disks").
+			OptionsFunc(func() []huh.Option[string] {
+				if s.imageSource == "factory" {
+					return []huh.Option[string]{
+						huh.NewOption("(will sync after configuration)", "factory-pending"),
+					}
+				}
+				return resourcesToOptions(resources[discovery.ResourceImages])
+			}, &s.imageSource).
 			Value(&s.nutImageUUID),
 	)
 }
@@ -445,8 +498,8 @@ func azureResourceGroup(s *wizardState, disc discovery.ProviderDiscovery, resour
 	)
 }
 
-// clusterAndSizingStep combines cluster identity and control plane sizing
-// into a single dense page.
+// clusterAndSizingStep combines cluster identity and control plane sizing.
+// CP Replicas is hidden for single-node topology since it is forced to 1.
 func clusterAndSizingStep(s *wizardState) *huh.Group {
 	return huh.NewGroup(
 		huh.NewNote().
@@ -455,6 +508,7 @@ func clusterAndSizingStep(s *wizardState) *huh.Group {
 
 		huh.NewInput().
 			Title("Cluster Name").
+			Placeholder("butler-mgmt").
 			Description("Lowercase alphanumeric with hyphens, max 63 chars").
 			Value(&s.clusterName).
 			Validate(validateClusterName),
@@ -469,7 +523,7 @@ func clusterAndSizingStep(s *wizardState) *huh.Group {
 
 		huh.NewInput().
 			Title("CP Replicas").
-			Description("Control plane nodes (odd for etcd quorum)").
+			Description("Control plane nodes (odd number for etcd quorum)").
 			Value(&s.cpReplicas).
 			Validate(validateIntRange(1, 7)),
 
@@ -490,9 +544,8 @@ func clusterAndSizingStep(s *wizardState) *huh.Group {
 	)
 }
 
-// workersAndNetworkStep combines worker sizing and network config into
-// one page. Hidden for single-node topology. VIP is only shown for
-// on-prem providers.
+// workersAndNetworkStep combines worker sizing and network config.
+// Hidden for single-node topology. VIP is only shown for on-prem.
 func workersAndNetworkStep(s *wizardState) *huh.Group {
 	fields := []huh.Field{
 		huh.NewNote().
@@ -528,12 +581,6 @@ func workersAndNetworkStep(s *wizardState) *huh.Group {
 			Title("Service CIDR").
 			Value(&s.serviceCIDR).
 			Validate(validateCIDR),
-
-		huh.NewInput().
-			Title("Control Plane VIP").
-			Description("Virtual IP for HA. Required for on-prem, skipped for cloud.").
-			Value(&s.vip).
-			Validate(validateOptional(validateIP)),
 	}
 
 	return huh.NewGroup(fields...).WithHideFunc(func() bool {
@@ -543,7 +590,7 @@ func workersAndNetworkStep(s *wizardState) *huh.Group {
 
 // networkOnlyStep shows just networking fields for single-node topology.
 func networkOnlyStep(s *wizardState) *huh.Group {
-	fields := []huh.Field{
+	return huh.NewGroup(
 		huh.NewNote().
 			Title("Networking").
 			Description("Configure cluster networking."),
@@ -557,25 +604,142 @@ func networkOnlyStep(s *wizardState) *huh.Group {
 			Title("Service CIDR").
 			Value(&s.serviceCIDR).
 			Validate(validateCIDR),
-
-		huh.NewInput().
-			Title("Control Plane VIP").
-			Description("Virtual IP. Required for on-prem, skipped for cloud.").
-			Value(&s.vip).
-			Validate(validateOptional(validateIP)),
-	}
-
-	return huh.NewGroup(fields...).WithHideFunc(func() bool {
+	).WithHideFunc(func() bool {
 		return s.topology != "single-node"
 	})
 }
 
-// platformStep combines Talos config, addons, and component toggles.
+// networkingStep consolidates all on-prem networking into one page.
+// Covers management cluster MetalLB + tenant IPAM allocation settings.
+// Hidden for cloud providers (they handle networking natively).
+func networkingStep(s *wizardState) *huh.Group {
+	return huh.NewGroup(
+		huh.NewNote().
+			Title("Networking").
+			Description("Management cluster VIP and MetalLB pool, plus tenant IPAM\nallocation settings stored on the ProviderConfig."),
+
+		// --- Management cluster networking ---
+		huh.NewInput().
+			Title("Control Plane VIP").
+			Description("Unused IP for kube-vip HA. Must be outside DHCP range.").
+			Placeholder("10.40.0.100").
+			Value(&s.vip).
+			Validate(validateOptional(validateIP)),
+
+		huh.NewInput().
+			Title("Management LB Pool Start").
+			Description("First IP for management cluster LoadBalancer services\n(console, steward TCPs in LB mode). Used by MetalLB.").
+			Placeholder("10.40.0.200").
+			Value(&s.lbStart).
+			Validate(validateIP),
+
+		huh.NewInput().
+			Title("Management LB Pool End").
+			Description("Last IP for management cluster LoadBalancer services").
+			Placeholder("10.40.0.250").
+			Value(&s.lbEnd).
+			Validate(validateIP),
+
+		// --- Tenant IPAM allocation ---
+		huh.NewSelect[string]().
+			Title("Tenant LB Allocation Mode").
+			Description("How LoadBalancer IPs are allocated to tenant clusters.\nStatic: fixed pool per tenant. Elastic: grows/shrinks with demand.").
+			Options(
+				huh.NewOption("Static (fixed pool per tenant)", "static"),
+				huh.NewOption("Elastic (auto-scale with demand)", "elastic"),
+			).
+			Value(&s.lbAllocMode),
+
+		huh.NewInput().
+			Title("Default LB IPs per Tenant").
+			Description("Number of LoadBalancer IPs allocated per tenant cluster").
+			Value(&s.lbPoolSize).
+			Validate(validateIntRange(1, 256)),
+	).WithHideFunc(func() bool {
+		return !isOnPrem(s.provider)
+	})
+}
+
+// exposureModeStep selects how tenant control planes are exposed.
+// Hidden for single-node topology (not relevant for single management node).
+func exposureModeStep(s *wizardState) *huh.Group {
+	return huh.NewGroup(
+		huh.NewSelect[string]().
+			Title("Control Plane Exposure Mode").
+			Description("How tenant API servers are exposed to clients.\nLoadBalancer: 1 IP per tenant (default, simplest)\nIngress: shared IP via SNI (requires tcp-proxy)\nGateway: shared IP via Gateway API (requires tcp-proxy)").
+			Options(
+				huh.NewOption("LoadBalancer (1 IP per tenant)", "LoadBalancer"),
+				huh.NewOption("Ingress (shared IP, SNI routing)", "Ingress"),
+				huh.NewOption("Gateway (shared IP, Gateway API)", "Gateway"),
+			).
+			Value(&s.exposureMode),
+	).WithHideFunc(func() bool {
+		return s.topology == "single-node"
+	})
+}
+
+// exposureIngressStep configures Ingress-mode exposure details.
+// Only shown when exposure mode is Ingress.
+func exposureIngressStep(s *wizardState) *huh.Group {
+	return huh.NewGroup(
+		huh.NewInput().
+			Title("Hostname Pattern").
+			Description("Wildcard domain for tenant API servers\n(e.g., *.k8s.example.com)").
+			Placeholder("*.k8s.example.com").
+			Value(&s.exposureHostname).
+			Validate(validateNotEmpty),
+
+		huh.NewInput().
+			Title("Ingress Class").
+			Description("Ingress class name for TCP routing").
+			Placeholder("traefik").
+			Value(&s.exposureIngressClass).
+			Validate(validateNotEmpty),
+
+		huh.NewSelect[string]().
+			Title("Controller Type").
+			Description("Ingress controller type for tcp-proxy configuration").
+			Options(
+				huh.NewOption("HAProxy", "haproxy"),
+				huh.NewOption("Nginx", "nginx"),
+				huh.NewOption("Traefik", "traefik"),
+				huh.NewOption("Generic", "generic"),
+			).
+			Value(&s.exposureControllerType),
+	).WithHideFunc(func() bool {
+		return s.exposureMode != "Ingress"
+	})
+}
+
+// exposureGatewayStep configures Gateway-mode exposure details.
+// Only shown when exposure mode is Gateway.
+func exposureGatewayStep(s *wizardState) *huh.Group {
+	return huh.NewGroup(
+		huh.NewInput().
+			Title("Hostname Pattern").
+			Description("Wildcard domain for tenant API servers\n(e.g., *.k8s.example.com)").
+			Placeholder("*.k8s.example.com").
+			Value(&s.exposureHostname).
+			Validate(validateNotEmpty),
+
+		huh.NewInput().
+			Title("Gateway Reference").
+			Description("Gateway resource in namespace/name format").
+			Placeholder("butler-system/tcp-gateway").
+			Value(&s.exposureGatewayRef).
+			Validate(validateNotEmpty),
+	).WithHideFunc(func() bool {
+		return s.exposureMode != "Gateway"
+	})
+}
+
+// platformStep combines Talos config and component toggles. CNI and
+// storage are fixed (Cilium, Longhorn) so they are not asked.
 func platformStep(s *wizardState) *huh.Group {
-	fields := []huh.Field{
+	return huh.NewGroup(
 		huh.NewNote().
 			Title("Platform & Addons").
-			Description("Configure Talos OS, networking stack, and Butler components."),
+			Description("Configure Talos OS and Butler components.\nCNI: Cilium  |  Storage: Longhorn"),
 
 		huh.NewInput().
 			Title("Talos Version").
@@ -584,48 +748,24 @@ func platformStep(s *wizardState) *huh.Group {
 
 		huh.NewInput().
 			Title("Talos Schematic").
-			Description("Extension schematic ID (leave empty for default)").
+			Description("Image Factory schematic for system extensions.\nDefault includes qemu-guest-agent, iscsi-tools, util-linux-tools.").
 			Value(&s.talosSchematic),
-
-		huh.NewSelect[string]().
-			Title("CNI").
-			Options(huh.NewOption("Cilium", "cilium")).
-			Value(&s.cniType),
-
-		huh.NewSelect[string]().
-			Title("Storage").
-			Options(huh.NewOption("Longhorn", "longhorn")).
-			Value(&s.storageType),
-
-		huh.NewSelect[string]().
-			Title("Load Balancer").
-			Description("MetalLB for on-prem, skipped for cloud").
-			Options(
-				huh.NewOption("MetalLB", "metallb"),
-				huh.NewOption("None (cloud provider)", "none"),
-			).
-			Value(&s.lbType),
-
-		huh.NewInput().
-			Title("LB Address Pool").
-			Description("IP range for LoadBalancer services (e.g., 10.40.0.100-10.40.0.200)").
-			Value(&s.lbPool),
 
 		huh.NewConfirm().
 			Title("Install CAPI").
-			Description("Cluster API for machine lifecycle").
+			Description("Cluster API for machine lifecycle management").
 			Value(&s.capiEnabled),
 
 		huh.NewConfirm().
 			Title("Install Butler Controller").
+			Description("Reconciler for TenantCluster and addon lifecycle").
 			Value(&s.ctrlEnabled),
 
 		huh.NewConfirm().
 			Title("Install Butler Console").
+			Description("Web dashboard for cluster management").
 			Value(&s.consEnabled),
-	}
-
-	return huh.NewGroup(fields...)
+	)
 }
 
 // consoleStep builds the console configuration step.
@@ -636,15 +776,30 @@ func consoleStep(s *wizardState) *huh.Group {
 			Title("Console Configuration").
 			Description("Configure the Butler web console."),
 
+		huh.NewInput().
+			Title("Admin Password").
+			Description("Initial admin password for the console").
+			Value(&s.consPassword).
+			EchoMode(huh.EchoModePassword),
+
 		huh.NewConfirm().
 			Title("Enable Ingress").
-			Description("Create an Ingress resource for the console").
+			Description("Create an Ingress resource for external access").
 			Value(&s.consIngress),
+	).WithHideFunc(func() bool {
+		return !s.consEnabled
+	})
+}
 
+// consoleIngressStep configures ingress details for the console.
+// Only shown when both console and ingress are enabled.
+func consoleIngressStep(s *wizardState) *huh.Group {
+	return huh.NewGroup(
 		huh.NewInput().
 			Title("Console Hostname").
-			Description("e.g., butler.example.com").
-			Value(&s.consHost),
+			Placeholder("butler.example.com").
+			Value(&s.consHost).
+			Validate(validateNotEmpty),
 
 		huh.NewInput().
 			Title("Ingress Class").
@@ -654,12 +809,99 @@ func consoleStep(s *wizardState) *huh.Group {
 		huh.NewConfirm().
 			Title("Enable TLS").
 			Value(&s.consTLS),
-
-		huh.NewInput().
-			Title("Admin Password").
-			Description("Initial admin password (default: admin)").
-			Value(&s.consPassword),
 	).WithHideFunc(func() bool {
-		return !s.consEnabled
+		return !s.consEnabled || !s.consIngress
 	})
+}
+
+// reviewStep shows a summary of the configuration before confirmation.
+func reviewStep(s *wizardState) *huh.Group {
+	return huh.NewGroup(
+		huh.NewNote().
+			Title("Review").
+			DescriptionFunc(func() string {
+				return buildReviewSummary(s)
+			}, &s.confirmed),
+
+		huh.NewConfirm().
+			Title("Start Bootstrap?").
+			Description("Begin provisioning the management cluster?").
+			Affirmative("Start").
+			Negative("Cancel").
+			Value(&s.confirmed),
+	)
+}
+
+// buildReviewSummary creates a human-readable summary of the configuration.
+func buildReviewSummary(s *wizardState) string {
+	var b strings.Builder
+
+	b.WriteString(fmt.Sprintf("Provider:     %s\n", providerDisplayName(s.provider)))
+	b.WriteString(fmt.Sprintf("Cluster:      %s\n", s.clusterName))
+	b.WriteString(fmt.Sprintf("Topology:     %s\n", s.topology))
+
+	if s.topology == "single-node" {
+		b.WriteString(fmt.Sprintf("Node:         %s vCPU, %s MB RAM, %s GB disk\n",
+			s.cpCPU, s.cpMemoryMB, s.cpDiskGB))
+	} else {
+		b.WriteString(fmt.Sprintf("Control Plane: %sx (%s vCPU, %s MB RAM, %s GB disk)\n",
+			s.cpReplicas, s.cpCPU, s.cpMemoryMB, s.cpDiskGB))
+		b.WriteString(fmt.Sprintf("Workers:       %sx (%s vCPU, %s MB RAM, %s GB disk)\n",
+			s.workerReplicas, s.workerCPU, s.workerMemoryMB, s.workerDiskGB))
+	}
+
+	b.WriteString(fmt.Sprintf("Pod CIDR:     %s\n", s.podCIDR))
+	b.WriteString(fmt.Sprintf("Service CIDR: %s\n", s.serviceCIDR))
+
+	if isOnPrem(s.provider) && s.vip != "" {
+		b.WriteString(fmt.Sprintf("VIP:          %s\n", s.vip))
+	}
+
+	if isOnPrem(s.provider) && s.lbStart != "" && s.lbEnd != "" {
+		b.WriteString(fmt.Sprintf("Mgmt LB:      %s - %s\n", s.lbStart, s.lbEnd))
+	}
+
+	if isOnPrem(s.provider) {
+		b.WriteString(fmt.Sprintf("Tenant LB:    %s, %s IPs/tenant\n", s.lbAllocMode, s.lbPoolSize))
+	}
+
+	if s.topology != "single-node" {
+		b.WriteString(fmt.Sprintf("Exposure:     %s", s.exposureMode))
+		if s.exposureMode == "Ingress" || s.exposureMode == "Gateway" {
+			b.WriteString(fmt.Sprintf(" (%s)", s.exposureHostname))
+		}
+		b.WriteString("\n")
+	}
+
+	if isOnPrem(s.provider) {
+		if s.imageSource == "factory" {
+			b.WriteString("Image:        Sync from Image Factory\n")
+		} else {
+			ref := s.harvImage
+			if s.provider == "nutanix" {
+				ref = s.nutImageUUID
+			}
+			b.WriteString(fmt.Sprintf("Image:        %s (existing)\n", ref))
+		}
+	}
+
+	b.WriteString(fmt.Sprintf("Talos:        %s\n", s.talosVersion))
+
+	var components []string
+	components = append(components, "Cilium", "Longhorn")
+	if isOnPrem(s.provider) {
+		components = append(components, "MetalLB")
+	}
+	if s.capiEnabled {
+		components = append(components, "CAPI")
+	}
+	if s.ctrlEnabled {
+		components = append(components, "Butler Controller")
+	}
+	if s.consEnabled {
+		components = append(components, "Console")
+	}
+	b.WriteString(fmt.Sprintf("Addons:       %s", strings.Join(components, ", ")))
+
+	return b.String()
 }

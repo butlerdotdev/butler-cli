@@ -885,6 +885,33 @@ func (o *Orchestrator) buildProviderConfigUnstructured(cfg *Config) *unstructure
 		"provider": cfg.Provider,
 	}
 
+	// Provider network config (IPAM mode, gateway, DNS, LB allocation)
+	if cfg.ProviderNetwork.Mode != "" {
+		networkConfig := map[string]interface{}{
+			"mode": cfg.ProviderNetwork.Mode,
+		}
+		if cfg.ProviderNetwork.Gateway != "" {
+			networkConfig["gateway"] = cfg.ProviderNetwork.Gateway
+		}
+		if len(cfg.ProviderNetwork.DNSServers) > 0 {
+			dnsServers := make([]interface{}, len(cfg.ProviderNetwork.DNSServers))
+			for i, s := range cfg.ProviderNetwork.DNSServers {
+				dnsServers[i] = s
+			}
+			networkConfig["dnsServers"] = dnsServers
+		}
+		if cfg.ProviderNetwork.LBAllocMode != "" {
+			lbConfig := map[string]interface{}{
+				"allocationMode": cfg.ProviderNetwork.LBAllocMode,
+			}
+			if cfg.ProviderNetwork.LBPoolSize > 0 {
+				lbConfig["defaultPoolSize"] = int64(cfg.ProviderNetwork.LBPoolSize)
+			}
+			networkConfig["loadBalancer"] = lbConfig
+		}
+		spec["network"] = networkConfig
+	}
+
 	// Add provider-specific config and credentialsRef based on provider type
 	switch cfg.Provider {
 	case "harvester":
@@ -1076,6 +1103,12 @@ func (o *Orchestrator) buildClusterBootstrapUnstructured(cfg *Config) *unstructu
 					if cfg.Network.VIP != "" {
 						n["vip"] = cfg.Network.VIP
 					}
+					if cfg.Addons.LoadBalancer.Start != "" && cfg.Addons.LoadBalancer.End != "" {
+						n["loadBalancerPool"] = map[string]interface{}{
+							"start": cfg.Addons.LoadBalancer.Start,
+							"end":   cfg.Addons.LoadBalancer.End,
+						}
+					}
 					return n
 				}(),
 				"talos": map[string]interface{}{
@@ -1085,6 +1118,27 @@ func (o *Orchestrator) buildClusterBootstrapUnstructured(cfg *Config) *unstructu
 				"addons": buildAddonsConfig(cfg),
 			},
 		},
+	}
+
+	// Add controlPlaneExposure when configured
+	if cfg.ControlPlaneExposure.Mode != "" {
+		spec := cb.Object["spec"].(map[string]interface{})
+		exposure := map[string]interface{}{
+			"mode": cfg.ControlPlaneExposure.Mode,
+		}
+		if cfg.ControlPlaneExposure.Hostname != "" {
+			exposure["hostname"] = cfg.ControlPlaneExposure.Hostname
+		}
+		if cfg.ControlPlaneExposure.IngressClassName != "" {
+			exposure["ingressClassName"] = cfg.ControlPlaneExposure.IngressClassName
+		}
+		if cfg.ControlPlaneExposure.ControllerType != "" {
+			exposure["controllerType"] = cfg.ControlPlaneExposure.ControllerType
+		}
+		if cfg.ControlPlaneExposure.GatewayRef != "" {
+			exposure["gatewayRef"] = cfg.ControlPlaneExposure.GatewayRef
+		}
+		spec["controlPlaneExposure"] = exposure
 	}
 
 	return cb
@@ -1415,6 +1469,13 @@ func (o *Orchestrator) buildAndLoadImages(ctx context.Context, provider string) 
 // when explicitly configured. Omitting them lets the CRD *bool defaults
 // (nil = enabled) take effect instead of writing Go's bool zero value (false).
 func buildAddonsConfig(cfg *Config) map[string]interface{} {
+	// Construct deprecated addressPool string from Start/End for backward compat
+	// with older bootstrap controllers that read the flat string.
+	lbPool := cfg.Addons.LoadBalancer.AddressPool
+	if lbPool == "" && cfg.Addons.LoadBalancer.Start != "" && cfg.Addons.LoadBalancer.End != "" {
+		lbPool = cfg.Addons.LoadBalancer.Start + "-" + cfg.Addons.LoadBalancer.End
+	}
+
 	addons := map[string]interface{}{
 		"cni": map[string]interface{}{
 			"type": cfg.Addons.CNI.Type,
@@ -1424,7 +1485,7 @@ func buildAddonsConfig(cfg *Config) map[string]interface{} {
 		},
 		"loadBalancer": map[string]interface{}{
 			"type":        cfg.Addons.LoadBalancer.Type,
-			"addressPool": cfg.Addons.LoadBalancer.AddressPool,
+			"addressPool": lbPool,
 		},
 	}
 

@@ -17,6 +17,7 @@ limitations under the License.
 package wizard
 
 import (
+	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/huh"
 	"github.com/charmbracelet/lipgloss"
 )
@@ -54,9 +55,22 @@ func butlerTheme() *huh.Theme {
 	return t
 }
 
-// vimKeyMap returns a huh KeyMap with vim-style navigation. huh v1
-// already includes j/k bindings in its default keymap; this function
-// makes the intent explicit and provides a single place to customize.
-func vimKeyMap() *huh.KeyMap {
-	return huh.NewDefaultKeyMap()
+// wizardKeyMap returns a huh KeyMap with Esc added to the Prev binding
+// on every field type. This makes Esc go back to the previous page
+// (same as Shift+Tab).
+func wizardKeyMap() *huh.KeyMap {
+	km := huh.NewDefaultKeyMap()
+	prevBinding := key.NewBinding(
+		key.WithKeys("shift+tab", "esc"),
+		key.WithHelp("esc", "back"),
+	)
+	km.Input.Prev = prevBinding
+	km.Text.Prev = prevBinding
+	km.Select.Prev = prevBinding
+	km.MultiSelect.Prev = prevBinding
+	km.Confirm.Prev = prevBinding
+	km.Note.Prev = prevBinding
+	km.FilePicker.Prev = prevBinding
+	return km
 }
+

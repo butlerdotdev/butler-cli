@@ -20,6 +20,8 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
+	"strings"
 	"time"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -59,7 +61,13 @@ func NewHarvesterDiscovery(creds CredentialProvider) (*HarvesterDiscovery, error
 }
 
 func (h *HarvesterDiscovery) Connect(ctx context.Context) error {
-	data, err := os.ReadFile(h.kubeconfigPath)
+	path := h.kubeconfigPath
+	if strings.HasPrefix(path, "~") {
+		home, _ := os.UserHomeDir()
+		path = filepath.Join(home, path[1:])
+	}
+
+	data, err := os.ReadFile(path)
 	if err != nil {
 		return fmt.Errorf("reading kubeconfig %s: %w", h.kubeconfigPath, err)
 	}

@@ -62,6 +62,7 @@ func printBanner() {
 	fmt.Println(blue.Render("  Bootstrap Wizard"))
 	fmt.Println()
 	fmt.Println(dim.Render("  Version: ") + version.Full())
+	fmt.Println(dim.Render("  ↑/↓ navigate  |  Enter next  |  Shift+Tab prev field  |  Esc back"))
 	fmt.Println()
 }
 
@@ -70,65 +71,97 @@ func printBanner() {
 // to discover available resources. A second form presents the discovered
 // resources as selectable options alongside cluster configuration.
 //
+// Navigation within each form: Shift+Tab or Esc goes back to the
+// previous page, Enter advances to the next page.
+//
 // The wizard flow is:
-//  1. Form 1: Provider selection + credentials
+//  1. Provider selection + credentials (multi-group form, Shift+Tab/Esc to go back)
 //  2. Async discovery phase (bubbletea model with concurrent resource fetches)
-//  3. Form 2: Resource selection + cluster config + addons + confirm
+//  3. Resource selection + cluster config + addons + confirm (multi-group form)
+//
+// Ctrl+C cancels the wizard. Cancelling form2 loops back to form1.
 func Run() (*orchestrator.Config, error) {
 	printBanner()
 
 	s := newWizardState()
+	theme := butlerTheme()
+	km := wizardKeyMap()
 
-	// Form 1: Provider selection and credentials.
-	form1 := huh.NewForm(
-		providerSelectGroup(s),
-		harvesterCredGroup(s),
-		nutanixCredGroup(s),
-		gcpCredGroup(s),
-		awsCredGroup(s),
-		azureCredGroup(s),
-	).WithTheme(butlerTheme()).WithKeyMap(vimKeyMap())
+	var disc discovery.ProviderDiscovery
+	for {
+		// Form 1: Provider selection and credentials.
+		form1 := huh.NewForm(
+			providerSelectGroup(s),
+			harvesterCredGroup(s),
+			nutanixCredGroup(s),
+			gcpCredGroup(s),
+			awsCredGroup(s),
+			azureCredGroup(s),
+		).WithTheme(theme).WithKeyMap(km)
 
-	if err := form1.Run(); err != nil {
-		return nil, fmt.Errorf("wizard cancelled: %w", err)
-	}
+		if err := form1.Run(); err != nil {
+			return nil, fmt.Errorf("wizard cancelled")
+		}
 
-	// Connect to provider and discover resources.
-	creds := &stateCredentials{s: s}
-	disc, err := discovery.NewDiscovery(s.provider, creds)
-	if err != nil {
-		return nil, fmt.Errorf("creating discovery client: %w", err)
-	}
+		// Phase 2: Connect to provider and discover resources.
+		creds := &stateCredentials{s: s}
+		var err error
+		disc, err = discovery.NewDiscovery(s.provider, creds)
+		if err != nil {
+			return nil, fmt.Errorf("creating discovery client: %w", err)
+		}
 
-	resources, err := runDiscovery(s.provider, disc)
-	if err != nil {
-		return nil, err
-	}
+		resources, err := runDiscovery(s.provider, disc)
+		if err != nil {
+			return nil, err
+		}
 
-	// Form 2: Resource selection and cluster configuration.
-	form2 := huh.NewForm(
-		resourceSelectGroup(s, disc, resources),
-		clusterAndSizingStep(s),
-		workersAndNetworkStep(s),
-		networkOnlyStep(s),
-		platformStep(s),
-		consoleStep(s),
-		huh.NewGroup(
-			huh.NewConfirm().
-				Title("Start Bootstrap?").
-				Description("Review complete. Begin provisioning the management cluster?").
-				Affirmative("Start").
-				Negative("Cancel").
-				Value(&s.confirmed),
-		),
-	).WithTheme(butlerTheme()).WithKeyMap(vimKeyMap())
+		// Form 2: Resource selection and cluster configuration.
+		form2 := huh.NewForm(
+			resourceSelectGroup(s, disc, resources),
+			clusterAndSizingStep(s),
+			workersAndNetworkStep(s),
+			networkOnlyStep(s),
+			networkingStep(s),
+			exposureModeStep(s),
+			exposureIngressStep(s),
+			exposureGatewayStep(s),
+			platformStep(s),
+			consoleStep(s),
+			consoleIngressStep(s),
+			reviewStep(s),
+		).WithTheme(theme).WithKeyMap(km)
 
-	if err := form2.Run(); err != nil {
-		return nil, fmt.Errorf("wizard cancelled: %w", err)
+		if err := form2.Run(); err != nil {
+			// Ctrl+C on form2 → loop back to form1
+			continue
+		}
+
+		break
 	}
 
 	if !s.confirmed {
 		return nil, fmt.Errorf("bootstrap cancelled by user")
+	}
+
+	// Sync image from factory if requested (on-prem only).
+	if isOnPrem(s.provider) && s.imageSource == "factory" {
+		factory := discovery.NewFactoryClient("")
+		artifactURL := factory.ArtifactURL(
+			s.talosSchematic, s.talosVersion, "talos", "amd64", "qcow2")
+		displayName := discovery.ProviderImageName(
+			"talos", s.talosVersion, "amd64", s.talosSchematic)
+
+		providerRef, err := runImageSync(disc, artifactURL, displayName)
+		if err != nil {
+			return nil, fmt.Errorf("image sync failed: %w", err)
+		}
+		switch s.provider {
+		case "harvester":
+			s.harvImage = providerRef
+		case "nutanix":
+			s.nutImageUUID = providerRef
+		}
 	}
 
 	return buildConfig(s)
@@ -211,8 +244,48 @@ func buildConfig(s *wizardState) (*orchestrator.Config, error) {
 	// Load balancer (on-prem only)
 	if isOnPrem(s.provider) && s.lbType != "none" {
 		cfg.Addons.LoadBalancer = orchestrator.LoadBalancerConfig{
-			Type:        s.lbType,
-			AddressPool: s.lbPool,
+			Type:  s.lbType,
+			Start: s.lbStart,
+			End:   s.lbEnd,
+		}
+	}
+
+	// Control plane exposure
+	cfg.ControlPlaneExposure = orchestrator.ControlPlaneExposureConfig{
+		Mode: s.exposureMode,
+	}
+	if s.exposureMode == "Ingress" {
+		cfg.ControlPlaneExposure.Hostname = s.exposureHostname
+		cfg.ControlPlaneExposure.IngressClassName = s.exposureIngressClass
+		cfg.ControlPlaneExposure.ControllerType = s.exposureControllerType
+	}
+	if s.exposureMode == "Gateway" {
+		cfg.ControlPlaneExposure.Hostname = s.exposureHostname
+		cfg.ControlPlaneExposure.GatewayRef = s.exposureGatewayRef
+	}
+
+	// Provider network config
+	if isOnPrem(s.provider) {
+		lbPoolSize, _ := parseInt32(s.lbPoolSize)
+		if lbPoolSize == 0 {
+			lbPoolSize = 1
+		}
+		cfg.ProviderNetwork = orchestrator.ProviderNetworkConfig{
+			Mode:        "ipam",
+			Gateway:     s.providerGateway,
+			LBAllocMode: s.lbAllocMode,
+			LBPoolSize:  lbPoolSize,
+		}
+		if s.providerDNS != "" {
+			for _, dns := range strings.Split(s.providerDNS, ",") {
+				if trimmed := strings.TrimSpace(dns); trimmed != "" {
+					cfg.ProviderNetwork.DNSServers = append(cfg.ProviderNetwork.DNSServers, trimmed)
+				}
+			}
+		}
+	} else {
+		cfg.ProviderNetwork = orchestrator.ProviderNetworkConfig{
+			Mode: "cloud",
 		}
 	}
 
@@ -297,6 +370,8 @@ func buildConfig(s *wizardState) (*orchestrator.Config, error) {
 			SubscriptionID: s.azSubscriptionID,
 			ResourceGroup:  s.azResourceGroup,
 			Location:       s.azLocation,
+			VNetName:       s.azVNet,
+			SubnetName:     s.azSubnet,
 		}
 	}
 
