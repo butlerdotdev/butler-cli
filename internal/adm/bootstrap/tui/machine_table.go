@@ -148,11 +148,6 @@ func (m machineTableModel) View() string {
 	return m.table.View()
 }
 
-// isEmpty returns true if no machines have been reported yet.
-func (m machineTableModel) isEmpty() bool {
-	return len(m.machines) == 0
-}
-
 // summary returns a one-line summary like "3/5 Running".
 func (m machineTableModel) summary() string {
 	if len(m.machines) == 0 {
