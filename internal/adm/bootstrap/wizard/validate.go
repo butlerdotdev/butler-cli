@@ -26,7 +26,7 @@ import (
 
 var clusterNameRe = regexp.MustCompile(`^[a-z][a-z0-9-]*[a-z0-9]$`)
 
-// validateClusterName checks that a cluster name is a valid DNS label.
+// validateClusterName checks for a valid DNS label.
 func validateClusterName(s string) error {
 	if s == "" {
 		return fmt.Errorf("cluster name is required")
@@ -40,7 +40,6 @@ func validateClusterName(s string) error {
 	return nil
 }
 
-// validateCIDR validates an IP CIDR notation string.
 func validateCIDR(s string) error {
 	if s == "" {
 		return fmt.Errorf("CIDR is required")
@@ -52,10 +51,9 @@ func validateCIDR(s string) error {
 	return nil
 }
 
-// validateIP validates a single IP address.
 func validateIP(s string) error {
 	if s == "" {
-		return nil // Optional fields
+		return nil
 	}
 	if net.ParseIP(s) == nil {
 		return fmt.Errorf("invalid IP address: %s", s)
@@ -63,7 +61,6 @@ func validateIP(s string) error {
 	return nil
 }
 
-// validateNotEmpty checks that a string is not empty.
 func validateNotEmpty(s string) error {
 	if strings.TrimSpace(s) == "" {
 		return fmt.Errorf("value is required")
@@ -71,7 +68,6 @@ func validateNotEmpty(s string) error {
 	return nil
 }
 
-// validateIntRange validates a string is a valid integer within a range.
 func validateIntRange(min, max int) func(string) error {
 	return func(s string) error {
 		v, err := strconv.Atoi(s)
@@ -85,12 +81,10 @@ func validateIntRange(min, max int) func(string) error {
 	}
 }
 
-// validatePort validates a string is a valid port number.
 func validatePort(s string) error {
 	return validateIntRange(1, 65535)(s)
 }
 
-// validateOptional wraps a validator to allow empty values.
 func validateOptional(fn func(string) error) func(string) error {
 	return func(s string) error {
 		if strings.TrimSpace(s) == "" {
