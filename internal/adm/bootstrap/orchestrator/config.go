@@ -25,448 +25,229 @@ import (
 	"github.com/spf13/viper"
 )
 
-// Config represents the bootstrap configuration
+// Config represents the bootstrap configuration.
 type Config struct {
-	// Provider is the infrastructure provider (harvester, nutanix, proxmox, gcp, aws, azure)
-	Provider string `mapstructure:"provider"`
-
-	// Cluster defines the management cluster configuration
-	Cluster ClusterConfig `mapstructure:"cluster"`
-
-	// Network defines networking configuration
-	Network NetworkConfig `mapstructure:"network"`
-
-	// Talos defines Talos Linux configuration
-	Talos TalosConfig `mapstructure:"talos"`
-
-	// Addons defines which addons to install
-	Addons AddonsConfig `mapstructure:"addons"`
-
-	// ProviderConfig contains provider-specific settings
-	ProviderConfig ProviderConfig `mapstructure:"providerConfig"`
-
-	// ControlPlaneExposure configures how tenant control planes are exposed.
-	// Set on ClusterBootstrap; the bootstrap controller copies it to ButlerConfig.
+	Provider             string                     `mapstructure:"provider"`
+	Cluster              ClusterConfig              `mapstructure:"cluster"`
+	Network              NetworkConfig              `mapstructure:"network"`
+	Talos                TalosConfig                `mapstructure:"talos"`
+	Addons               AddonsConfig               `mapstructure:"addons"`
+	ProviderConfig       ProviderConfig             `mapstructure:"providerConfig"`
 	ControlPlaneExposure ControlPlaneExposureConfig `mapstructure:"controlPlaneExposure"`
-
-	// ProviderNetwork configures IPAM and networking on the ProviderConfig CRD.
-	ProviderNetwork ProviderNetworkConfig `mapstructure:"providerNetwork"`
+	ProviderNetwork      ProviderNetworkConfig      `mapstructure:"providerNetwork"`
 }
 
 // ControlPlaneExposureConfig defines how tenant API servers are exposed.
 type ControlPlaneExposureConfig struct {
-	// Mode: LoadBalancer (1 IP per tenant), Ingress (shared IP via SNI), Gateway (shared IP via Gateway API)
-	Mode string `mapstructure:"mode"`
-
-	// Hostname is the wildcard domain for tenant API servers (required for Ingress/Gateway)
-	Hostname string `mapstructure:"hostname"`
-
-	// IngressClassName specifies the Ingress class (Ingress mode only)
-	IngressClassName string `mapstructure:"ingressClassName"`
-
-	// ControllerType specifies the ingress controller type: haproxy, nginx, traefik, generic
-	ControllerType string `mapstructure:"controllerType"`
-
-	// GatewayRef references the Gateway resource (Gateway mode only, format: namespace/name)
-	GatewayRef string `mapstructure:"gatewayRef"`
+	Mode             string `mapstructure:"mode"`             // LoadBalancer, Ingress, or Gateway
+	Hostname         string `mapstructure:"hostname"`         // Wildcard domain (Ingress/Gateway)
+	IngressClassName string `mapstructure:"ingressClassName"` // Ingress mode only
+	ControllerType   string `mapstructure:"controllerType"`   // haproxy, nginx, traefik, generic
+	GatewayRef       string `mapstructure:"gatewayRef"`       // namespace/name (Gateway mode only)
 }
 
 // ProviderNetworkConfig configures IPAM and networking on the ProviderConfig CRD.
 type ProviderNetworkConfig struct {
-	// Mode: "ipam" for on-prem (NetworkPool-based), "cloud" for cloud-native networking
-	Mode string `mapstructure:"mode"`
-
-	// Gateway is the network gateway address
-	Gateway string `mapstructure:"gateway"`
-
-	// DNSServers are the DNS server addresses
-	DNSServers []string `mapstructure:"dnsServers"`
-
-	// LBAllocMode controls how tenant LB IPs are allocated: "static" (fixed pool) or "elastic" (grow/shrink)
-	LBAllocMode string `mapstructure:"lbAllocMode"`
-
-	// LBPoolSize is the default number of LB IPs allocated per tenant (static mode) or initial size (elastic mode)
-	LBPoolSize int32 `mapstructure:"lbPoolSize"`
+	Mode        string   `mapstructure:"mode"`        // "ipam" (on-prem) or "cloud"
+	Gateway     string   `mapstructure:"gateway"`
+	DNSServers  []string `mapstructure:"dnsServers"`
+	LBAllocMode string   `mapstructure:"lbAllocMode"` // "static" or "elastic"
+	LBPoolSize  int32    `mapstructure:"lbPoolSize"`  // LB IPs per tenant
 }
 
-// ClusterConfig defines cluster specifications
+// ClusterConfig defines cluster specifications.
 type ClusterConfig struct {
-	// Name is the cluster name (used for VM names, kubeconfig context)
-	Name string `mapstructure:"name"`
-
-	// Topology defines the cluster topology
-	// - "single-node": Single control plane node that also runs workloads
-	// - "ha": High-availability with separate control plane and worker nodes (default)
-	Topology string `mapstructure:"topology"`
-
-	// ControlPlane defines control plane node configuration
+	Name         string         `mapstructure:"name"`
+	Topology     string         `mapstructure:"topology"` // "ha" or "single-node"
 	ControlPlane NodePoolConfig `mapstructure:"controlPlane"`
-
-	// Workers defines worker node configuration
-	// Ignored when topology is "single-node"
-	Workers NodePoolConfig `mapstructure:"workers"`
+	Workers      NodePoolConfig `mapstructure:"workers"` // Ignored for single-node
 }
 
-// NodePoolConfig defines a pool of nodes
+// NodePoolConfig defines a pool of nodes.
 type NodePoolConfig struct {
-	// Replicas is the number of nodes
-	Replicas int32 `mapstructure:"replicas"`
-
-	// CPU is the number of vCPUs per node
-	CPU int32 `mapstructure:"cpu"`
-
-	// MemoryMB is the memory in MB per node
-	MemoryMB int32 `mapstructure:"memoryMB"`
-
-	// DiskGB is the boot disk size in GB
-	DiskGB int32 `mapstructure:"diskGB"`
-
-	// ExtraDisks are additional disks (for storage)
+	Replicas   int32        `mapstructure:"replicas"`
+	CPU        int32        `mapstructure:"cpu"`
+	MemoryMB   int32        `mapstructure:"memoryMB"`
+	DiskGB     int32        `mapstructure:"diskGB"`
 	ExtraDisks []DiskConfig `mapstructure:"extraDisks"`
 }
 
-// DiskConfig defines an additional disk
+// DiskConfig defines an additional disk.
 type DiskConfig struct {
-	// SizeGB is the disk size in GB
-	SizeGB int32 `mapstructure:"sizeGB"`
-
-	// StorageClass is the optional storage class for this disk
+	SizeGB       int32  `mapstructure:"sizeGB"`
 	StorageClass string `mapstructure:"storageClass,omitempty"`
 }
 
-// NetworkConfig defines network configuration
+// NetworkConfig defines network configuration.
 type NetworkConfig struct {
-	// PodCIDR is the pod network CIDR
-	PodCIDR string `mapstructure:"podCIDR"`
-
-	// ServiceCIDR is the service network CIDR
+	PodCIDR     string `mapstructure:"podCIDR"`
 	ServiceCIDR string `mapstructure:"serviceCIDR"`
-
-	// VIP is the control plane VIP address
-	VIP string `mapstructure:"vip"`
+	VIP         string `mapstructure:"vip"`
 }
 
-// TalosConfig defines Talos OS configuration
+// TalosConfig defines Talos OS configuration.
 type TalosConfig struct {
-	// Version is the Talos version
-	Version string `mapstructure:"version"`
-
-	// Schematic is the Talos schematic ID (for extensions)
+	Version   string `mapstructure:"version"`
 	Schematic string `mapstructure:"schematic,omitempty"`
 }
 
-// AddonsConfig defines which addons to install
+// AddonsConfig defines which addons to install.
 type AddonsConfig struct {
-	// CNI defines CNI configuration
-	CNI CNIConfig `mapstructure:"cni"`
-
-	// Storage defines storage configuration
-	Storage StorageConfig `mapstructure:"storage"`
-
-	// LoadBalancer defines load balancer configuration
-	LoadBalancer LoadBalancerConfig `mapstructure:"loadBalancer"`
-
-	// GitOps defines GitOps configuration
-	GitOps GitOpsConfig `mapstructure:"gitOps"`
-
-	// CAPI defines Cluster API configuration
-	CAPI CAPIConfig `mapstructure:"capi"`
-
-	// ButlerController defines Butler Controller configuration
+	CNI              CNIConfig              `mapstructure:"cni"`
+	Storage          StorageConfig          `mapstructure:"storage"`
+	LoadBalancer     LoadBalancerConfig     `mapstructure:"loadBalancer"`
+	GitOps           GitOpsConfig           `mapstructure:"gitOps"`
+	CAPI             CAPIConfig             `mapstructure:"capi"`
 	ButlerController ButlerControllerConfig `mapstructure:"butlerController"`
-
-	// Console defines Butler Console configuration
-	Console ConsoleConfig `mapstructure:"console"`
+	Console          ConsoleConfig          `mapstructure:"console"`
 }
 
-// CNIConfig defines CNI configuration
+// CNIConfig defines CNI configuration.
 type CNIConfig struct {
-	// Type is the CNI type (cilium)
-	Type string `mapstructure:"type"`
+	Type string `mapstructure:"type"` // cilium
 }
 
-// StorageConfig defines storage configuration
+// StorageConfig defines storage configuration.
 type StorageConfig struct {
-	// Type is the storage type (longhorn)
-	Type string `mapstructure:"type"`
+	Type string `mapstructure:"type"` // longhorn
 }
 
-// LoadBalancerConfig defines load balancer configuration
+// LoadBalancerConfig defines load balancer configuration.
 type LoadBalancerConfig struct {
-	// Type is the load balancer type (metallb)
-	Type string `mapstructure:"type"`
-
-	// AddressPool is the IP address range for LoadBalancer services (deprecated, use Start/End)
-	AddressPool string `mapstructure:"addressPool"`
-
-	// Start is the first IP in the MetalLB address pool (preferred over AddressPool)
-	Start string `mapstructure:"start"`
-
-	// End is the last IP in the MetalLB address pool (preferred over AddressPool)
-	End string `mapstructure:"end"`
+	Type        string `mapstructure:"type"`        // metallb
+	AddressPool string `mapstructure:"addressPool"` // Deprecated: use Start/End
+	Start       string `mapstructure:"start"`
+	End         string `mapstructure:"end"`
 }
 
-// GitOpsConfig defines GitOps configuration
+// GitOpsConfig defines GitOps configuration.
 type GitOpsConfig struct {
-	// Type is the GitOps type (flux)
-	Type string `mapstructure:"type"`
+	Type string `mapstructure:"type"` // flux
 }
 
-// CAPIConfig defines CAPI configuration
+// CAPIConfig defines Cluster API configuration.
 type CAPIConfig struct {
 	Enabled bool   `mapstructure:"enabled"`
 	Version string `mapstructure:"version"`
 }
 
-// ButlerControllerConfig defines Butler Controller configuration
+// ButlerControllerConfig defines Butler Controller configuration.
 type ButlerControllerConfig struct {
 	Enabled bool   `mapstructure:"enabled"`
 	Version string `mapstructure:"version"`
 	Image   string `mapstructure:"image"`
 }
 
-// ConsoleConfig defines Butler Console configuration
+// ConsoleConfig defines Butler Console configuration.
 type ConsoleConfig struct {
-	// Enabled controls whether to install the console
-	Enabled bool `mapstructure:"enabled"`
-
-	// Version is the chart/image version (defaults to "latest")
-	Version string `mapstructure:"version"`
-
-	// Ingress configures ingress for the console
+	Enabled bool                 `mapstructure:"enabled"`
+	Version string               `mapstructure:"version"`
 	Ingress ConsoleIngressConfig `mapstructure:"ingress"`
-
-	// Auth configures authentication settings
-	Auth ConsoleAuthConfig `mapstructure:"auth"`
+	Auth    ConsoleAuthConfig    `mapstructure:"auth"`
 }
 
-// ConsoleIngressConfig defines ingress configuration for the console
+// ConsoleIngressConfig defines ingress for the console.
 type ConsoleIngressConfig struct {
-	// Enabled controls whether to create an Ingress resource
-	Enabled bool `mapstructure:"enabled"`
-
-	// Host is the hostname for the console (e.g., "butler.example.com")
-	// If not set and ingress is enabled, uses "butler.<cluster-name>.local"
-	Host string `mapstructure:"host"`
-
-	// ClassName is the ingress class (e.g., "traefik", "nginx")
-	// If not set, uses cluster default
-	ClassName string `mapstructure:"className"`
-
-	// TLS enables TLS termination
-	TLS bool `mapstructure:"tls"`
-
-	// TLSSecretName is the name of the TLS secret (auto-generated if empty and TLS enabled)
+	Enabled       bool   `mapstructure:"enabled"`
+	Host          string `mapstructure:"host"`
+	ClassName     string `mapstructure:"className"`
+	TLS           bool   `mapstructure:"tls"`
 	TLSSecretName string `mapstructure:"tlsSecretName"`
 }
 
-// ConsoleAuthConfig defines authentication configuration
+// ConsoleAuthConfig defines authentication configuration.
 type ConsoleAuthConfig struct {
-	// AdminPassword sets the initial admin password
-	// If not set, defaults to "admin" (should be changed post-install)
 	AdminPassword string `mapstructure:"adminPassword"`
-
-	// JWTSecret is the secret for JWT signing
-	// If not set, a random secret is generated
-	JWTSecret string `mapstructure:"jwtSecret"`
+	JWTSecret     string `mapstructure:"jwtSecret"`
 }
 
-// ProviderConfig contains provider-specific settings
+// ProviderConfig contains provider-specific settings.
 type ProviderConfig struct {
-	// Harvester contains Harvester-specific settings
 	Harvester *HarvesterProviderConfig `mapstructure:"harvester,omitempty"`
-
-	// Nutanix contains Nutanix-specific settings
-	Nutanix *NutanixProviderConfig `mapstructure:"nutanix,omitempty"`
-
-	// Proxmox contains Proxmox-specific settings
-	Proxmox *ProxmoxProviderConfig `mapstructure:"proxmox,omitempty"`
-
-	// GCP contains GCP-specific settings
-	GCP *GCPProviderConfig `mapstructure:"gcp,omitempty"`
-
-	// AWS contains AWS-specific settings
-	AWS *AWSProviderConfig `mapstructure:"aws,omitempty"`
-
-	// Azure contains Azure-specific settings
-	Azure *AzureProviderConfig `mapstructure:"azure,omitempty"`
+	Nutanix   *NutanixProviderConfig   `mapstructure:"nutanix,omitempty"`
+	Proxmox   *ProxmoxProviderConfig   `mapstructure:"proxmox,omitempty"`
+	GCP       *GCPProviderConfig       `mapstructure:"gcp,omitempty"`
+	AWS       *AWSProviderConfig       `mapstructure:"aws,omitempty"`
+	Azure     *AzureProviderConfig     `mapstructure:"azure,omitempty"`
 }
 
-// HarvesterProviderConfig contains Harvester-specific settings
+// HarvesterProviderConfig contains Harvester-specific settings.
 type HarvesterProviderConfig struct {
-	// KubeconfigPath is the path to the Harvester kubeconfig
 	KubeconfigPath string `mapstructure:"kubeconfigPath"`
-
-	// Namespace is the Harvester namespace for VMs
-	Namespace string `mapstructure:"namespace"`
-
-	// NetworkName is the Harvester network name (namespace/name format)
-	NetworkName string `mapstructure:"networkName"`
-
-	// ImageName is the Talos image name in Harvester (namespace/name format)
-	ImageName string `mapstructure:"imageName"`
+	Namespace      string `mapstructure:"namespace"`
+	NetworkName    string `mapstructure:"networkName"` // namespace/name
+	ImageName      string `mapstructure:"imageName"`   // namespace/name
 }
 
-// NutanixProviderConfig contains Nutanix-specific settings
+// NutanixProviderConfig contains Nutanix Prism Central settings.
 type NutanixProviderConfig struct {
-	// Endpoint is the Prism Central URL (e.g., https://prism-central.example.com)
-	Endpoint string `mapstructure:"endpoint"`
-
-	// Port is the Prism Central API port (default: 9440)
-	Port int32 `mapstructure:"port"`
-
-	// Insecure allows insecure TLS connections (for self-signed certs)
-	Insecure bool `mapstructure:"insecure"`
-
-	// Username is the Prism Central username
-	Username string `mapstructure:"username"`
-
-	// Password is the Prism Central password
-	Password string `mapstructure:"password"`
-
-	// ClusterUUID is the target Nutanix cluster UUID
-	ClusterUUID string `mapstructure:"clusterUUID"`
-
-	// SubnetUUID is the network subnet UUID for VMs
-	SubnetUUID string `mapstructure:"subnetUUID"`
-
-	// ImageUUID is the Talos image UUID in Prism Central
-	ImageUUID string `mapstructure:"imageUUID"`
-
-	// StorageContainerUUID is the storage container for VM disks (optional)
-	StorageContainerUUID string `mapstructure:"storageContainerUUID,omitempty"`
-
-	// HostAliases adds /etc/hosts entries to the KIND node for corporate DNS.
-	HostAliases []string `mapstructure:"hostAliases,omitempty"`
+	Endpoint             string   `mapstructure:"endpoint"`
+	Port                 int32    `mapstructure:"port"`
+	Insecure             bool     `mapstructure:"insecure"`
+	Username             string   `mapstructure:"username"`
+	Password             string   `mapstructure:"password"`
+	ClusterUUID          string   `mapstructure:"clusterUUID"`
+	SubnetUUID           string   `mapstructure:"subnetUUID"`
+	ImageUUID            string   `mapstructure:"imageUUID"`
+	StorageContainerUUID string   `mapstructure:"storageContainerUUID,omitempty"`
+	HostAliases          []string `mapstructure:"hostAliases,omitempty"`
 }
 
-// ProxmoxProviderConfig contains Proxmox-specific settings
+// ProxmoxProviderConfig contains Proxmox-specific settings.
 type ProxmoxProviderConfig struct {
-	// Endpoint is the Proxmox API URL
-	Endpoint string `mapstructure:"endpoint"`
-
-	// Insecure allows insecure TLS connections
-	Insecure bool `mapstructure:"insecure"`
-
-	// Username is the Proxmox username
-	Username string `mapstructure:"username"`
-
-	// Password is the Proxmox password
-	Password string `mapstructure:"password"`
-
-	// Nodes is the list of Proxmox nodes available for VM placement
-	Nodes []string `mapstructure:"nodes"`
-
-	// Storage is the storage location for VM disks
-	Storage string `mapstructure:"storage"`
-
-	// TemplateID is the VM template ID to clone (optional)
-	TemplateID int32 `mapstructure:"templateID,omitempty"`
-
-	// VMIDStart is the start of the VM ID range
-	VMIDStart int32 `mapstructure:"vmidStart,omitempty"`
-
-	// VMIDEnd is the end of the VM ID range
-	VMIDEnd int32 `mapstructure:"vmidEnd,omitempty"`
-
-	// HostAliases adds /etc/hosts entries to the KIND node for corporate DNS.
+	Endpoint    string   `mapstructure:"endpoint"`
+	Insecure    bool     `mapstructure:"insecure"`
+	Username    string   `mapstructure:"username"`
+	Password    string   `mapstructure:"password"`
+	Nodes       []string `mapstructure:"nodes"`
+	Storage     string   `mapstructure:"storage"`
+	TemplateID  int32    `mapstructure:"templateID,omitempty"`
+	VMIDStart   int32    `mapstructure:"vmidStart,omitempty"`
+	VMIDEnd     int32    `mapstructure:"vmidEnd,omitempty"`
 	HostAliases []string `mapstructure:"hostAliases,omitempty"`
 }
 
-// GCPProviderConfig contains GCP-specific settings
+// GCPProviderConfig contains GCP-specific settings.
 type GCPProviderConfig struct {
-	// ServiceAccountKeyPath is the path to the GCP service account key JSON file
 	ServiceAccountKeyPath string `mapstructure:"serviceAccountKeyPath"`
-
-	// ProjectID is the GCP project ID
-	ProjectID string `mapstructure:"projectID"`
-
-	// Region is the GCP region (e.g., "us-central1")
-	Region string `mapstructure:"region"`
-
-	// Zone is the GCP zone (e.g., "us-central1-a"). Defaults to "{region}-a"
-	Zone string `mapstructure:"zone,omitempty"`
-
-	// Network is the VPC network name
-	Network string `mapstructure:"network"`
-
-	// Subnetwork is the VPC subnetwork name
-	Subnetwork string `mapstructure:"subnetwork,omitempty"`
-
-	// MachineType is the default GCE machine type (e.g., "n2-standard-4")
-	MachineType string `mapstructure:"machineType,omitempty"`
-
-	// ImageProject is the GCP project containing the source image
-	ImageProject string `mapstructure:"imageProject,omitempty"`
-
-	// ImageFamily is the image family (e.g., "ubuntu-2204-lts")
-	ImageFamily string `mapstructure:"imageFamily,omitempty"`
-
-	// Image is the specific image name. Takes precedence over ImageFamily.
-	Image string `mapstructure:"image,omitempty"`
+	ProjectID             string `mapstructure:"projectID"`
+	Region                string `mapstructure:"region"`
+	Zone                  string `mapstructure:"zone,omitempty"`
+	Network               string `mapstructure:"network"`
+	Subnetwork            string `mapstructure:"subnetwork,omitempty"`
+	MachineType           string `mapstructure:"machineType,omitempty"`
+	ImageProject          string `mapstructure:"imageProject,omitempty"`
+	ImageFamily           string `mapstructure:"imageFamily,omitempty"`
+	Image                 string `mapstructure:"image,omitempty"`
 }
 
-// AWSProviderConfig contains AWS-specific settings
+// AWSProviderConfig contains AWS-specific settings.
 type AWSProviderConfig struct {
-	// AccessKeyPath is the path to an AWS credentials file or access key ID directly
-	AccessKeyID string `mapstructure:"accessKeyID"`
-
-	// SecretAccessKey is the AWS secret access key
-	SecretAccessKey string `mapstructure:"secretAccessKey"`
-
-	// Region is the AWS region (e.g., "us-east-1")
-	Region string `mapstructure:"region"`
-
-	// VPCID is the VPC identifier
-	VPCID string `mapstructure:"vpcID,omitempty"`
-
-	// SubnetID is the subnet identifier for VM placement
-	SubnetID string `mapstructure:"subnetID,omitempty"`
-
-	// SecurityGroupID is the security group identifier
+	AccessKeyID     string `mapstructure:"accessKeyID"`
+	SecretAccessKey  string `mapstructure:"secretAccessKey"`
+	Region          string `mapstructure:"region"`
+	VPCID           string `mapstructure:"vpcID,omitempty"`
+	SubnetID        string `mapstructure:"subnetID,omitempty"`
 	SecurityGroupID string `mapstructure:"securityGroupID,omitempty"`
-
-	// InstanceType is the EC2 instance type (e.g., "m5.xlarge")
-	InstanceType string `mapstructure:"instanceType,omitempty"`
-
-	// AMI is the Amazon Machine Image ID
-	AMI string `mapstructure:"ami,omitempty"`
+	InstanceType    string `mapstructure:"instanceType,omitempty"`
+	AMI             string `mapstructure:"ami,omitempty"`
 }
 
-// AzureProviderConfig contains Azure-specific settings
+// AzureProviderConfig contains Azure-specific settings.
 type AzureProviderConfig struct {
-	// ClientID is the Azure service principal client ID
-	ClientID string `mapstructure:"clientID"`
-
-	// ClientSecret is the Azure service principal client secret
-	ClientSecret string `mapstructure:"clientSecret"`
-
-	// TenantID is the Azure Active Directory tenant ID
-	TenantID string `mapstructure:"tenantID"`
-
-	// SubscriptionID is the Azure subscription ID
+	ClientID       string `mapstructure:"clientID"`
+	ClientSecret   string `mapstructure:"clientSecret"`
+	TenantID       string `mapstructure:"tenantID"`
 	SubscriptionID string `mapstructure:"subscriptionID"`
-
-	// ResourceGroup is the Azure resource group
-	ResourceGroup string `mapstructure:"resourceGroup"`
-
-	// Location is the Azure region (e.g., "eastus")
-	Location string `mapstructure:"location"`
-
-	// VNetName is the Azure Virtual Network name
-	VNetName string `mapstructure:"vnetName,omitempty"`
-
-	// SubnetName is the subnet within the VNet
-	SubnetName string `mapstructure:"subnetName,omitempty"`
-
-	// VMSize is the Azure VM size (e.g., "Standard_D4s_v3")
-	VMSize string `mapstructure:"vmSize,omitempty"`
-
-	// Image is the VM image reference (Shared Gallery ID, URN, or managed image ID)
-	Image string `mapstructure:"image,omitempty"`
+	ResourceGroup  string `mapstructure:"resourceGroup"`
+	Location       string `mapstructure:"location"`
+	VNetName       string `mapstructure:"vnetName,omitempty"`
+	SubnetName     string `mapstructure:"subnetName,omitempty"`
+	VMSize         string `mapstructure:"vmSize,omitempty"`
+	Image          string `mapstructure:"image,omitempty"`
 }
 
-// LoadConfig loads the bootstrap configuration from viper
+// LoadConfig loads the bootstrap configuration from viper.
 func LoadConfig() (*Config, error) {
 	var cfg Config
 	if err := viper.Unmarshal(&cfg); err != nil {
@@ -524,7 +305,7 @@ func LoadConfig() (*Config, error) {
 			cfg.ProviderNetwork.LBAllocMode = "static"
 		}
 		if cfg.ProviderNetwork.LBPoolSize == 0 {
-			cfg.ProviderNetwork.LBPoolSize = 8
+			cfg.ProviderNetwork.LBPoolSize = 1
 		}
 	}
 
@@ -588,7 +369,6 @@ func LoadConfig() (*Config, error) {
 	return &cfg, nil
 }
 
-// expandPath expands ~ to home directory
 func expandPath(path string) string {
 	if len(path) > 0 && path[0] == '~' {
 		home, err := os.UserHomeDir()
@@ -600,12 +380,12 @@ func expandPath(path string) string {
 	return path
 }
 
-// IsSingleNode returns true if this is a single-node topology
+// IsSingleNode returns true for single-node topology.
 func (c *Config) IsSingleNode() bool {
 	return c.Cluster.Topology == "single-node"
 }
 
-// GetConsoleURL returns the console URL based on configuration
+// GetConsoleURL returns the console URL, or empty if no ingress is configured.
 func (c *Config) GetConsoleURL() string {
 	if !c.Addons.Console.Enabled {
 		return ""
