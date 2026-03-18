@@ -43,12 +43,12 @@ func tickCmd(d time.Duration) tea.Cmd {
 }
 
 // waitForEvent blocks until an event arrives and wraps it as orchestratorEventMsg.
+// When the channel closes, returns bootstrapDoneMsg to trigger the post view.
 func waitForEvent(ch <-chan orchestrator.Event) tea.Cmd {
 	return func() tea.Msg {
 		e, ok := <-ch
 		if !ok {
-			// Channel closed - orchestrator is done
-			return nil
+			return bootstrapDoneMsg{}
 		}
 		return orchestratorEventMsg(e)
 	}

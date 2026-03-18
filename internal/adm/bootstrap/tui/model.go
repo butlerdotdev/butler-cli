@@ -47,6 +47,7 @@ type bootstrapModel struct {
 	skipPreBootstrap bool
 	startTime        time.Time
 	lastStatus       *orchestrator.BootstrapSnapshot
+	lastCreds        *orchestrator.ClusterCredentials
 	err              error
 	width            int
 	height           int
@@ -139,7 +140,12 @@ func (m bootstrapModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// During-bootstrap key handling is delegated to the during model
 
 	case bootstrapDoneMsg:
-		m.err = msg.err
+		// Channel closed — orchestrator goroutine finished.
+		// Use lastCreds/lastStatus captured from terminal events.
+		if m.lastCreds == nil && m.err == nil {
+			// No EventComplete received but no error either
+			m.err = msg.err
+		}
 		return m, m.transitionToPost()
 
 	case orchestratorEventMsg:
@@ -147,14 +153,16 @@ func (m bootstrapModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if e.Status != nil {
 			m.lastStatus = e.Status
 		}
-		if e.Type == orchestrator.EventComplete {
-			m.during.handleEvent(e)
-			return m, nil
+		if e.Creds != nil {
+			m.lastCreds = e.Creds
 		}
-		if e.Type == orchestrator.EventFailed {
-			m.during.handleEvent(e)
-			return m, nil
+		if e.Error != nil {
+			m.err = e.Error
 		}
+		m.during.handleEvent(e)
+		// Re-launch to receive the next event.
+		cmds = append(cmds, waitForEvent(m.eventCh))
+		return m, tea.Batch(cmds...)
 	}
 
 	// Delegate to active view
@@ -209,13 +217,7 @@ func (m *bootstrapModel) transitionToPost() tea.Cmd {
 		}
 		m.post.SetFailure(phase, reason, message, elapsed, m.skipCleanup)
 	} else {
-		var creds *orchestrator.ClusterCredentials
-		// Find creds from the last complete event
-		if m.lastStatus != nil && m.lastStatus.Phase == "Ready" {
-			// Creds are passed via bootstrapDoneMsg, not status
-		}
-		_ = creds // Will be set by the tui.go wiring
-		m.post.SetSuccess(nil, elapsed)
+		m.post.SetSuccess(m.lastCreds, elapsed)
 	}
 
 	return nil
