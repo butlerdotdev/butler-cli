@@ -26,11 +26,9 @@ var (
 	colorError   = lipgloss.Color("#ef4444") // red
 	colorInfo    = lipgloss.Color("#3b82f6") // blue
 	colorMuted   = lipgloss.Color("#a3a3a3") // gray
-	colorBorder  = lipgloss.Color("#404040") // dark gray
-	colorText    = lipgloss.Color("#fafafa") // primary text
-	colorBg      = lipgloss.Color("#0a0a0a") // near-black background
-	colorSurface = lipgloss.Color("#171717") // secondary surface
-	colorTert    = lipgloss.Color("#262626") // tertiary surface
+	colorBorder = lipgloss.Color("#404040") // dark gray
+	colorText   = lipgloss.Color("#fafafa") // primary text
+	colorBg     = lipgloss.Color("#0a0a0a") // near-black background
 )
 
 // Panel border styles
@@ -50,10 +48,8 @@ var (
 
 // Machine status styles
 var (
-	machineRunning  = lipgloss.NewStyle().Foreground(colorSuccess)
-	machineCreating = lipgloss.NewStyle().Foreground(colorWarning)
-	machinePending  = lipgloss.NewStyle().Foreground(colorMuted)
-	machineFailed   = lipgloss.NewStyle().Foreground(colorError)
+	machineRunning = lipgloss.NewStyle().Foreground(colorSuccess)
+	machinePending = lipgloss.NewStyle().Foreground(colorMuted)
 )
 
 // Addon styles
@@ -65,7 +61,6 @@ var (
 // Status icons (Unicode)
 const (
 	iconCompleted = "\u2713" // ✓
-	iconActive    = "\u25CF" // ●
 	iconPending   = "\u25CB" // ○
 	iconFailed    = "\u2717" // ✗
 )
@@ -80,19 +75,3 @@ var (
 	helpBarStyle = lipgloss.NewStyle().Foreground(colorMuted)
 	sectionStyle = lipgloss.NewStyle().Bold(true).Foreground(colorInfo)
 )
-
-// colorizePhase applies color to a machine phase string.
-func colorizePhase(phase string) string {
-	switch phase {
-	case "Running":
-		return machineRunning.Render(phase)
-	case "Creating":
-		return machineCreating.Render(phase)
-	case "Pending":
-		return machinePending.Render(phase)
-	case "Failed":
-		return machineFailed.Render(phase)
-	default:
-		return phase
-	}
-}

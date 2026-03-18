@@ -27,9 +27,7 @@ var (
 	brandBlue  = lipgloss.Color("#3b82f6")
 	brandRed   = lipgloss.Color("#ef4444")
 	brandGray  = lipgloss.Color("#a3a3a3")
-	brandText  = lipgloss.Color("#fafafa")
-	brandBg    = lipgloss.Color("#0a0a0a")
-	brandBgAlt = lipgloss.Color("#171717")
+	brandBg = lipgloss.Color("#0a0a0a")
 )
 
 // butlerTheme returns a huh theme with Butler brand colors.
