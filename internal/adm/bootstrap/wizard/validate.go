@@ -1,0 +1,111 @@
+/*
+Copyright 2026 The Butler Authors.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
+package wizard
+
+import (
+	"fmt"
+	"net"
+	"regexp"
+	"strconv"
+	"strings"
+)
+
+var clusterNameRe = regexp.MustCompile(`^[a-z][a-z0-9-]*[a-z0-9]$`)
+
+// validateClusterName checks for a valid DNS label.
+func validateClusterName(s string) error {
+	if s == "" {
+		return fmt.Errorf("cluster name is required")
+	}
+	if len(s) > 63 {
+		return fmt.Errorf("cluster name must be at most 63 characters")
+	}
+	if !clusterNameRe.MatchString(s) {
+		return fmt.Errorf("must be lowercase alphanumeric with hyphens, starting with a letter")
+	}
+	return nil
+}
+
+func validateCIDR(s string) error {
+	if s == "" {
+		return fmt.Errorf("CIDR is required")
+	}
+	_, _, err := net.ParseCIDR(s)
+	if err != nil {
+		return fmt.Errorf("invalid CIDR: %s", err)
+	}
+	return nil
+}
+
+func validateIP(s string) error {
+	if s == "" {
+		return fmt.Errorf("IP address is required")
+	}
+	if net.ParseIP(s) == nil {
+		return fmt.Errorf("invalid IP address: %s", s)
+	}
+	return nil
+}
+
+func validateNotEmpty(s string) error {
+	if strings.TrimSpace(s) == "" {
+		return fmt.Errorf("value is required")
+	}
+	return nil
+}
+
+func validateIntRange(min, max int) func(string) error {
+	return func(s string) error {
+		v, err := strconv.Atoi(s)
+		if err != nil {
+			return fmt.Errorf("must be a number")
+		}
+		if v < min || v > max {
+			return fmt.Errorf("must be between %d and %d", min, max)
+		}
+		return nil
+	}
+}
+
+func validatePort(s string) error {
+	return validateIntRange(1, 65535)(s)
+}
+
+func validateCSVIPs(s string) error {
+	if strings.TrimSpace(s) == "" {
+		return nil
+	}
+	for _, part := range strings.Split(s, ",") {
+		ip := strings.TrimSpace(part)
+		if ip == "" {
+			continue
+		}
+		if net.ParseIP(ip) == nil {
+			return fmt.Errorf("invalid IP address: %s", ip)
+		}
+	}
+	return nil
+}
+
+func validateOptional(fn func(string) error) func(string) error {
+	return func(s string) error {
+		if strings.TrimSpace(s) == "" {
+			return nil
+		}
+		return fn(s)
+	}
+}

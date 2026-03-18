@@ -25,12 +25,14 @@ import (
 	"time"
 
 	"github.com/butlerdotdev/butler/internal/adm/bootstrap/orchestrator"
+	"github.com/butlerdotdev/butler/internal/adm/bootstrap/tui"
 	"github.com/butlerdotdev/butler/internal/common/log"
+	"github.com/butlerdotdev/butler/internal/common/output"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
 
-// NewNutanixCmd creates the nutanix bootstrap subcommand
+// NewNutanixCmd creates the nutanix bootstrap subcommand.
 func NewNutanixCmd(logger *log.Logger) *cobra.Command {
 	var (
 		configFile    string
@@ -41,6 +43,7 @@ func NewNutanixCmd(logger *log.Logger) *cobra.Command {
 		prismEndpoint string
 		prismUsername  string
 		prismPassword string
+		noTUI         bool
 	)
 
 	cmd := &cobra.Command{
@@ -50,52 +53,37 @@ func NewNutanixCmd(logger *log.Logger) *cobra.Command {
 
 Nutanix AHV is an enterprise hypervisor built into the Nutanix platform.
 Butler provisions Talos Linux VMs running Kubernetes with:
-  • Cilium CNI (kube-proxy replacement)
-  • kube-vip for control plane HA
-  • Longhorn distributed storage
-  • MetalLB for LoadBalancer services
-  • FluxCD for GitOps
+  - Cilium CNI (kube-proxy replacement)
+  - kube-vip for control plane HA
+  - Longhorn distributed storage
+  - MetalLB for LoadBalancer services
+  - FluxCD for GitOps
 
 Prerequisites:
-  • Docker running locally
-  • Nutanix Prism Central access (endpoint, username, password)
-  • Talos image uploaded to Prism Central
-  • Network subnet configured for VMs
+  - Docker running locally
+  - Nutanix Prism Central access (endpoint, username, password)
+  - Talos image uploaded to Prism Central
+  - Network subnet configured for VMs
 
 Example:
   butleradm bootstrap nutanix --config bootstrap-nutanix.yaml
-  
+
 Local Development:
-  butleradm bootstrap nutanix --config bootstrap-nutanix.yaml --local
-  butleradm bootstrap nutanix --config bootstrap-nutanix.yaml --local --repo-root ~/code/github.com/butlerdotdev`,
+  butleradm bootstrap nutanix --config bootstrap-nutanix.yaml --local`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			// Handle interrupts gracefully
 			ctx, cancel := context.WithCancel(cmd.Context())
 			defer cancel()
 
-			sigCh := make(chan os.Signal, 1)
-			signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
-			go func() {
-				<-sigCh
-				logger.Warn("received interrupt, cleaning up...")
-				cancel()
-			}()
-
-			// Load config
-			if configFile != "" {
-				viper.SetConfigFile(configFile)
-				if err := viper.ReadInConfig(); err != nil {
-					return fmt.Errorf("reading config file: %w", err)
-				}
+			viper.SetConfigFile(configFile)
+			if err := viper.ReadInConfig(); err != nil {
+				return fmt.Errorf("reading config file: %w", err)
 			}
 
-			// Parse config
 			cfg, err := orchestrator.LoadConfig()
 			if err != nil {
 				return fmt.Errorf("parsing config: %w", err)
 			}
 
-			// Validate provider
 			if cfg.Provider != "nutanix" {
 				return fmt.Errorf("provider must be 'nutanix', got %q", cfg.Provider)
 			}
@@ -136,32 +124,44 @@ Local Development:
 				return fmt.Errorf("providerConfig.nutanix.subnetUUID is required")
 			}
 
-			// Determine repo root for local dev
 			if localDev && repoRoot == "" {
-				// Try to find repo root automatically
 				home, _ := os.UserHomeDir()
 				repoRoot = home + "/code/github.com/butlerdotdev"
 			}
 
-			// Create orchestrator
-			orch := orchestrator.New(logger, orchestrator.Options{
+			orchOptions := orchestrator.Options{
 				DryRun:      dryRun,
 				SkipCleanup: skipCleanup,
 				Timeout:     30 * time.Minute,
 				LocalDev:    localDev,
 				RepoRoot:    repoRoot,
-			})
-
-			// Run bootstrap
-			if err := orch.Run(ctx, cfg); err != nil {
-				return err
 			}
 
-			return nil
+			if output.IsTTY() && !noTUI && !dryRun {
+				return tui.Run(tui.RunConfig{
+					Ctx:        ctx,
+					Cancel:     cancel,
+					Cfg:        cfg,
+					OrcOptions: orchOptions,
+					LoggerName: logger.Name(),
+					LogLevel:   logger.Level(),
+				})
+			}
+
+			sigCh := make(chan os.Signal, 1)
+			signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
+			go func() {
+				<-sigCh
+				logger.Warn("received interrupt, cleaning up...")
+				cancel()
+			}()
+
+			orch := orchestrator.New(logger, orchOptions)
+			return orch.Run(ctx, cfg)
 		},
 	}
 
-	cmd.Flags().StringVarP(&configFile, "config", "c", "", "path to bootstrap config file (required)")
+	cmd.Flags().StringVarP(&configFile, "config", "c", "", "path to bootstrap config file")
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "show what would be created without executing")
 	cmd.Flags().BoolVar(&skipCleanup, "skip-cleanup", false, "don't delete KIND cluster on failure (for debugging)")
 	cmd.Flags().BoolVar(&localDev, "local", false, "local development mode - build and load images from source")
@@ -169,8 +169,8 @@ Local Development:
 	cmd.Flags().StringVar(&prismEndpoint, "prism-endpoint", "", "Nutanix Prism Central endpoint (overrides config file)")
 	cmd.Flags().StringVar(&prismUsername, "prism-username", "", "Nutanix Prism Central username (overrides config file)")
 	cmd.Flags().StringVar(&prismPassword, "prism-password", "", "Nutanix Prism Central password (overrides config file)")
-
-	cmd.MarkFlagRequired("config")
+	cmd.Flags().BoolVar(&noTUI, "no-tui", false, "disable interactive TUI (use line-by-line output)")
+	_ = cmd.MarkFlagRequired("config")
 
 	return cmd
 }

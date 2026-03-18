@@ -25,12 +25,14 @@ import (
 	"time"
 
 	"github.com/butlerdotdev/butler/internal/adm/bootstrap/orchestrator"
+	"github.com/butlerdotdev/butler/internal/adm/bootstrap/tui"
 	"github.com/butlerdotdev/butler/internal/common/log"
+	"github.com/butlerdotdev/butler/internal/common/output"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
 
-// NewGCPCmd creates the gcp bootstrap subcommand
+// NewGCPCmd creates the gcp bootstrap subcommand.
 func NewGCPCmd(logger *log.Logger) *cobra.Command {
 	var (
 		configFile  string
@@ -39,6 +41,7 @@ func NewGCPCmd(logger *log.Logger) *cobra.Command {
 		localDev    bool
 		repoRoot    string
 		credentials string
+		noTUI       bool
 	)
 
 	cmd := &cobra.Command{
@@ -65,36 +68,21 @@ Example:
   butleradm bootstrap gcp --config bootstrap-gcp.yaml
 
 Local Development:
-  butleradm bootstrap gcp --config bootstrap-gcp.yaml --local
-  butleradm bootstrap gcp --config bootstrap-gcp.yaml --local --repo-root ~/code/github.com/butlerdotdev`,
+  butleradm bootstrap gcp --config bootstrap-gcp.yaml --local`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			// Handle interrupts gracefully
 			ctx, cancel := context.WithCancel(cmd.Context())
 			defer cancel()
 
-			sigCh := make(chan os.Signal, 1)
-			signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
-			go func() {
-				<-sigCh
-				logger.Warn("received interrupt, cleaning up...")
-				cancel()
-			}()
-
-			// Load config
-			if configFile != "" {
-				viper.SetConfigFile(configFile)
-				if err := viper.ReadInConfig(); err != nil {
-					return fmt.Errorf("reading config file: %w", err)
-				}
+			viper.SetConfigFile(configFile)
+			if err := viper.ReadInConfig(); err != nil {
+				return fmt.Errorf("reading config file: %w", err)
 			}
 
-			// Parse config
 			cfg, err := orchestrator.LoadConfig()
 			if err != nil {
 				return fmt.Errorf("parsing config: %w", err)
 			}
 
-			// Validate provider
 			if cfg.Provider != "gcp" {
 				return fmt.Errorf("provider must be 'gcp', got %q", cfg.Provider)
 			}
@@ -124,43 +112,55 @@ Local Development:
 				return fmt.Errorf("providerConfig.gcp.network is required")
 			}
 
-			// Verify service account key file exists
 			if _, err := os.Stat(cfg.ProviderConfig.GCP.ServiceAccountKeyPath); os.IsNotExist(err) {
 				return fmt.Errorf("service account key file not found: %s", cfg.ProviderConfig.GCP.ServiceAccountKeyPath)
 			}
 
-			// Determine repo root for local dev
 			if localDev && repoRoot == "" {
 				home, _ := os.UserHomeDir()
 				repoRoot = home + "/code/github.com/butlerdotdev"
 			}
 
-			// Create orchestrator
-			orch := orchestrator.New(logger, orchestrator.Options{
+			orchOptions := orchestrator.Options{
 				DryRun:      dryRun,
 				SkipCleanup: skipCleanup,
 				Timeout:     60 * time.Minute,
 				LocalDev:    localDev,
 				RepoRoot:    repoRoot,
-			})
-
-			// Run bootstrap
-			if err := orch.Run(ctx, cfg); err != nil {
-				return err
 			}
 
-			return nil
+			if output.IsTTY() && !noTUI && !dryRun {
+				return tui.Run(tui.RunConfig{
+					Ctx:        ctx,
+					Cancel:     cancel,
+					Cfg:        cfg,
+					OrcOptions: orchOptions,
+					LoggerName: logger.Name(),
+					LogLevel:   logger.Level(),
+				})
+			}
+
+			sigCh := make(chan os.Signal, 1)
+			signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
+			go func() {
+				<-sigCh
+				logger.Warn("received interrupt, cleaning up...")
+				cancel()
+			}()
+
+			orch := orchestrator.New(logger, orchOptions)
+			return orch.Run(ctx, cfg)
 		},
 	}
 
-	cmd.Flags().StringVarP(&configFile, "config", "c", "", "path to bootstrap config file (required)")
+	cmd.Flags().StringVarP(&configFile, "config", "c", "", "path to bootstrap config file")
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "show what would be created without executing")
 	cmd.Flags().BoolVar(&skipCleanup, "skip-cleanup", false, "don't delete KIND cluster on failure (for debugging)")
 	cmd.Flags().BoolVar(&localDev, "local", false, "local development mode - build and load images from source")
 	cmd.Flags().StringVar(&repoRoot, "repo-root", "", "path to butlerdotdev repos (default: ~/code/github.com/butlerdotdev)")
 	cmd.Flags().StringVar(&credentials, "credentials", "", "path to GCP service account JSON key (overrides config file)")
-
-	cmd.MarkFlagRequired("config")
+	cmd.Flags().BoolVar(&noTUI, "no-tui", false, "disable interactive TUI (use line-by-line output)")
+	_ = cmd.MarkFlagRequired("config")
 
 	return cmd
 }

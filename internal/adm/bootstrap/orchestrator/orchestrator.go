@@ -72,28 +72,32 @@ var (
 	}
 )
 
-// Options configures the orchestrator
+// Options configures the orchestrator.
 type Options struct {
-	// DryRun shows what would be created without executing
-	DryRun bool
-
-	// SkipCleanup prevents KIND cluster deletion on failure
-	SkipCleanup bool
-
-	// Timeout is the maximum time to wait for bootstrap
-	Timeout time.Duration
-
-	// LocalDev enables local development mode - builds images from source
-	LocalDev bool
-
-	// RepoRoot is the path to butlerdotdev repos (for LocalDev mode)
-	RepoRoot string
+	DryRun      bool          // show what would be created without executing
+	SkipCleanup bool          // prevent KIND cluster deletion on failure
+	Timeout     time.Duration // max time to wait for bootstrap
+	LocalDev    bool          // build images from source instead of pulling
+	RepoRoot    string        // path to butlerdotdev repos (LocalDev mode)
 }
 
-// Orchestrator manages the bootstrap process
+// Orchestrator manages the bootstrap process.
 type Orchestrator struct {
-	logger  *log.Logger
-	options Options
+	logger    *log.Logger
+	options   Options
+	eventSink EventSink
+}
+
+// SetEventSink sets an optional event sink for TUI integration.
+func (o *Orchestrator) SetEventSink(sink EventSink) {
+	o.eventSink = sink
+}
+
+// emit sends an event to the sink if one is configured.
+func (o *Orchestrator) emit(e Event) {
+	if o.eventSink != nil {
+		o.eventSink.Send(e)
+	}
 }
 
 // New creates a new orchestrator
@@ -104,7 +108,6 @@ func New(logger *log.Logger, options Options) *Orchestrator {
 	}
 }
 
-// clusterCredentials holds the kubeconfig and talosconfig for a cluster
 type clusterCredentials struct {
 	kubeconfig      []byte
 	talosconfig     []byte
@@ -119,6 +122,7 @@ func (o *Orchestrator) Run(ctx context.Context, cfg *Config) error {
 	}
 
 	o.logger.Phase("Initializing bootstrap")
+	o.emit(Event{Type: EventPhaseChange, Phase: "Initializing", Message: "Initializing bootstrap"})
 
 	// Create context with timeout
 	ctx, cancel := context.WithTimeout(ctx, o.options.Timeout)
@@ -126,6 +130,7 @@ func (o *Orchestrator) Run(ctx context.Context, cfg *Config) error {
 
 	// Phase 1: Create KIND cluster
 	o.logger.Phase("Creating temporary KIND cluster")
+	o.emit(Event{Type: EventPhaseChange, Phase: "CreatingKIND", Message: "Creating temporary KIND cluster"})
 	kindProvider := cluster.NewProvider()
 
 	kubeconfigPath, err := o.createKINDCluster(ctx, kindProvider)
@@ -135,6 +140,7 @@ func (o *Orchestrator) Run(ctx context.Context, cfg *Config) error {
 	defer func() {
 		if !o.options.SkipCleanup {
 			o.logger.Phase("Cleaning up KIND cluster")
+			o.emit(Event{Type: EventPhaseChange, Phase: "CleaningUp", Message: "Cleaning up KIND cluster"})
 			if err := kindProvider.Delete(kindClusterName, ""); err != nil {
 				o.logger.Error("failed to delete KIND cluster", "error", err)
 			}
@@ -152,6 +158,7 @@ func (o *Orchestrator) Run(ctx context.Context, cfg *Config) error {
 	// Build and load images in local dev mode
 	if o.options.LocalDev {
 		o.logger.Phase("Building and loading controller images (local dev mode)")
+		o.emit(Event{Type: EventPhaseChange, Phase: "BuildingImages", Message: "Building and loading controller images"})
 		if err := o.buildAndLoadImages(ctx, cfg.Provider); err != nil {
 			return fmt.Errorf("building/loading images: %w", err)
 		}
@@ -159,6 +166,7 @@ func (o *Orchestrator) Run(ctx context.Context, cfg *Config) error {
 
 	// Create Kubernetes clients
 	o.logger.Phase("Connecting to KIND cluster")
+	o.emit(Event{Type: EventPhaseChange, Phase: "ConnectingKIND", Message: "Connecting to KIND cluster"})
 	clientset, dynamicClient, err := o.createClients(kubeconfigPath)
 	if err != nil {
 		return fmt.Errorf("creating clients: %w", err)
@@ -166,24 +174,28 @@ func (o *Orchestrator) Run(ctx context.Context, cfg *Config) error {
 
 	// Deploy Butler CRDs
 	o.logger.Phase("Deploying Butler CRDs")
+	o.emit(Event{Type: EventPhaseChange, Phase: "DeployingCRDs", Message: "Deploying Butler CRDs"})
 	if err := o.deployCRDs(ctx, clientset, dynamicClient); err != nil {
 		return fmt.Errorf("deploying CRDs: %w", err)
 	}
 
 	// Create namespace and provider secret
 	o.logger.Phase("Creating namespace and secrets")
+	o.emit(Event{Type: EventPhaseChange, Phase: "CreatingSecrets", Message: "Creating namespace and secrets"})
 	if err := o.createNamespaceAndSecrets(ctx, clientset, cfg); err != nil {
 		return fmt.Errorf("creating namespace/secrets: %w", err)
 	}
 
 	// Deploy controllers
 	o.logger.Phase("Deploying Butler controllers")
+	o.emit(Event{Type: EventPhaseChange, Phase: "DeployingControllers", Message: "Deploying Butler controllers"})
 	if err := o.deployControllers(ctx, clientset, dynamicClient, cfg); err != nil {
 		return fmt.Errorf("deploying controllers: %w", err)
 	}
 
 	// Create ProviderConfig CR
 	o.logger.Phase("Creating ProviderConfig")
+	o.emit(Event{Type: EventPhaseChange, Phase: "CreatingProviderConfig", Message: "Creating ProviderConfig"})
 	if err := o.createProviderConfig(ctx, dynamicClient, cfg); err != nil {
 		return fmt.Errorf("creating ProviderConfig: %w", err)
 	}
@@ -198,12 +210,14 @@ func (o *Orchestrator) Run(ctx context.Context, cfg *Config) error {
 
 	// Create ClusterBootstrap CR
 	o.logger.Phase("Creating ClusterBootstrap")
+	o.emit(Event{Type: EventPhaseChange, Phase: "CreatingBootstrap", Message: "Creating ClusterBootstrap"})
 	if err := o.createClusterBootstrap(ctx, dynamicClient, cfg); err != nil {
 		return fmt.Errorf("creating ClusterBootstrap: %w", err)
 	}
 
 	// Watch for completion
 	o.logger.Phase("Waiting for cluster bootstrap")
+	o.emit(Event{Type: EventPhaseChange, Phase: "WatchingBootstrap", Message: "Waiting for cluster bootstrap"})
 	creds, err := o.watchBootstrap(ctx, dynamicClient, cfg)
 	if err != nil {
 		return fmt.Errorf("watching bootstrap: %w", err)
@@ -211,11 +225,13 @@ func (o *Orchestrator) Run(ctx context.Context, cfg *Config) error {
 
 	// Save cluster credentials
 	o.logger.Phase("Saving cluster credentials")
+	o.emit(Event{Type: EventPhaseChange, Phase: "SavingCredentials", Message: "Saving cluster credentials"})
 	if err := o.saveClusterCredentials(cfg.Cluster.Name, creds); err != nil {
 		return fmt.Errorf("saving cluster credentials: %w", err)
 	}
 
 	o.logger.Success("Bootstrap complete!")
+	o.emit(Event{Type: EventSuccess, Phase: "Complete", Message: "Bootstrap complete"})
 	o.logger.Info("")
 	o.logger.Info("Cluster credentials saved to:")
 	o.logger.Info("  Kubeconfig:   ~/.butler/" + cfg.Cluster.Name + "-kubeconfig")
@@ -326,10 +342,7 @@ func (o *Orchestrator) dryRun(cfg *Config) error {
 	return nil
 }
 
-// findCACertificates discovers CA certificates from standard locations.
-// Priority order:
-// 1. BUTLER_CA_CERT_PATH environment variable (single file or directory)
-// 2. ~/.butler/certificates/ directory (all .crt and .pem files)
+// findCACertificates discovers CA certificates from BUTLER_CA_CERT_PATH and ~/.butler/certificates/.
 func (o *Orchestrator) findCACertificates() []string {
 	var certs []string
 
@@ -361,7 +374,7 @@ func (o *Orchestrator) findCACertificates() []string {
 	return certs
 }
 
-// scanCertDirectory scans a directory for certificate files (.crt, .pem)
+// scanCertDirectory returns .crt and .pem files in a directory.
 func (o *Orchestrator) scanCertDirectory(dir string) []string {
 	var certs []string
 
@@ -383,7 +396,7 @@ func (o *Orchestrator) scanCertDirectory(dir string) []string {
 	return certs
 }
 
-// buildKINDConfig generates a KIND cluster configuration with CA certificate mounts
+// buildKINDConfig generates a KIND cluster configuration with optional CA cert mounts.
 func (o *Orchestrator) buildKINDConfig(caCerts []string) string {
 	if len(caCerts) == 0 {
 		// No custom certs, use minimal config
@@ -544,8 +557,7 @@ func (o *Orchestrator) createKINDCluster(ctx context.Context, provider *cluster.
 	return kubeconfigPath, nil
 }
 
-// tuneKINDNode adjusts kernel parameters inside the KIND node
-// to handle controller-runtime's heavy use of inotify watches
+// tuneKINDNode adjusts inotify limits inside the KIND node for controller-runtime.
 func (o *Orchestrator) tuneKINDNode(ctx context.Context) error {
 	nodeName := kindClusterName + "-control-plane"
 
@@ -568,8 +580,7 @@ func (o *Orchestrator) tuneKINDNode(ctx context.Context) error {
 	return nil
 }
 
-// patchCoreDNS fixes CoreDNS to use Google DNS instead of /etc/resolv.conf
-// This is needed because KIND's resolv.conf may not work properly on Mac
+// patchCoreDNS replaces CoreDNS upstream with Google DNS (KIND resolv.conf is unreliable on Mac).
 func (o *Orchestrator) patchCoreDNS(kubeconfigPath string) error {
 	corefile := `.:53 {
     errors
@@ -615,7 +626,7 @@ func (o *Orchestrator) patchCoreDNS(kubeconfigPath string) error {
 	return nil
 }
 
-// getKINDKubeconfig retrieves the kubeconfig for the KIND cluster
+// getKINDKubeconfig writes the KIND kubeconfig to a temp file and returns the path.
 func (o *Orchestrator) getKINDKubeconfig(provider *cluster.Provider) (string, error) {
 	kubeconfig, err := provider.KubeConfig(kindClusterName, false)
 	if err != nil {
@@ -631,7 +642,7 @@ func (o *Orchestrator) getKINDKubeconfig(provider *cluster.Provider) (string, er
 	return kubeconfigPath, nil
 }
 
-// createClients creates Kubernetes clients for the KIND cluster
+// createClients creates typed and dynamic Kubernetes clients from a kubeconfig path.
 func (o *Orchestrator) createClients(kubeconfigPath string) (*kubernetes.Clientset, dynamic.Interface, error) {
 	config, err := clientcmd.BuildConfigFromFlags("", kubeconfigPath)
 	if err != nil {
@@ -651,7 +662,7 @@ func (o *Orchestrator) createClients(kubeconfigPath string) (*kubernetes.Clients
 	return clientset, dynamicClient, nil
 }
 
-// deployCRDs deploys Butler CRDs to the KIND cluster
+// deployCRDs deploys embedded Butler CRDs and waits for them to be established.
 func (o *Orchestrator) deployCRDs(ctx context.Context, clientset *kubernetes.Clientset, dynamicClient dynamic.Interface) error {
 	deployer := manifests.NewDeployer(clientset, dynamicClient)
 
@@ -682,7 +693,7 @@ func (o *Orchestrator) deployCRDs(ctx context.Context, clientset *kubernetes.Cli
 	return nil
 }
 
-// createNamespaceAndSecrets creates the Butler namespace and provider credentials secrets
+// createNamespaceAndSecrets creates butler-system and the provider credentials secret.
 func (o *Orchestrator) createNamespaceAndSecrets(ctx context.Context, clientset *kubernetes.Clientset, cfg *Config) error {
 	// Create namespace
 	ns := &corev1.Namespace{
@@ -804,7 +815,7 @@ func (o *Orchestrator) createNamespaceAndSecrets(ctx context.Context, clientset 
 	return nil
 }
 
-// deployControllers deploys Butler controllers
+// deployControllers deploys bootstrap and provider controllers, then waits for readiness.
 func (o *Orchestrator) deployControllers(ctx context.Context, clientset *kubernetes.Clientset, dynamicClient dynamic.Interface, cfg *Config) error {
 	deployer := manifests.NewDeployer(clientset, dynamicClient)
 
@@ -836,7 +847,7 @@ func (o *Orchestrator) deployControllers(ctx context.Context, clientset *kuberne
 	return nil
 }
 
-// createProviderConfig creates the ProviderConfig CR using unstructured
+// createProviderConfig creates the ProviderConfig CR.
 func (o *Orchestrator) createProviderConfig(ctx context.Context, client dynamic.Interface, cfg *Config) error {
 	pc := o.buildProviderConfigUnstructured(cfg)
 
@@ -850,10 +861,37 @@ func (o *Orchestrator) createProviderConfig(ctx context.Context, client dynamic.
 	return nil
 }
 
-// buildProviderConfigUnstructured builds a ProviderConfig as unstructured
+// buildProviderConfigUnstructured builds an unstructured ProviderConfig from the bootstrap config.
 func (o *Orchestrator) buildProviderConfigUnstructured(cfg *Config) *unstructured.Unstructured {
 	spec := map[string]interface{}{
 		"provider": cfg.Provider,
+	}
+
+	// Provider network config (IPAM mode, gateway, DNS, LB allocation)
+	if cfg.ProviderNetwork.Mode != "" {
+		networkConfig := map[string]interface{}{
+			"mode": cfg.ProviderNetwork.Mode,
+		}
+		if cfg.ProviderNetwork.Gateway != "" {
+			networkConfig["gateway"] = cfg.ProviderNetwork.Gateway
+		}
+		if len(cfg.ProviderNetwork.DNSServers) > 0 {
+			dnsServers := make([]interface{}, len(cfg.ProviderNetwork.DNSServers))
+			for i, s := range cfg.ProviderNetwork.DNSServers {
+				dnsServers[i] = s
+			}
+			networkConfig["dnsServers"] = dnsServers
+		}
+		if cfg.ProviderNetwork.LBAllocMode != "" {
+			lbConfig := map[string]interface{}{
+				"allocationMode": cfg.ProviderNetwork.LBAllocMode,
+			}
+			if cfg.ProviderNetwork.LBPoolSize > 0 {
+				lbConfig["defaultPoolSize"] = int64(cfg.ProviderNetwork.LBPoolSize)
+			}
+			networkConfig["loadBalancer"] = lbConfig
+		}
+		spec["network"] = networkConfig
 	}
 
 	// Add provider-specific config and credentialsRef based on provider type
@@ -970,7 +1008,7 @@ func (o *Orchestrator) buildProviderConfigUnstructured(cfg *Config) *unstructure
 	return pc
 }
 
-// createClusterBootstrap creates the ClusterBootstrap CR using unstructured
+// createClusterBootstrap creates the ClusterBootstrap CR.
 func (o *Orchestrator) createClusterBootstrap(ctx context.Context, client dynamic.Interface, cfg *Config) error {
 	cb := o.buildClusterBootstrapUnstructured(cfg)
 
@@ -984,7 +1022,7 @@ func (o *Orchestrator) createClusterBootstrap(ctx context.Context, client dynami
 	return nil
 }
 
-// buildClusterBootstrapUnstructured builds a ClusterBootstrap as unstructured
+// buildClusterBootstrapUnstructured builds an unstructured ClusterBootstrap from the bootstrap config.
 func (o *Orchestrator) buildClusterBootstrapUnstructured(cfg *Config) *unstructured.Unstructured {
 	// Build cluster spec based on topology
 	clusterSpec := map[string]interface{}{
@@ -1047,6 +1085,12 @@ func (o *Orchestrator) buildClusterBootstrapUnstructured(cfg *Config) *unstructu
 					if cfg.Network.VIP != "" {
 						n["vip"] = cfg.Network.VIP
 					}
+					if cfg.Addons.LoadBalancer.Start != "" && cfg.Addons.LoadBalancer.End != "" {
+						n["loadBalancerPool"] = map[string]interface{}{
+							"start": cfg.Addons.LoadBalancer.Start,
+							"end":   cfg.Addons.LoadBalancer.End,
+						}
+					}
 					return n
 				}(),
 				"talos": map[string]interface{}{
@@ -1058,10 +1102,31 @@ func (o *Orchestrator) buildClusterBootstrapUnstructured(cfg *Config) *unstructu
 		},
 	}
 
+	// Add controlPlaneExposure when configured
+	if cfg.ControlPlaneExposure.Mode != "" {
+		spec := cb.Object["spec"].(map[string]interface{})
+		exposure := map[string]interface{}{
+			"mode": cfg.ControlPlaneExposure.Mode,
+		}
+		if cfg.ControlPlaneExposure.Hostname != "" {
+			exposure["hostname"] = cfg.ControlPlaneExposure.Hostname
+		}
+		if cfg.ControlPlaneExposure.IngressClassName != "" {
+			exposure["ingressClassName"] = cfg.ControlPlaneExposure.IngressClassName
+		}
+		if cfg.ControlPlaneExposure.ControllerType != "" {
+			exposure["controllerType"] = cfg.ControlPlaneExposure.ControllerType
+		}
+		if cfg.ControlPlaneExposure.GatewayRef != "" {
+			exposure["gatewayRef"] = cfg.ControlPlaneExposure.GatewayRef
+		}
+		spec["controlPlaneExposure"] = exposure
+	}
+
 	return cb
 }
 
-// watchBootstrap watches the ClusterBootstrap CR for completion
+// watchBootstrap polls the ClusterBootstrap CR until Ready or Failed.
 func (o *Orchestrator) watchBootstrap(ctx context.Context, client dynamic.Interface, cfg *Config) (*clusterCredentials, error) {
 	// Poll for status updates
 	ticker := time.NewTicker(5 * time.Second)
@@ -1093,26 +1158,72 @@ func (o *Orchestrator) watchBootstrap(ctx context.Context, client dynamic.Interf
 				lastPhase = phase
 			}
 
-			// Collect control plane IPs from machine status
+			// Build machine status list and collect control plane IPs
 			var controlPlaneIPs []string
+			var machineStatuses []MachineStatus
 			if machines, ok := status["machines"].([]interface{}); ok {
 				for _, m := range machines {
 					if machine, ok := m.(map[string]interface{}); ok {
+						name, _ := machine["name"].(string)
+						role, _ := machine["role"].(string)
+						mPhase, _ := machine["phase"].(string)
+						ip, _ := machine["ipAddress"].(string)
+						talosConfigured, _ := machine["talosConfigured"].(bool)
+						ready, _ := machine["ready"].(bool)
+
 						o.logger.Debug("machine status",
-							"name", machine["name"],
-							"phase", machine["phase"],
-							"ip", machine["ipAddress"],
-							"ready", machine["ready"],
+							"name", name,
+							"phase", mPhase,
+							"ip", ip,
+							"ready", ready,
 						)
-						// Collect control plane IPs for talosconfig endpoints
-						if role, _ := machine["role"].(string); role == "control-plane" {
-							if ip, _ := machine["ipAddress"].(string); ip != "" {
-								controlPlaneIPs = append(controlPlaneIPs, ip)
-							}
+
+						machineStatuses = append(machineStatuses, MachineStatus{
+							Name:            name,
+							Role:            role,
+							Phase:           mPhase,
+							IPAddress:       ip,
+							TalosConfigured: talosConfigured,
+							Ready:           ready,
+						})
+
+						if role == "control-plane" && ip != "" {
+							controlPlaneIPs = append(controlPlaneIPs, ip)
 						}
 					}
 				}
 			}
+
+			// Build addons installed map
+			addonsInstalled := make(map[string]bool)
+			if addons, ok := status["addonsInstalled"].(map[string]interface{}); ok {
+				for k, v := range addons {
+					if b, ok := v.(bool); ok {
+						addonsInstalled[k] = b
+					}
+				}
+			}
+
+			endpoint, _ := status["controlPlaneEndpoint"].(string)
+			consoleURL, _ := status["consoleURL"].(string)
+			failureReason, _ := status["failureReason"].(string)
+			failureMessage, _ := status["failureMessage"].(string)
+
+			// Emit full status snapshot for TUI
+			o.emit(Event{
+				Type:    EventBootstrapStatus,
+				Phase:   phase,
+				Message: "bootstrap status update",
+				Status: &BootstrapSnapshot{
+					Phase:           phase,
+					Machines:        machineStatuses,
+					AddonsInstalled: addonsInstalled,
+					FailureReason:   failureReason,
+					FailureMessage:  failureMessage,
+					Endpoint:        endpoint,
+					ConsoleURL:      consoleURL,
+				},
+			})
 
 			switch phase {
 			case "Ready":
@@ -1132,24 +1243,39 @@ func (o *Orchestrator) watchBootstrap(ctx context.Context, client dynamic.Interf
 					return nil, fmt.Errorf("decoding talosconfig: %w", err)
 				}
 
-				consoleURL, _ := status["consoleURL"].(string)
-
-				return &clusterCredentials{
+				creds := &clusterCredentials{
 					kubeconfig:      kubeconfigBytes,
 					talosconfig:     talosconfigBytes,
 					controlPlaneIPs: controlPlaneIPs,
 					consoleURL:      consoleURL,
-				}, nil
+				}
+				o.emit(Event{
+					Type:    EventComplete,
+					Phase:   phase,
+					Message: "Bootstrap complete",
+					Creds: &ClusterCredentials{
+						Kubeconfig:      kubeconfigBytes,
+						Talosconfig:     talosconfigBytes,
+						ControlPlaneIPs: controlPlaneIPs,
+						ConsoleURL:      consoleURL,
+					},
+				})
+				return creds, nil
 			case "Failed":
-				reason, _ := status["failureReason"].(string)
-				message, _ := status["failureMessage"].(string)
-				return nil, fmt.Errorf("bootstrap failed: %s - %s", reason, message)
+				err := fmt.Errorf("bootstrap failed: %s - %s", failureReason, failureMessage)
+				o.emit(Event{
+					Type:    EventFailed,
+					Phase:   phase,
+					Message: failureMessage,
+					Error:   err,
+				})
+				return nil, err
 			}
 		}
 	}
 }
 
-// saveClusterCredentials saves the kubeconfig and talosconfig to ~/.butler/
+// saveClusterCredentials writes kubeconfig and talosconfig to ~/.butler/.
 func (o *Orchestrator) saveClusterCredentials(clusterName string, creds *clusterCredentials) error {
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -1177,7 +1303,7 @@ func (o *Orchestrator) saveClusterCredentials(clusterName string, creds *cluster
 	return nil
 }
 
-// fixTalosconfigEndpoints adds endpoints to the talosconfig if they're empty
+// fixTalosconfigEndpoints populates empty endpoints/nodes with control plane IPs.
 func (o *Orchestrator) fixTalosconfigEndpoints(talosconfig []byte, clusterName string, controlPlaneIPs []string) []byte {
 	if len(controlPlaneIPs) == 0 {
 		return talosconfig
@@ -1230,17 +1356,13 @@ func (o *Orchestrator) fixTalosconfigEndpoints(talosconfig []byte, clusterName s
 	return fixed
 }
 
-// buildAndLoadImages builds controller images and loads them into KIND (local dev mode)
+// buildAndLoadImages builds controller images and loads them into KIND.
 func (o *Orchestrator) buildAndLoadImages(ctx context.Context, provider string) error {
 	if o.options.RepoRoot == "" {
 		return fmt.Errorf("repo root not set - use --repo-root flag")
 	}
 
-	// Define images to build.
-	// useParentContext signals that the repo's go.mod has a replace directive
-	// pointing to a sibling repo (e.g., replace ../butler-api). In that case
-	// the Docker build context must be the parent directory so the sibling
-	// is accessible, and -f points to the repo's Dockerfile.
+	// useParentContext: Docker context = repo root so replace directives resolve
 	images := []struct {
 		name             string
 		repoDir          string
@@ -1267,10 +1389,6 @@ func (o *Orchestrator) buildAndLoadImages(ctx context.Context, provider string) 
 			return fmt.Errorf("repo directory not found: %s", img.repoDir)
 		}
 
-		// Build Docker image. When useParentContext is true, set the build
-		// context to the repo root (parent of all sibling repos) so that
-		// go.mod replace directives like ../butler-api resolve correctly.
-		// A temporary .dockerignore limits the context to only the needed repos.
 		var buildCmd *exec.Cmd
 		if img.useParentContext {
 			repoName := filepath.Base(img.repoDir)
@@ -1320,11 +1438,16 @@ func (o *Orchestrator) buildAndLoadImages(ctx context.Context, provider string) 
 	return nil
 }
 
-// buildAddonsConfig builds the addons config for the ClusterBootstrap CR.
-// Fields with CRD-level defaults (butlerController, capi) are only included
-// when explicitly configured. Omitting them lets the CRD *bool defaults
-// (nil = enabled) take effect instead of writing Go's bool zero value (false).
+// buildAddonsConfig builds the addons section for the ClusterBootstrap CR.
+// Optional fields are omitted to let CRD *bool defaults take effect.
 func buildAddonsConfig(cfg *Config) map[string]interface{} {
+	// Construct deprecated addressPool string from Start/End for backward compat
+	// with older bootstrap controllers that read the flat string.
+	lbPool := cfg.Addons.LoadBalancer.AddressPool
+	if lbPool == "" && cfg.Addons.LoadBalancer.Start != "" && cfg.Addons.LoadBalancer.End != "" {
+		lbPool = cfg.Addons.LoadBalancer.Start + "-" + cfg.Addons.LoadBalancer.End
+	}
+
 	addons := map[string]interface{}{
 		"cni": map[string]interface{}{
 			"type": cfg.Addons.CNI.Type,
@@ -1334,20 +1457,16 @@ func buildAddonsConfig(cfg *Config) map[string]interface{} {
 		},
 		"loadBalancer": map[string]interface{}{
 			"type":        cfg.Addons.LoadBalancer.Type,
-			"addressPool": cfg.Addons.LoadBalancer.AddressPool,
+			"addressPool": lbPool,
 		},
 	}
 
-	// Only include console when the user explicitly configured it.
-	// The CRD defaults Enabled to true via *bool, so omitting this section
-	// enables butler-console by default.
+	// Only include console when explicitly configured
 	if cfg.Addons.Console.Enabled || cfg.Addons.Console.Version != "" {
 		addons["console"] = buildConsoleConfig(cfg.Addons.Console)
 	}
 
-	// Only include butlerController when the user explicitly configured it.
-	// The CRD defaults Enabled to true via *bool, so omitting this section
-	// enables butler-controller by default.
+	// Only include butlerController when explicitly configured
 	if cfg.Addons.ButlerController.Version != "" || cfg.Addons.ButlerController.Image != "" {
 		bc := map[string]interface{}{
 			"enabled": true,
@@ -1361,8 +1480,7 @@ func buildAddonsConfig(cfg *Config) map[string]interface{} {
 		addons["butlerController"] = bc
 	}
 
-	// Only include capi when the user explicitly configured it.
-	// The CRD defaults Enabled to true via *bool.
+	// Only include capi when explicitly configured
 	if cfg.Addons.CAPI.Version != "" {
 		addons["capi"] = map[string]interface{}{
 			"enabled": true,

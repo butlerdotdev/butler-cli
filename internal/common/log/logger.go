@@ -55,10 +55,16 @@ func New(name string) *Logger {
 
 // NewWithLevel creates a new Logger with the given name and level
 func NewWithLevel(name string, level slog.Level) *Logger {
+	return NewWithWriter(name, level, os.Stderr)
+}
+
+// NewWithWriter creates a Logger that writes to the given writer instead
+// of stderr. This is used by the TUI to redirect log output to a buffer.
+func NewWithWriter(name string, level slog.Level, w io.Writer) *Logger {
 	handler := &prettyHandler{
 		name:   name,
 		level:  level,
-		output: os.Stderr,
+		output: w,
 	}
 
 	return &Logger{
@@ -66,6 +72,16 @@ func NewWithLevel(name string, level slog.Level) *Logger {
 		name:   name,
 		level:  level,
 	}
+}
+
+// Name returns the logger's name.
+func (l *Logger) Name() string {
+	return l.name
+}
+
+// Level returns the logger's minimum log level.
+func (l *Logger) Level() slog.Level {
+	return l.level
 }
 
 // SetVerbose enables debug logging

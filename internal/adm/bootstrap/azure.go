@@ -25,12 +25,14 @@ import (
 	"time"
 
 	"github.com/butlerdotdev/butler/internal/adm/bootstrap/orchestrator"
+	"github.com/butlerdotdev/butler/internal/adm/bootstrap/tui"
 	"github.com/butlerdotdev/butler/internal/common/log"
+	"github.com/butlerdotdev/butler/internal/common/output"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
 
-// NewAzureCmd creates the azure bootstrap subcommand
+// NewAzureCmd creates the azure bootstrap subcommand.
 func NewAzureCmd(logger *log.Logger) *cobra.Command {
 	var (
 		configFile     string
@@ -42,6 +44,7 @@ func NewAzureCmd(logger *log.Logger) *cobra.Command {
 		clientSecret   string
 		tenantID       string
 		subscriptionID string
+		noTUI          bool
 	)
 
 	cmd := &cobra.Command{
@@ -74,19 +77,9 @@ Local Development:
 			ctx, cancel := context.WithCancel(cmd.Context())
 			defer cancel()
 
-			sigCh := make(chan os.Signal, 1)
-			signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
-			go func() {
-				<-sigCh
-				logger.Warn("received interrupt, cleaning up...")
-				cancel()
-			}()
-
-			if configFile != "" {
-				viper.SetConfigFile(configFile)
-				if err := viper.ReadInConfig(); err != nil {
-					return fmt.Errorf("reading config file: %w", err)
-				}
+			viper.SetConfigFile(configFile)
+			if err := viper.ReadInConfig(); err != nil {
+				return fmt.Errorf("reading config file: %w", err)
 			}
 
 			cfg, err := orchestrator.LoadConfig()
@@ -144,23 +137,39 @@ Local Development:
 				repoRoot = home + "/code/github.com/butlerdotdev"
 			}
 
-			orch := orchestrator.New(logger, orchestrator.Options{
+			orchOptions := orchestrator.Options{
 				DryRun:      dryRun,
 				SkipCleanup: skipCleanup,
 				Timeout:     60 * time.Minute,
 				LocalDev:    localDev,
 				RepoRoot:    repoRoot,
-			})
-
-			if err := orch.Run(ctx, cfg); err != nil {
-				return err
 			}
 
-			return nil
+			if output.IsTTY() && !noTUI && !dryRun {
+				return tui.Run(tui.RunConfig{
+					Ctx:        ctx,
+					Cancel:     cancel,
+					Cfg:        cfg,
+					OrcOptions: orchOptions,
+					LoggerName: logger.Name(),
+					LogLevel:   logger.Level(),
+				})
+			}
+
+			sigCh := make(chan os.Signal, 1)
+			signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
+			go func() {
+				<-sigCh
+				logger.Warn("received interrupt, cleaning up...")
+				cancel()
+			}()
+
+			orch := orchestrator.New(logger, orchOptions)
+			return orch.Run(ctx, cfg)
 		},
 	}
 
-	cmd.Flags().StringVarP(&configFile, "config", "c", "", "path to bootstrap config file (required)")
+	cmd.Flags().StringVarP(&configFile, "config", "c", "", "path to bootstrap config file")
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "show what would be created without executing")
 	cmd.Flags().BoolVar(&skipCleanup, "skip-cleanup", false, "don't delete KIND cluster on failure (for debugging)")
 	cmd.Flags().BoolVar(&localDev, "local", false, "local development mode - build and load images from source")
@@ -169,8 +178,8 @@ Local Development:
 	cmd.Flags().StringVar(&clientSecret, "client-secret", "", "Azure service principal password (overrides config file)")
 	cmd.Flags().StringVar(&tenantID, "tenant-id", "", "Azure tenant ID (overrides config file)")
 	cmd.Flags().StringVar(&subscriptionID, "subscription-id", "", "Azure subscription ID (overrides config file)")
-
-	cmd.MarkFlagRequired("config")
+	cmd.Flags().BoolVar(&noTUI, "no-tui", false, "disable interactive TUI (use line-by-line output)")
+	_ = cmd.MarkFlagRequired("config")
 
 	return cmd
 }

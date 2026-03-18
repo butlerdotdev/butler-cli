@@ -23,6 +23,7 @@ import (
 	"github.com/butlerdotdev/butler/internal/adm/status"
 	"github.com/butlerdotdev/butler/internal/common/log"
 	"github.com/butlerdotdev/butler/internal/common/output"
+	"github.com/butlerdotdev/butler/internal/common/version"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
@@ -128,7 +129,7 @@ func NewVersionCmd() *cobra.Command {
 		Use:   "version",
 		Short: "Print version information",
 		Run: func(cmd *cobra.Command, args []string) {
-			cmd.Println(output.Binary("butleradm") + " version v0.1.0-dev")
+			cmd.Println(output.Binary("butleradm") + " version " + version.Version)
 			cmd.Println("Butler Platform Administration")
 			cmd.Println(output.Dim("https://github.com/butlerdotdev/butler"))
 		},
