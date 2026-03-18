@@ -187,7 +187,6 @@ func (m *duringBootstrapModel) SetSize(w, h int) {
 	m.machines.SetWidth(contentWidth - 4)
 	m.addons.SetWidth(contentWidth - 4)
 
-	// Allocate log viewport height: roughly 1/4 of available space
 	logH := h / 4
 	if logH < 3 {
 		logH = 3

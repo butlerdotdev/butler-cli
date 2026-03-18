@@ -32,8 +32,7 @@ type prereqCheck struct {
 	detail string
 }
 
-// preBootstrapModel shows config summary, prerequisite checks, and
-// a confirmation prompt before starting bootstrap.
+// preBootstrapModel shows config summary, prereq checks, and a confirmation prompt.
 type preBootstrapModel struct {
 	cfg     *orchestrator.Config
 	checks  []prereqCheck
