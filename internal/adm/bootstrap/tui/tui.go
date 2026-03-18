@@ -61,6 +61,18 @@ func Run(rc RunConfig) error {
 		go func() {
 			defer orchOnce.Do(func() { close(orchDone) })
 			orchErr = orch.Run(rc.Ctx, rc.Cfg)
+			// Ensure the TUI receives a terminal event for early failures
+			// (before watchBootstrap which emits its own EventFailed).
+			if orchErr != nil {
+				select {
+				case eventCh <- orchestrator.Event{
+					Type:    orchestrator.EventFailed,
+					Message: orchErr.Error(),
+					Error:   orchErr,
+				}:
+				default:
+				}
+			}
 			close(eventCh)
 		}()
 	}
