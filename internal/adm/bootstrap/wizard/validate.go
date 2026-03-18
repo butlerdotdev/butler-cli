@@ -53,7 +53,7 @@ func validateCIDR(s string) error {
 
 func validateIP(s string) error {
 	if s == "" {
-		return nil
+		return fmt.Errorf("IP address is required")
 	}
 	if net.ParseIP(s) == nil {
 		return fmt.Errorf("invalid IP address: %s", s)
@@ -83,6 +83,22 @@ func validateIntRange(min, max int) func(string) error {
 
 func validatePort(s string) error {
 	return validateIntRange(1, 65535)(s)
+}
+
+func validateCSVIPs(s string) error {
+	if strings.TrimSpace(s) == "" {
+		return nil
+	}
+	for _, part := range strings.Split(s, ",") {
+		ip := strings.TrimSpace(part)
+		if ip == "" {
+			continue
+		}
+		if net.ParseIP(ip) == nil {
+			return fmt.Errorf("invalid IP address: %s", ip)
+		}
+	}
+	return nil
 }
 
 func validateOptional(fn func(string) error) func(string) error {

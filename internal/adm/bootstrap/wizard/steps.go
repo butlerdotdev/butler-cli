@@ -605,6 +605,21 @@ func networkingStep(s *wizardState) *huh.Group {
 			Value(&s.lbEnd).
 			Validate(validateIP),
 
+		// --- Provider network ---
+		huh.NewInput().
+			Title("Provider Gateway").
+			Description("Default gateway for tenant VMs (leave blank if DHCP provides it)").
+			Placeholder("10.40.0.1").
+			Value(&s.providerGateway).
+			Validate(validateOptional(validateIP)),
+
+		huh.NewInput().
+			Title("DNS Servers").
+			Description("Comma-separated DNS servers for tenant VMs\n(leave blank for DHCP defaults)").
+			Placeholder("10.40.0.1, 1.1.1.1").
+			Value(&s.providerDNS).
+			Validate(validateCSVIPs),
+
 		// --- Tenant IPAM allocation ---
 		huh.NewSelect[string]().
 			Title("Tenant LB Allocation Mode").
@@ -818,6 +833,14 @@ func buildReviewSummary(s *wizardState) string {
 
 	if isOnPrem(s.provider) && s.lbStart != "" && s.lbEnd != "" {
 		b.WriteString(fmt.Sprintf("Mgmt LB:      %s - %s\n", s.lbStart, s.lbEnd))
+	}
+
+	if isOnPrem(s.provider) && s.providerGateway != "" {
+		b.WriteString(fmt.Sprintf("Gateway:      %s\n", s.providerGateway))
+	}
+
+	if isOnPrem(s.provider) && s.providerDNS != "" {
+		b.WriteString(fmt.Sprintf("DNS:          %s\n", s.providerDNS))
 	}
 
 	if isOnPrem(s.provider) {
