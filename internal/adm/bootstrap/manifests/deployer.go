@@ -34,13 +34,13 @@ import (
 	"k8s.io/client-go/kubernetes"
 )
 
-// Deployer applies embedded manifests to a Kubernetes cluster
+// Deployer applies embedded manifests to a Kubernetes cluster.
 type Deployer struct {
 	clientset     *kubernetes.Clientset
 	dynamicClient dynamic.Interface
 }
 
-// NewDeployer creates a new manifest deployer
+// NewDeployer creates a new manifest deployer.
 func NewDeployer(clientset *kubernetes.Clientset, dynamicClient dynamic.Interface) *Deployer {
 	return &Deployer{
 		clientset:     clientset,
@@ -48,12 +48,12 @@ func NewDeployer(clientset *kubernetes.Clientset, dynamicClient dynamic.Interfac
 	}
 }
 
-// DeployCRDs deploys all embedded CRD manifests
+// DeployCRDs deploys all embedded CRD manifests.
 func (d *Deployer) DeployCRDs(ctx context.Context) error {
 	return d.deployFromFS(ctx, CRDs, "crds")
 }
 
-// DeployControllers deploys all embedded controller manifests
+// DeployControllers deploys bootstrap and provider controller manifests.
 func (d *Deployer) DeployControllers(ctx context.Context, provider string) error {
 	// Deploy bootstrap controller (always needed)
 	if err := d.deployFile(ctx, Controllers, "controllers/butler-bootstrap.yaml"); err != nil {
@@ -69,7 +69,7 @@ func (d *Deployer) DeployControllers(ctx context.Context, provider string) error
 	return nil
 }
 
-// deployFromFS deploys all YAML files from an embedded filesystem directory
+// deployFromFS deploys all YAML files from an embedded filesystem directory.
 func (d *Deployer) deployFromFS(ctx context.Context, fsys fs.FS, dir string) error {
 	entries, err := fs.ReadDir(fsys, dir)
 	if err != nil {
@@ -93,7 +93,7 @@ func (d *Deployer) deployFromFS(ctx context.Context, fsys fs.FS, dir string) err
 	return nil
 }
 
-// deployFile deploys all resources from a single YAML file
+// deployFile deploys all resources from a single YAML file.
 func (d *Deployer) deployFile(ctx context.Context, fsys fs.FS, path string) error {
 	data, err := fs.ReadFile(fsys, path)
 	if err != nil {
@@ -103,7 +103,7 @@ func (d *Deployer) deployFile(ctx context.Context, fsys fs.FS, path string) erro
 	return d.applyYAML(ctx, data)
 }
 
-// applyYAML applies multi-document YAML to the cluster
+// applyYAML applies multi-document YAML to the cluster.
 func (d *Deployer) applyYAML(ctx context.Context, data []byte) error {
 	reader := yaml.NewYAMLReader(bufio.NewReader(bytes.NewReader(data)))
 
@@ -116,18 +116,15 @@ func (d *Deployer) applyYAML(ctx context.Context, data []byte) error {
 			return fmt.Errorf("reading YAML document: %w", err)
 		}
 
-		// Skip empty documents
 		if len(bytes.TrimSpace(doc)) == 0 {
 			continue
 		}
 
-		// Parse the document
 		obj := &unstructured.Unstructured{}
 		if err := yaml.Unmarshal(doc, &obj.Object); err != nil {
 			return fmt.Errorf("unmarshaling YAML: %w", err)
 		}
 
-		// Skip if no kind (comments-only documents)
 		if obj.GetKind() == "" {
 			continue
 		}
@@ -140,7 +137,7 @@ func (d *Deployer) applyYAML(ctx context.Context, data []byte) error {
 	return nil
 }
 
-// applyResource creates or updates a single resource
+// applyResource creates or updates a single resource.
 func (d *Deployer) applyResource(ctx context.Context, obj *unstructured.Unstructured) error {
 	gvk := obj.GroupVersionKind()
 	gvr := gvkToGVR(gvk)
@@ -152,15 +149,12 @@ func (d *Deployer) applyResource(ctx context.Context, obj *unstructured.Unstruct
 		client = d.dynamicClient.Resource(gvr)
 	}
 
-	// Try to create first
 	_, err := client.Create(ctx, obj, metav1.CreateOptions{})
 	if err == nil {
 		return nil
 	}
 
-	// If already exists, update
 	if errors.IsAlreadyExists(err) {
-		// Get existing to preserve resourceVersion
 		existing, getErr := client.Get(ctx, obj.GetName(), metav1.GetOptions{})
 		if getErr != nil {
 			return fmt.Errorf("getting existing resource: %w", getErr)
@@ -177,10 +171,8 @@ func (d *Deployer) applyResource(ctx context.Context, obj *unstructured.Unstruct
 	return fmt.Errorf("creating resource: %w", err)
 }
 
-// gvkToGVR converts GroupVersionKind to GroupVersionResource
-// This is a simplified mapping - in production you'd use discovery
+// gvkToGVR converts GroupVersionKind to GroupVersionResource using a static mapping.
 func gvkToGVR(gvk schema.GroupVersionKind) schema.GroupVersionResource {
-	// Standard Kubernetes resources
 	kindToResource := map[string]string{
 		"Namespace":                "namespaces",
 		"ServiceAccount":           "serviceaccounts",
@@ -197,7 +189,6 @@ func gvkToGVR(gvk schema.GroupVersionKind) schema.GroupVersionResource {
 
 	resource, ok := kindToResource[gvk.Kind]
 	if !ok {
-		// Default: lowercase + 's'
 		resource = strings.ToLower(gvk.Kind) + "s"
 	}
 
@@ -208,7 +199,7 @@ func gvkToGVR(gvk schema.GroupVersionKind) schema.GroupVersionResource {
 	}
 }
 
-// WaitForCRDs waits for CRDs to be established
+// WaitForCRDs polls until all named CRDs have the Established condition.
 func (d *Deployer) WaitForCRDs(ctx context.Context, names []string) error {
 	crdGVR := schema.GroupVersionResource{
 		Group:    "apiextensions.k8s.io",
@@ -229,7 +220,6 @@ func (d *Deployer) WaitForCRDs(ctx context.Context, names []string) error {
 				continue
 			}
 
-			// Check if established
 			conditions, found, _ := unstructured.NestedSlice(crd.Object, "status", "conditions")
 			if !found {
 				continue
@@ -256,7 +246,7 @@ func (d *Deployer) WaitForCRDs(ctx context.Context, names []string) error {
 	return nil
 }
 
-// WaitForDeployment waits for a deployment to be ready
+// WaitForDeployment polls until the named deployment has all replicas ready.
 func (d *Deployer) WaitForDeployment(ctx context.Context, namespace, name string) error {
 	deployGVR := schema.GroupVersionResource{
 		Group:    "apps",

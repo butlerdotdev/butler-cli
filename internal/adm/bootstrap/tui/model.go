@@ -33,7 +33,7 @@ const (
 	viewPostBootstrap
 )
 
-// bootstrapModel is the root bubbletea model that manages view transitions.
+// bootstrapModel is the root bubbletea model managing pre/during/post views.
 type bootstrapModel struct {
 	pre    preBootstrapModel
 	during duringBootstrapModel
@@ -53,7 +53,7 @@ type bootstrapModel struct {
 	quitting         bool
 }
 
-// ModelConfig holds the configuration needed to construct a bootstrapModel.
+// ModelConfig holds configuration for constructing a bootstrapModel.
 type ModelConfig struct {
 	Cfg              *orchestrator.Config
 	EventCh          <-chan orchestrator.Event

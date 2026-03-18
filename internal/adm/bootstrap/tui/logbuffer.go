@@ -21,8 +21,7 @@ import (
 	"sync"
 )
 
-// LogBuffer is a thread-safe ring buffer that stores formatted log lines
-// for display in the TUI log viewport.
+// LogBuffer is a thread-safe ring buffer for formatted log lines.
 type LogBuffer struct {
 	mu    sync.Mutex
 	lines []string
@@ -37,8 +36,7 @@ func NewLogBuffer(max int) *LogBuffer {
 	}
 }
 
-// Write appends a formatted line to the buffer. If the buffer is full,
-// the oldest line is evicted.
+// Write appends a line, evicting the oldest if full.
 func (b *LogBuffer) Write(line string) {
 	b.mu.Lock()
 	defer b.mu.Unlock()

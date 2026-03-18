@@ -111,8 +111,6 @@ func (m *phaseProgressModel) SetPhase(phaseID string) {
 		}
 	}
 	if !found {
-		// Phase not in the standard list (e.g., Initializing, BuildingImages)
-		// Just track it as current without modifying the checklist
 		m.currentPhase = phaseID
 	}
 }
@@ -160,7 +158,6 @@ func (m phaseProgressModel) View() string {
 			name = phasePending.Render(p.name)
 		}
 
-		// Show elapsed time for active or completed phases
 		if start, ok := m.startTimes[p.id]; ok {
 			end := time.Now()
 			if e, ok := m.endTimes[p.id]; ok {

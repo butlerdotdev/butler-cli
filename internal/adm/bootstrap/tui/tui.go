@@ -41,25 +41,11 @@ type RunConfig struct {
 	SkipPreBootstrap bool // Skip pre-bootstrap view (used when wizard already confirmed)
 }
 
-// Run starts the interactive TUI for the bootstrap process. It creates
-// the event channel, log buffer, orchestrator, and bubbletea program,
-// then blocks until the bootstrap completes or the user quits.
-//
-// The cancel function is called when the user aborts, which propagates
-// to the orchestrator's context for KIND cleanup.
+// Run starts the interactive TUI for the bootstrap process.
 func Run(rc RunConfig) error {
-	// Event channel for orchestrator -> TUI communication
 	eventCh := make(chan orchestrator.Event, 100)
-
-	// Log buffer for capturing orchestrator output
 	logBuf := NewLogBuffer(1000)
-
-	// Create a writer that feeds the log buffer. The prettyHandler writes
-	// formatted lines including a trailing newline, so we strip it and
-	// write each line to the buffer.
 	bufWriter := &logBufferWriter{buf: logBuf}
-
-	// Create a real log.Logger that writes to the buffer instead of stderr.
 	orchLogger := log.NewWithWriter(rc.LoggerName, rc.LogLevel, bufWriter)
 
 	orch := orchestrator.New(orchLogger, rc.OrcOptions)
@@ -67,7 +53,6 @@ func Run(rc RunConfig) error {
 		orchLogger.Debug(msg, args...)
 	}))
 
-	// Track orchestrator completion
 	var orchErr error
 	var orchOnce sync.Once
 	orchDone := make(chan struct{})
@@ -80,7 +65,6 @@ func Run(rc RunConfig) error {
 		}()
 	}
 
-	// Create the root model
 	model := NewModel(ModelConfig{
 		Cfg:              rc.Cfg,
 		EventCh:          eventCh,
@@ -90,7 +74,6 @@ func Run(rc RunConfig) error {
 		SkipPreBootstrap: rc.SkipPreBootstrap,
 	})
 
-	// Run the bubbletea program
 	p := tea.NewProgram(model, tea.WithAltScreen())
 
 	finalModel, err := p.Run()
@@ -98,20 +81,16 @@ func Run(rc RunConfig) error {
 		return fmt.Errorf("TUI error: %w", err)
 	}
 
-	// If the user quit mid-bootstrap, cancel the context and wait for cleanup
 	if fm, ok := finalModel.(bootstrapModel); ok && fm.quitting && fm.activeView == viewDuringBootstrap {
 		rc.Cancel()
 		<-orchDone
 	}
 
-	// Wait for orchestrator to finish if it was started
 	select {
 	case <-orchDone:
 	default:
-		// Orchestrator was never started (user quit from pre-bootstrap)
 	}
 
-	// Return the orchestrator error if it failed
 	if orchErr != nil {
 		return orchErr
 	}
@@ -119,9 +98,7 @@ func Run(rc RunConfig) error {
 	return nil
 }
 
-// logBufferWriter adapts a LogBuffer to io.Writer. The prettyHandler writes
-// complete lines ending with \n. This writer splits on newlines and feeds
-// each non-empty line to the buffer.
+// logBufferWriter adapts a LogBuffer to io.Writer by splitting on newlines.
 type logBufferWriter struct {
 	buf *LogBuffer
 }

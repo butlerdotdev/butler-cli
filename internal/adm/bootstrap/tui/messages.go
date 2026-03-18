@@ -42,8 +42,7 @@ func tickCmd(d time.Duration) tea.Cmd {
 	})
 }
 
-// waitForEvent returns a command that blocks until an event arrives on the
-// channel, then wraps it as an orchestratorEventMsg.
+// waitForEvent blocks until an event arrives and wraps it as orchestratorEventMsg.
 func waitForEvent(ch <-chan orchestrator.Event) tea.Cmd {
 	return func() tea.Msg {
 		e, ok := <-ch
