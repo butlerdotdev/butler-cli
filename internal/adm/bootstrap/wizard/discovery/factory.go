@@ -25,22 +25,18 @@ import (
 	"time"
 )
 
-// DefaultFactoryURL is the public Butler Image Factory endpoint.
 const DefaultFactoryURL = "https://factory.butlerlabs.dev"
 
-// DefaultTalosSchematic is the default schematic ID for Talos images
-// with qemu-guest-agent, iscsi-tools, and util-linux-tools extensions.
+// DefaultTalosSchematic includes qemu-guest-agent, iscsi-tools, util-linux-tools.
 const DefaultTalosSchematic = "ce4c980550dd2ab1b17bbf2b08801c7eb59418eafe8f279833297925d67c7515"
 
-// FactoryClient queries the Butler Image Factory API for available
-// OS images and builds artifact download URLs.
+// FactoryClient queries the Butler Image Factory API.
 type FactoryClient struct {
 	baseURL    string
 	httpClient *http.Client
 }
 
-// NewFactoryClient creates a factory client. If baseURL is empty,
-// DefaultFactoryURL is used.
+// NewFactoryClient creates a factory client. Defaults to DefaultFactoryURL.
 func NewFactoryClient(baseURL string) *FactoryClient {
 	if baseURL == "" {
 		baseURL = DefaultFactoryURL
@@ -53,14 +49,14 @@ func NewFactoryClient(baseURL string) *FactoryClient {
 	}
 }
 
-// CatalogEntry represents an available OS type with its versions and formats.
+// CatalogEntry represents an available OS image in the factory.
 type CatalogEntry struct {
 	OS       string   `json:"os"`
 	Versions []string `json:"versions"`
 	Formats  []string `json:"formats"`
 }
 
-// FetchCatalog returns the list of available OS images from the factory.
+// FetchCatalog returns available OS images from the factory.
 func (c *FactoryClient) FetchCatalog(ctx context.Context) ([]CatalogEntry, error) {
 	url := c.baseURL + "/v1/catalog"
 
@@ -88,14 +84,12 @@ func (c *FactoryClient) FetchCatalog(ctx context.Context) ([]CatalogEntry, error
 }
 
 // ArtifactURL builds the download URL for a specific image artifact.
-// Format example: https://factory.butlerlabs.dev/image/{schematicID}/{version}/talos-amd64.qcow2
 func (c *FactoryClient) ArtifactURL(schematicID, version, platform, arch, format string) string {
 	return fmt.Sprintf("%s/image/%s/%s/%s-%s.%s",
 		c.baseURL, schematicID, version, platform, arch, format)
 }
 
-// ProviderImageName generates a standardized image name for a synced image.
-// Example: talos-v1-12-4-amd64-ce4c9805-butler
+// ProviderImageName generates a standardized name (e.g., talos-v1-12-4-amd64-ce4c9805-butler).
 func ProviderImageName(platform, version, arch, schematicID string) string {
 	v := strings.ReplaceAll(version, ".", "-")
 	shortID := schematicID

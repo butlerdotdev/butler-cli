@@ -20,8 +20,7 @@ import (
 	"github.com/charmbracelet/huh"
 )
 
-// harvesterCredGroup builds the Harvester credential fields.
-// Hidden unless provider == "harvester".
+// harvesterCredGroup collects the Harvester kubeconfig path.
 func harvesterCredGroup(s *wizardState) *huh.Group {
 	return huh.NewGroup(
 		huh.NewNote().
@@ -38,8 +37,7 @@ func harvesterCredGroup(s *wizardState) *huh.Group {
 	})
 }
 
-// nutanixCredGroup builds the Nutanix credential fields.
-// Hidden unless provider == "nutanix".
+// nutanixCredGroup collects Prism Central endpoint, port, and credentials.
 func nutanixCredGroup(s *wizardState) *huh.Group {
 	if s.nutPort == "" {
 		s.nutPort = "9440"
@@ -80,8 +78,7 @@ func nutanixCredGroup(s *wizardState) *huh.Group {
 	})
 }
 
-// gcpCredGroup builds the GCP credential fields.
-// Hidden unless provider == "gcp".
+// gcpCredGroup collects the service account key path and project ID.
 func gcpCredGroup(s *wizardState) *huh.Group {
 	return huh.NewGroup(
 		huh.NewNote().
@@ -103,8 +100,7 @@ func gcpCredGroup(s *wizardState) *huh.Group {
 	})
 }
 
-// awsCredGroup builds the AWS credential fields.
-// Hidden unless provider == "aws".
+// awsCredGroup collects AWS access key and secret.
 func awsCredGroup(s *wizardState) *huh.Group {
 	return huh.NewGroup(
 		huh.NewNote().
@@ -126,8 +122,7 @@ func awsCredGroup(s *wizardState) *huh.Group {
 	})
 }
 
-// azureCredGroup builds the Azure credential fields.
-// Hidden unless provider == "azure".
+// azureCredGroup collects Azure service principal credentials.
 func azureCredGroup(s *wizardState) *huh.Group {
 	return huh.NewGroup(
 		huh.NewNote().

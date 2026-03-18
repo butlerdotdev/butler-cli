@@ -22,7 +22,6 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
-// Butler brand colors matching butler-console and tui/styles.go.
 var (
 	brandGreen = lipgloss.Color("#22c55e")
 	brandBlue  = lipgloss.Color("#3b82f6")
@@ -33,11 +32,11 @@ var (
 	brandBgAlt = lipgloss.Color("#171717")
 )
 
-// butlerTheme returns a huh theme using the Butler brand palette.
+// butlerTheme returns a huh theme with Butler brand colors.
 func butlerTheme() *huh.Theme {
 	t := huh.ThemeCharm()
 
-	// Focused field styles
+	// Focused
 	t.Focused.Title = t.Focused.Title.Foreground(brandBlue).Bold(true)
 	t.Focused.Description = t.Focused.Description.Foreground(brandGray)
 	t.Focused.Base = t.Focused.Base.BorderForeground(brandGreen)
@@ -48,16 +47,14 @@ func butlerTheme() *huh.Theme {
 	t.Focused.FocusedButton = t.Focused.FocusedButton.Background(brandGreen).Foreground(brandBg)
 	t.Focused.BlurredButton = t.Focused.BlurredButton.Foreground(brandGray)
 
-	// Blurred field styles
+	// Blurred
 	t.Blurred.Title = t.Blurred.Title.Foreground(brandGray)
 	t.Blurred.TextInput.Prompt = t.Blurred.TextInput.Prompt.Foreground(brandGray)
 
 	return t
 }
 
-// wizardKeyMap returns a huh KeyMap with Esc added to the Prev binding
-// on every field type. This makes Esc go back to the previous page
-// (same as Shift+Tab).
+// wizardKeyMap adds Esc to the Prev binding on every field type.
 func wizardKeyMap() *huh.KeyMap {
 	km := huh.NewDefaultKeyMap()
 	prevBinding := key.NewBinding(

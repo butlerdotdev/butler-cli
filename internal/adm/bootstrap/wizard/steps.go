@@ -27,53 +27,41 @@ import (
 	"github.com/butlerdotdev/butler/internal/adm/bootstrap/wizard/discovery"
 )
 
-// wizardState holds intermediate form values as strings. huh's Input
-// fields bind to *string, so numeric values are stored as strings and
-// parsed to int32 when building the final Config.
 type wizardState struct {
-	// Provider selection
 	provider    string
 	imageSource string // "factory" or "existing"
 
-	// Cluster basics
 	clusterName string
 	topology    string
 
-	// Control plane sizing
 	cpReplicas string
 	cpCPU      string
 	cpMemoryMB string
 	cpDiskGB   string
 
-	// Worker sizing
 	workerReplicas string
 	workerCPU      string
 	workerMemoryMB string
 	workerDiskGB   string
 
-	// Networking
 	podCIDR     string
 	serviceCIDR string
 	vip         string
 
-	// Talos
 	talosVersion   string
 	talosSchematic string
 
-	// Control plane exposure
 	exposureMode           string
 	exposureHostname       string
 	exposureIngressClass   string
 	exposureControllerType string
 	exposureGatewayRef     string
 
-	// Provider network / IPAM (on-prem)
 	providerGateway string
 	providerDNS     string
 	lbAllocMode     string
 	lbPoolSize      string
 
-	// Addons
 	cniType     string
 	storageType string
 	lbType      string
@@ -92,14 +80,11 @@ type wizardState struct {
 	consTLS      bool
 	consPassword string
 
-	// Provider credentials
-	// Harvester
 	harvKubeconfig string
 	harvNamespace  string
 	harvNetwork    string
 	harvImage      string
 
-	// Nutanix
 	nutEndpoint    string
 	nutPort        string
 	nutInsecure    bool
@@ -109,7 +94,6 @@ type wizardState struct {
 	nutSubnetUUID  string
 	nutImageUUID   string
 
-	// GCP
 	gcpKeyPath    string
 	gcpProjectID  string
 	gcpRegion     string
@@ -117,7 +101,6 @@ type wizardState struct {
 	gcpNetwork    string
 	gcpSubnetwork string
 
-	// AWS
 	awsAccessKey  string
 	awsSecretKey  string
 	awsRegion     string
@@ -125,7 +108,6 @@ type wizardState struct {
 	awsSubnetID   string
 	awsSecGroupID string
 
-	// Azure
 	azClientID       string
 	azClientSecret   string
 	azTenantID       string
@@ -135,7 +117,6 @@ type wizardState struct {
 	azVNet           string
 	azSubnet         string
 
-	// Review
 	confirmed bool
 }
 
@@ -171,8 +152,7 @@ func newWizardState() *wizardState {
 	}
 }
 
-// stateCredentials implements discovery.CredentialProvider by reading
-// from the wizard state fields populated by Form 1.
+// stateCredentials adapts wizardState to the discovery.CredentialProvider interface.
 type stateCredentials struct {
 	s *wizardState
 }
@@ -233,7 +213,7 @@ func (c *stateCredentials) GetBool(key string) bool {
 	}
 }
 
-// providerSelectGroup asks the user to choose an infrastructure provider.
+// providerSelectGroup presents the provider selection dropdown.
 func providerSelectGroup(s *wizardState) *huh.Group {
 	return huh.NewGroup(
 		huh.NewNote().
@@ -253,10 +233,7 @@ func providerSelectGroup(s *wizardState) *huh.Group {
 	)
 }
 
-// resourceSelectGroup dynamically builds a resource selection group
-// from discovered provider resources. Root resources are presented as
-// static selects. Child resources that depend on a parent use OptionsFunc
-// for lazy loading when the parent value changes.
+// resourceSelectGroup dispatches to the provider-specific resource group.
 func resourceSelectGroup(s *wizardState, disc discovery.ProviderDiscovery, resources map[string][]discovery.ProviderResource) *huh.Group {
 	switch s.provider {
 	case "harvester":
@@ -276,7 +253,7 @@ func resourceSelectGroup(s *wizardState, disc discovery.ProviderDiscovery, resou
 	}
 }
 
-// resourcesToOptions converts discovered resources into huh Select options.
+// resourcesToOptions converts discovered resources to huh select options.
 func resourcesToOptions(resources []discovery.ProviderResource) []huh.Option[string] {
 	if len(resources) == 0 {
 		return []huh.Option[string]{huh.NewOption("(none found)", "")}
@@ -292,8 +269,7 @@ func resourcesToOptions(resources []discovery.ProviderResource) []huh.Option[str
 	return opts
 }
 
-// fetchOptions returns an OptionsFunc that lazily fetches child resources
-// from the discovery client based on a parent selection.
+// fetchOptions lazily fetches child resources when the parent selection changes.
 func fetchOptions(disc discovery.ProviderDiscovery, resourceType string, parentID *string) func() []huh.Option[string] {
 	return func() []huh.Option[string] {
 		if parentID == nil || *parentID == "" {
@@ -309,8 +285,7 @@ func fetchOptions(disc discovery.ProviderDiscovery, resourceType string, parentI
 	}
 }
 
-// harvesterResourceGroup builds resource selection for Harvester.
-// Namespaces are pre-fetched; networks and images cascade from namespace.
+// harvesterResourceGroup builds Harvester resource selection (namespace, network, image).
 func harvesterResourceGroup(s *wizardState, disc discovery.ProviderDiscovery, resources map[string][]discovery.ProviderResource) *huh.Group {
 	nsOpts := resourcesToOptions(resources[discovery.ResourceNamespaces])
 
@@ -353,8 +328,7 @@ func harvesterResourceGroup(s *wizardState, disc discovery.ProviderDiscovery, re
 	)
 }
 
-// nutanixResourceGroup builds resource selection for Nutanix.
-// All resources are top-level (no cascading).
+// nutanixResourceGroup builds Nutanix resource selection (cluster, subnet, image).
 func nutanixResourceGroup(s *wizardState, resources map[string][]discovery.ProviderResource) *huh.Group {
 	clusterOpts := resourcesToOptions(resources[discovery.ResourceClusters])
 	subnetOpts := resourcesToOptions(resources[discovery.ResourceSubnets])
@@ -398,8 +372,7 @@ func nutanixResourceGroup(s *wizardState, resources map[string][]discovery.Provi
 	)
 }
 
-// gcpResourceGroup builds resource selection for GCP.
-// Regions and networks are pre-fetched; zones and subnetworks cascade.
+// gcpResourceGroup builds GCP resource selection (region, zone, network, subnet).
 func gcpResourceGroup(s *wizardState, disc discovery.ProviderDiscovery, resources map[string][]discovery.ProviderResource) *huh.Group {
 	regionOpts := resourcesToOptions(resources[discovery.ResourceRegions])
 	networkOpts := resourcesToOptions(resources[discovery.ResourceNetworks])
@@ -431,9 +404,7 @@ func gcpResourceGroup(s *wizardState, disc discovery.ProviderDiscovery, resource
 	)
 }
 
-// awsResourceGroup builds resource selection for AWS.
-// Regions are pre-fetched; VPCs cascade from region, subnets and SGs
-// cascade from VPC.
+// awsResourceGroup builds AWS resource selection (region, VPC, subnet, security group).
 func awsResourceGroup(s *wizardState, disc discovery.ProviderDiscovery, resources map[string][]discovery.ProviderResource) *huh.Group {
 	regionOpts := resourcesToOptions(resources[discovery.ResourceRegions])
 
@@ -464,9 +435,7 @@ func awsResourceGroup(s *wizardState, disc discovery.ProviderDiscovery, resource
 	)
 }
 
-// azureResourceGroup builds resource selection for Azure.
-// Locations and resource groups are pre-fetched; VNets cascade from
-// resource group, subnets cascade from VNet.
+// azureResourceGroup builds Azure resource selection (location, RG, VNet, subnet).
 func azureResourceGroup(s *wizardState, disc discovery.ProviderDiscovery, resources map[string][]discovery.ProviderResource) *huh.Group {
 	locationOpts := resourcesToOptions(resources[discovery.ResourceLocations])
 	rgOpts := resourcesToOptions(resources[discovery.ResourceResourceGroups])
@@ -498,8 +467,7 @@ func azureResourceGroup(s *wizardState, disc discovery.ProviderDiscovery, resour
 	)
 }
 
-// clusterAndSizingStep combines cluster identity and control plane sizing.
-// CP Replicas is hidden for single-node topology since it is forced to 1.
+// clusterAndSizingStep configures cluster name, topology, and control plane sizing.
 func clusterAndSizingStep(s *wizardState) *huh.Group {
 	return huh.NewGroup(
 		huh.NewNote().
@@ -544,8 +512,7 @@ func clusterAndSizingStep(s *wizardState) *huh.Group {
 	)
 }
 
-// workersAndNetworkStep combines worker sizing and network config.
-// Hidden for single-node topology. VIP is only shown for on-prem.
+// workersAndNetworkStep configures worker sizing and CIDRs (hidden for single-node).
 func workersAndNetworkStep(s *wizardState) *huh.Group {
 	fields := []huh.Field{
 		huh.NewNote().
@@ -588,7 +555,7 @@ func workersAndNetworkStep(s *wizardState) *huh.Group {
 	})
 }
 
-// networkOnlyStep shows just networking fields for single-node topology.
+// networkOnlyStep shows CIDRs only (single-node topology).
 func networkOnlyStep(s *wizardState) *huh.Group {
 	return huh.NewGroup(
 		huh.NewNote().
@@ -609,9 +576,7 @@ func networkOnlyStep(s *wizardState) *huh.Group {
 	})
 }
 
-// networkingStep consolidates all on-prem networking into one page.
-// Covers management cluster MetalLB + tenant IPAM allocation settings.
-// Hidden for cloud providers (they handle networking natively).
+// networkingStep covers VIP, MetalLB pool, and tenant IPAM settings (on-prem only).
 func networkingStep(s *wizardState) *huh.Group {
 	return huh.NewGroup(
 		huh.NewNote().
@@ -660,8 +625,7 @@ func networkingStep(s *wizardState) *huh.Group {
 	})
 }
 
-// exposureModeStep selects how tenant control planes are exposed.
-// Hidden for single-node topology (not relevant for single management node).
+// exposureModeStep selects LoadBalancer, Ingress, or Gateway exposure mode.
 func exposureModeStep(s *wizardState) *huh.Group {
 	return huh.NewGroup(
 		huh.NewSelect[string]().
@@ -678,8 +642,7 @@ func exposureModeStep(s *wizardState) *huh.Group {
 	})
 }
 
-// exposureIngressStep configures Ingress-mode exposure details.
-// Only shown when exposure mode is Ingress.
+// exposureIngressStep configures hostname and ingress class for Ingress mode.
 func exposureIngressStep(s *wizardState) *huh.Group {
 	return huh.NewGroup(
 		huh.NewInput().
@@ -711,8 +674,7 @@ func exposureIngressStep(s *wizardState) *huh.Group {
 	})
 }
 
-// exposureGatewayStep configures Gateway-mode exposure details.
-// Only shown when exposure mode is Gateway.
+// exposureGatewayStep configures hostname and gateway ref for Gateway mode.
 func exposureGatewayStep(s *wizardState) *huh.Group {
 	return huh.NewGroup(
 		huh.NewInput().
@@ -733,8 +695,7 @@ func exposureGatewayStep(s *wizardState) *huh.Group {
 	})
 }
 
-// platformStep combines Talos config and component toggles. CNI and
-// storage are fixed (Cilium, Longhorn) so they are not asked.
+// platformStep configures Talos version/schematic and addon toggles.
 func platformStep(s *wizardState) *huh.Group {
 	return huh.NewGroup(
 		huh.NewNote().
@@ -768,8 +729,7 @@ func platformStep(s *wizardState) *huh.Group {
 	)
 }
 
-// consoleStep builds the console configuration step.
-// Only shown when console is enabled.
+// consoleStep configures admin password and ingress toggle.
 func consoleStep(s *wizardState) *huh.Group {
 	return huh.NewGroup(
 		huh.NewNote().
@@ -791,8 +751,7 @@ func consoleStep(s *wizardState) *huh.Group {
 	})
 }
 
-// consoleIngressStep configures ingress details for the console.
-// Only shown when both console and ingress are enabled.
+// consoleIngressStep configures console hostname, class, and TLS.
 func consoleIngressStep(s *wizardState) *huh.Group {
 	return huh.NewGroup(
 		huh.NewInput().
@@ -814,7 +773,7 @@ func consoleIngressStep(s *wizardState) *huh.Group {
 	})
 }
 
-// reviewStep shows a summary of the configuration before confirmation.
+// reviewStep shows a configuration summary and confirm prompt.
 func reviewStep(s *wizardState) *huh.Group {
 	return huh.NewGroup(
 		huh.NewNote().
@@ -832,7 +791,7 @@ func reviewStep(s *wizardState) *huh.Group {
 	)
 }
 
-// buildReviewSummary creates a human-readable summary of the configuration.
+// buildReviewSummary formats the wizard state for the review page.
 func buildReviewSummary(s *wizardState) string {
 	var b strings.Builder
 

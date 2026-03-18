@@ -29,9 +29,7 @@ import (
 	"github.com/butlerdotdev/butler/internal/adm/bootstrap/wizard/discovery"
 )
 
-// imageSyncModel is a bubbletea model that uploads an OS image to a provider
-// and polls until it is ready. Used when the user selects "Sync new image
-// from Butler Image Factory" in the resource selection form.
+// imageSyncModel uploads an OS image to a provider and polls until ready.
 type imageSyncModel struct {
 	disc        discovery.ProviderDiscovery
 	artifactURL string
@@ -55,7 +53,6 @@ const (
 	syncFailed
 )
 
-// Image sync messages.
 type syncStartedMsg struct {
 	syncID string
 	err    error
@@ -187,7 +184,6 @@ func (m imageSyncModel) View() string {
 	b.WriteString("\n")
 
 	b.WriteString(dim.Render("  Source:   "))
-	// Truncate long URLs for display.
 	url := m.artifactURL
 	if len(url) > 60 {
 		url = url[:57] + "..."
@@ -221,18 +217,16 @@ func (m imageSyncModel) View() string {
 	return b.String()
 }
 
-// ProviderRef returns the provider image reference after a successful sync.
+// ProviderRef returns the provider image reference after sync.
 func (m imageSyncModel) ProviderRef() string {
 	return m.providerRef
 }
 
-// Err returns any error that occurred during the sync.
 func (m imageSyncModel) Err() error {
 	return m.err
 }
 
-// runImageSync runs the image sync model as a bubbletea program and returns
-// the provider image reference on success.
+// runImageSync uploads an image and polls until the provider reports it ready.
 func runImageSync(disc discovery.ProviderDiscovery, artifactURL, displayName string) (string, error) {
 	m := newImageSyncModel(disc, artifactURL, displayName)
 	p := tea.NewProgram(m)

@@ -29,17 +29,13 @@ import (
 	"github.com/butlerdotdev/butler/internal/adm/bootstrap/wizard/discovery"
 )
 
-// discoveryModel is a bubbletea model that connects to a provider and
-// fetches root-level resources concurrently. Each resource type gets its
-// own spinner and status line, updated independently as fetch results
-// arrive via tea.Cmd/Msg.
+// discoveryModel connects to a provider and fetches root resources concurrently.
 type discoveryModel struct {
 	disc     discovery.ProviderDiscovery
 	provider string
 	tasks    []discoveryTask
 	spinner  spinner.Model
 
-	// results holds discovered resources keyed by resource type.
 	results map[string][]discovery.ProviderResource
 
 	connected bool
@@ -66,7 +62,6 @@ type discoveryTask struct {
 	err          error
 }
 
-// Discovery messages.
 type connectDoneMsg struct {
 	err error
 }
@@ -158,7 +153,6 @@ func (m discoveryModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.connected = true
 
-		// Fire all root resource fetches concurrently.
 		var cmds []tea.Cmd
 		for i := range m.tasks {
 			m.tasks[i].status = taskLoading
@@ -181,7 +175,6 @@ func (m discoveryModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 
-		// Check if all tasks are complete.
 		allDone := true
 		hasFailure := false
 		for _, t := range m.tasks {
@@ -226,7 +219,6 @@ func (m discoveryModel) View() string {
 	b.WriteString(title.Render(fmt.Sprintf("  Discovering %s Resources", providerDisplayName(m.provider))))
 	b.WriteString("\n\n")
 
-	// Connection status.
 	if !m.connected && m.connErr == nil {
 		b.WriteString(fmt.Sprintf("  %s Connecting...\n", m.spinner.View()))
 	} else if m.connErr != nil {
@@ -237,7 +229,6 @@ func (m discoveryModel) View() string {
 
 	b.WriteString("\n")
 
-	// Resource tasks.
 	for _, t := range m.tasks {
 		switch t.status {
 		case taskPending:
@@ -263,24 +254,21 @@ func (m discoveryModel) View() string {
 	return b.String()
 }
 
-// Results returns the discovered resources after the model has finished.
+// Results returns discovered resources keyed by type.
 func (m discoveryModel) Results() map[string][]discovery.ProviderResource {
 	return m.results
 }
 
-// Err returns any error that occurred during discovery.
 func (m discoveryModel) Err() error {
 	return m.err
 }
 
-// Status icons matching tui/styles.go.
 const (
 	iconCompleted = "\u2713" // check
 	iconFailed    = "\u2717" // x
 	iconPending   = "\u25CB" // circle
 )
 
-// providerDisplayName returns a user-friendly name for a provider.
 func providerDisplayName(provider string) string {
 	switch provider {
 	case "harvester":
@@ -298,8 +286,7 @@ func providerDisplayName(provider string) string {
 	}
 }
 
-// runDiscovery runs the discovery model as a bubbletea program and returns
-// the discovered resources. This is called between Form 1 and Form 2.
+// runDiscovery runs provider discovery between form1 and form2.
 func runDiscovery(provider string, disc discovery.ProviderDiscovery) (map[string][]discovery.ProviderResource, error) {
 	m := newDiscoveryModel(provider, disc)
 	p := tea.NewProgram(m)

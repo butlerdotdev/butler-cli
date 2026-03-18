@@ -41,7 +41,6 @@ func isOnPrem(provider string) bool {
 	}
 }
 
-// Butler Labs BL monogram rendered in brand green.
 const butlerLogo = `
  ██████╗  ██╗
  ██╔══██╗ ██║
@@ -50,7 +49,7 @@ const butlerLogo = `
  ██████╔╝ ███████╗
  ╚═════╝  ╚══════╝`
 
-// printBanner displays the branded header before the wizard starts.
+// printBanner displays the Butler logo and keyboard hints.
 func printBanner() {
 	green := lipgloss.NewStyle().Foreground(brandGreen).Bold(true)
 	dim := lipgloss.NewStyle().Foreground(brandGray)
@@ -66,20 +65,8 @@ func printBanner() {
 	fmt.Println()
 }
 
-// Run launches the interactive bootstrap wizard. The user selects a
-// provider, enters credentials, and the wizard connects to the provider
-// to discover available resources. A second form presents the discovered
-// resources as selectable options alongside cluster configuration.
-//
-// Navigation within each form: Shift+Tab or Esc goes back to the
-// previous page, Enter advances to the next page.
-//
-// The wizard flow is:
-//  1. Provider selection + credentials (multi-group form, Shift+Tab/Esc to go back)
-//  2. Async discovery phase (bubbletea model with concurrent resource fetches)
-//  3. Resource selection + cluster config + addons + confirm (multi-group form)
-//
-// Ctrl+C cancels the wizard. Cancelling form2 loops back to form1.
+// Run launches the interactive bootstrap wizard.
+// Flow: provider+creds → discovery → resources+config+review → image sync → config.
 func Run() (*orchestrator.Config, error) {
 	printBanner()
 
@@ -167,7 +154,7 @@ func Run() (*orchestrator.Config, error) {
 	return buildConfig(s)
 }
 
-// buildConfig converts the wizard state into an orchestrator.Config.
+// buildConfig converts wizard state into an orchestrator.Config.
 func buildConfig(s *wizardState) (*orchestrator.Config, error) {
 	cpReplicas, err := parseInt32(s.cpReplicas)
 	if err != nil {
@@ -378,7 +365,6 @@ func buildConfig(s *wizardState) (*orchestrator.Config, error) {
 	return cfg, nil
 }
 
-// parseInt32 parses a string to int32.
 func parseInt32(s string) (int32, error) {
 	v, err := strconv.ParseInt(strings.TrimSpace(s), 10, 32)
 	if err != nil {
