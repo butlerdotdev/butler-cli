@@ -952,6 +952,12 @@ func (o *Orchestrator) buildProviderConfigUnstructured(cfg *Config) *unstructure
 		if cfg.ProviderConfig.Azure.SubnetName != "" {
 			azureSpec["subnetName"] = cfg.ProviderConfig.Azure.SubnetName
 		}
+		if cfg.ProviderConfig.Azure.VMSize != "" {
+			azureSpec["vmSize"] = cfg.ProviderConfig.Azure.VMSize
+		}
+		if cfg.ProviderConfig.Azure.ImageURN != "" {
+			azureSpec["imageURN"] = cfg.ProviderConfig.Azure.ImageURN
+		}
 		spec["azure"] = azureSpec
 	}
 
