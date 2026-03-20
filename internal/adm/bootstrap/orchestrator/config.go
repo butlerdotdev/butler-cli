@@ -409,6 +409,9 @@ type AzureProviderConfig struct {
 	// SubnetName is the subnet within the VNet
 	SubnetName string `mapstructure:"subnetName,omitempty"`
 
+	// SecurityGroupName is the Azure Network Security Group name
+	SecurityGroupName string `mapstructure:"securityGroupName,omitempty"`
+
 	// VMSize is the Azure VM size (e.g., "Standard_D4s_v3")
 	VMSize string `mapstructure:"vmSize,omitempty"`
 
