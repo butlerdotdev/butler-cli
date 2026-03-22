@@ -33,17 +33,19 @@ network:
   # Kubernetes internal networks
   podCIDR: 10.244.0.0/16
   serviceCIDR: 10.96.0.0/12
-  
+
   # Control plane VIP (must be in your VLAN, not in DHCP range)
   vip: 10.40.0.201
-  
-  # Network interface for VIP (optional, auto-detected from default route)
-  # vipInterface: eth0
+
+  # MetalLB IP pool for LoadBalancer services
+  loadBalancerPool:
+    start: 10.40.0.200
+    end: 10.40.0.250
 
 # Talos Linux configuration
 talos:
   # Talos version
-  version: v1.9.0
+  version: v1.12.1
   
   # Talos schematic ID (custom image with extensions)
   # Generated from factory.talos.dev with qemu-guest-agent + iscsi-tools
@@ -62,7 +64,6 @@ addons:
   # Load balancer for Services
   loadBalancer:
     type: metallb
-    addressPool: 10.40.0.200-10.40.0.250
 
   # GitOps
   gitOps:
