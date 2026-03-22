@@ -1057,6 +1057,12 @@ func (o *Orchestrator) buildClusterBootstrapUnstructured(cfg *Config) *unstructu
 					if cfg.Network.VIP != "" {
 						n["vip"] = cfg.Network.VIP
 					}
+					if cfg.Network.LoadBalancerPool != nil {
+						n["loadBalancerPool"] = map[string]interface{}{
+							"start": cfg.Network.LoadBalancerPool.Start,
+							"end":   cfg.Network.LoadBalancerPool.End,
+						}
+					}
 					return n
 				}(),
 				"talos": map[string]interface{}{
@@ -1342,10 +1348,16 @@ func buildAddonsConfig(cfg *Config) map[string]interface{} {
 		"storage": map[string]interface{}{
 			"type": cfg.Addons.Storage.Type,
 		},
-		"loadBalancer": map[string]interface{}{
-			"type":        cfg.Addons.LoadBalancer.Type,
-			"addressPool": cfg.Addons.LoadBalancer.AddressPool,
-		},
+		"loadBalancer": func() map[string]interface{} {
+			lb := map[string]interface{}{
+				"type": cfg.Addons.LoadBalancer.Type,
+			}
+			// Only write deprecated addressPool if the new loadBalancerPool isn't set
+			if cfg.Network.LoadBalancerPool == nil && cfg.Addons.LoadBalancer.AddressPool != "" {
+				lb["addressPool"] = cfg.Addons.LoadBalancer.AddressPool
+			}
+			return lb
+		}(),
 	}
 
 	// Only include console when the user explicitly configured it.

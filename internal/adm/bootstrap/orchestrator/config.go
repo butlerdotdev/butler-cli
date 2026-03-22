@@ -100,6 +100,19 @@ type NetworkConfig struct {
 
 	// VIP is the control plane VIP address
 	VIP string `mapstructure:"vip"`
+
+	// LoadBalancerPool defines the IP range for MetalLB LoadBalancer services.
+	// Uses validated start/end format. Takes precedence over addons.loadBalancer.addressPool.
+	LoadBalancerPool *LBPoolConfig `mapstructure:"loadBalancerPool"`
+}
+
+// LBPoolConfig defines a validated IP address range for LoadBalancer services
+type LBPoolConfig struct {
+	// Start is the first IP in the pool (inclusive)
+	Start string `mapstructure:"start"`
+
+	// End is the last IP in the pool (inclusive)
+	End string `mapstructure:"end"`
 }
 
 // TalosConfig defines Talos OS configuration
