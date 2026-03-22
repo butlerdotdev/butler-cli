@@ -781,18 +781,22 @@ func (o *Orchestrator) createNamespaceAndSecrets(ctx context.Context, clientset 
 		}
 
 	case "azure":
+		azureSecretData := map[string]string{
+			"clientID":       cfg.ProviderConfig.Azure.ClientID,
+			"clientSecret":   cfg.ProviderConfig.Azure.ClientSecret,
+			"tenantID":       cfg.ProviderConfig.Azure.TenantID,
+			"subscriptionID": cfg.ProviderConfig.Azure.SubscriptionID,
+		}
+		if cfg.ProviderConfig.Azure.SecurityGroupName != "" {
+			azureSecretData["securityGroupName"] = cfg.ProviderConfig.Azure.SecurityGroupName
+		}
 		secret := &corev1.Secret{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      cfg.Cluster.Name + "-azure-credentials",
 				Namespace: butlerNamespace,
 			},
-			Type: corev1.SecretTypeOpaque,
-			StringData: map[string]string{
-				"clientID":       cfg.ProviderConfig.Azure.ClientID,
-				"clientSecret":   cfg.ProviderConfig.Azure.ClientSecret,
-				"tenantID":       cfg.ProviderConfig.Azure.TenantID,
-				"subscriptionID": cfg.ProviderConfig.Azure.SubscriptionID,
-			},
+			Type:       corev1.SecretTypeOpaque,
+			StringData: azureSecretData,
 		}
 		_, err = clientset.CoreV1().Secrets(butlerNamespace).Create(ctx, secret, metav1.CreateOptions{})
 		if err != nil && !strings.Contains(err.Error(), "already exists") {
@@ -951,6 +955,12 @@ func (o *Orchestrator) buildProviderConfigUnstructured(cfg *Config) *unstructure
 		}
 		if cfg.ProviderConfig.Azure.SubnetName != "" {
 			azureSpec["subnetName"] = cfg.ProviderConfig.Azure.SubnetName
+		}
+		if cfg.ProviderConfig.Azure.VMSize != "" {
+			azureSpec["vmSize"] = cfg.ProviderConfig.Azure.VMSize
+		}
+		if cfg.ProviderConfig.Azure.ImageURN != "" {
+			azureSpec["imageURN"] = cfg.ProviderConfig.Azure.ImageURN
 		}
 		spec["azure"] = azureSpec
 	}

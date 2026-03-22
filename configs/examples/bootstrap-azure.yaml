@@ -44,6 +44,7 @@ providerConfig:
     # Networking (must be pre-provisioned)
     vnetName: "butler-vnet"
     subnetName: "default"
+    securityGroupName: "butler-nsg"
 
     # Optional: override VM size (default: Standard_D4s_v3)
     # vmSize: "Standard_D4s_v3"

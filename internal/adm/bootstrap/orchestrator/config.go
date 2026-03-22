@@ -409,8 +409,14 @@ type AzureProviderConfig struct {
 	// SubnetName is the subnet within the VNet
 	SubnetName string `mapstructure:"subnetName,omitempty"`
 
+	// SecurityGroupName is the Azure Network Security Group name
+	SecurityGroupName string `mapstructure:"securityGroupName,omitempty"`
+
 	// VMSize is the Azure VM size (e.g., "Standard_D4s_v3")
 	VMSize string `mapstructure:"vmSize,omitempty"`
+
+	// ImageURN is the VM image reference (URN, managed image ID, or gallery image ID)
+	ImageURN string `mapstructure:"imageURN,omitempty"`
 }
 
 // LoadConfig loads the bootstrap configuration from viper
