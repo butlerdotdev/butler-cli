@@ -34,10 +34,11 @@ network:
   podCIDR: 10.244.0.0/16
   serviceCIDR: 10.96.0.0/12
 
-  # Control plane VIP (must be in your VLAN, not in DHCP range)
-  vip: 10.40.0.201
+  # Control plane VIP (must be in your VLAN, not in DHCP or LB pool range)
+  vip: 10.40.0.199
 
   # MetalLB IP pool for LoadBalancer services
+  # VIP must NOT be inside this range
   loadBalancerPool:
     start: 10.40.0.200
     end: 10.40.0.250

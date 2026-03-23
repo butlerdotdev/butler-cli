@@ -477,7 +477,7 @@ func LoadConfig() (*Config, error) {
 		cfg.Network.ServiceCIDR = "10.96.0.0/12"
 	}
 	if cfg.Talos.Version == "" {
-		cfg.Talos.Version = "v1.9.0"
+		cfg.Talos.Version = "v1.12.1"
 	}
 	if cfg.Addons.CNI.Type == "" {
 		cfg.Addons.CNI.Type = "cilium"
@@ -523,6 +523,20 @@ func LoadConfig() (*Config, error) {
 		// Default ingress host based on cluster name
 		if cfg.Addons.Console.Ingress.Enabled && cfg.Addons.Console.Ingress.Host == "" {
 			cfg.Addons.Console.Ingress.Host = fmt.Sprintf("butler.%s.local", cfg.Cluster.Name)
+		}
+	}
+
+	// ControlPlaneExposure validation
+	if cfg.ControlPlaneExposure != nil && cfg.ControlPlaneExposure.Mode != "" {
+		mode := cfg.ControlPlaneExposure.Mode
+		if mode != "LoadBalancer" && mode != "Ingress" && mode != "Gateway" {
+			return nil, fmt.Errorf("invalid controlPlaneExposure.mode %q, must be 'LoadBalancer', 'Ingress', or 'Gateway'", mode)
+		}
+		if (mode == "Ingress" || mode == "Gateway") && cfg.ControlPlaneExposure.Hostname == "" {
+			return nil, fmt.Errorf("controlPlaneExposure.hostname is required when mode is %q", mode)
+		}
+		if mode == "Gateway" && cfg.ControlPlaneExposure.GatewayRef == "" {
+			return nil, fmt.Errorf("controlPlaneExposure.gatewayRef is required when mode is 'Gateway'")
 		}
 	}
 
