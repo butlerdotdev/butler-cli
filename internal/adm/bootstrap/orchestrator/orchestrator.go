@@ -1074,6 +1074,27 @@ func (o *Orchestrator) buildClusterBootstrapUnstructured(cfg *Config) *unstructu
 		},
 	}
 
+	// Add controlPlaneExposure if configured
+	if cfg.ControlPlaneExposure != nil && cfg.ControlPlaneExposure.Mode != "" {
+		spec := cb.Object["spec"].(map[string]interface{})
+		exposure := map[string]interface{}{
+			"mode": cfg.ControlPlaneExposure.Mode,
+		}
+		if cfg.ControlPlaneExposure.Hostname != "" {
+			exposure["hostname"] = cfg.ControlPlaneExposure.Hostname
+		}
+		if cfg.ControlPlaneExposure.IngressClassName != "" {
+			exposure["ingressClassName"] = cfg.ControlPlaneExposure.IngressClassName
+		}
+		if cfg.ControlPlaneExposure.ControllerType != "" {
+			exposure["controllerType"] = cfg.ControlPlaneExposure.ControllerType
+		}
+		if cfg.ControlPlaneExposure.GatewayRef != "" {
+			exposure["gatewayRef"] = cfg.ControlPlaneExposure.GatewayRef
+		}
+		spec["controlPlaneExposure"] = exposure
+	}
+
 	return cb
 }
 

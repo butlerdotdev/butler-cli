@@ -26,7 +26,7 @@ import (
 
 // Config represents the bootstrap configuration
 type Config struct {
-	// Provider is the infrastructure provider (harvester, nutanix, proxmox)
+	// Provider is the infrastructure provider (harvester, nutanix, proxmox, aws, gcp, azure)
 	Provider string `mapstructure:"provider"`
 
 	// Cluster defines the management cluster configuration
@@ -41,8 +41,38 @@ type Config struct {
 	// Addons defines which addons to install
 	Addons AddonsConfig `mapstructure:"addons"`
 
+	// ControlPlaneExposure configures how tenant control planes are exposed.
+	// If omitted, defaults to LoadBalancer mode.
+	ControlPlaneExposure *ControlPlaneExposureConfig `mapstructure:"controlPlaneExposure,omitempty"`
+
 	// ProviderConfig contains provider-specific settings
 	ProviderConfig ProviderConfig `mapstructure:"providerConfig"`
+}
+
+// ControlPlaneExposureConfig configures how tenant control planes are exposed.
+// This is a platform-level setting written to ButlerConfig during bootstrap.
+type ControlPlaneExposureConfig struct {
+	// Mode determines how tenant API servers are exposed.
+	// LoadBalancer: 1 IP per tenant, direct access (default)
+	// Ingress: shared IP via Ingress controller with TLS passthrough
+	// Gateway: shared IP via Gateway API TLSRoute
+	Mode string `mapstructure:"mode"`
+
+	// Hostname is the wildcard domain for tenant API servers.
+	// Required when Mode is Ingress or Gateway.
+	// Example: "*.k8s.platform.example.com"
+	Hostname string `mapstructure:"hostname,omitempty"`
+
+	// IngressClassName specifies the Ingress class when Mode is Ingress.
+	IngressClassName string `mapstructure:"ingressClassName,omitempty"`
+
+	// ControllerType specifies the ingress controller type for TLS passthrough.
+	// Used when Mode is Ingress. Supported: haproxy, nginx, traefik, generic.
+	ControllerType string `mapstructure:"controllerType,omitempty"`
+
+	// GatewayRef references the Gateway resource when Mode is Gateway.
+	// Format: "namespace/name"
+	GatewayRef string `mapstructure:"gatewayRef,omitempty"`
 }
 
 // ClusterConfig defines cluster specifications
