@@ -33,7 +33,7 @@ network:
   serviceCIDR: 10.96.0.0/12
 
 talos:
-  version: v1.9.0
+  version: v1.12.5
 
 addons:
   cni:
@@ -60,7 +60,11 @@ providerConfig:
     network: default          # VPC network name
     subnetwork: default       # Subnet name (same as network for auto-mode VPCs)
 
-    # Optional: override VM configuration
+    # GCP project containing the Talos image
+    # imageProject: your-project-id
+
+    # GCE image name (uploaded from Talos Image Factory)
+    # image: talos-v1-12-5-iscsi
+
+    # Optional: override VM type
     # machineType: n2-standard-4
-    # imageProject: ubuntu-os-cloud
-    # imageFamily: ubuntu-2204-lts

@@ -18,7 +18,7 @@ network:
   serviceCIDR: "10.96.0.0/12"
 
 talos:
-  version: v1.9.0
+  version: v1.12.5
 
 addons:
   cni:
@@ -26,7 +26,7 @@ addons:
   storage:
     type: longhorn
   # No loadBalancer block — cloud providers don't use MetalLB
-  gitops:
+  gitOps:
     type: flux
 
 providerConfig:
@@ -46,5 +46,8 @@ providerConfig:
     subnetName: "default"
     securityGroupName: "butler-nsg"
 
-    # Optional: override VM size (default: Standard_D4s_v3)
-    # vmSize: "Standard_D4s_v3"
+    # VM size
+    vmSize: "Standard_D4s_v3"
+
+    # Talos image ARM resource ID (managed image or gallery image version)
+    imageURN: "/subscriptions/SUBSCRIPTION_ID/resourceGroups/RESOURCE_GROUP/providers/Microsoft.Compute/images/talos-v1-12-5"

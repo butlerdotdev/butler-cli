@@ -21,7 +21,7 @@ network:
     end: 10.40.0.230
 
 talos:
-  version: v1.9.0
+  version: v1.12.1
   schematic: dc7b152cb3ea99b821fcb7340ce7168313ce393d663740b791c36f6e95fc8586
 
 addons:
@@ -31,7 +31,6 @@ addons:
     type: longhorn
   loadBalancer:
     type: metallb
-    addressPool: 10.40.0.211-10.40.0.220
   gitOps:
     type: flux
   capi:

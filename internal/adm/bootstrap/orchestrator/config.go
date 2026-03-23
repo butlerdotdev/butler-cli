@@ -26,7 +26,7 @@ import (
 
 // Config represents the bootstrap configuration
 type Config struct {
-	// Provider is the infrastructure provider (harvester, nutanix, proxmox)
+	// Provider is the infrastructure provider (harvester, nutanix, proxmox, aws, gcp, azure)
 	Provider string `mapstructure:"provider"`
 
 	// Cluster defines the management cluster configuration
@@ -41,8 +41,38 @@ type Config struct {
 	// Addons defines which addons to install
 	Addons AddonsConfig `mapstructure:"addons"`
 
+	// ControlPlaneExposure configures how tenant control planes are exposed.
+	// If omitted, defaults to LoadBalancer mode.
+	ControlPlaneExposure *ControlPlaneExposureConfig `mapstructure:"controlPlaneExposure,omitempty"`
+
 	// ProviderConfig contains provider-specific settings
 	ProviderConfig ProviderConfig `mapstructure:"providerConfig"`
+}
+
+// ControlPlaneExposureConfig configures how tenant control planes are exposed.
+// This is a platform-level setting written to ButlerConfig during bootstrap.
+type ControlPlaneExposureConfig struct {
+	// Mode determines how tenant API servers are exposed.
+	// LoadBalancer: 1 IP per tenant, direct access (default)
+	// Ingress: shared IP via Ingress controller with TLS passthrough
+	// Gateway: shared IP via Gateway API TLSRoute
+	Mode string `mapstructure:"mode"`
+
+	// Hostname is the wildcard domain for tenant API servers.
+	// Required when Mode is Ingress or Gateway.
+	// Example: "*.k8s.platform.example.com"
+	Hostname string `mapstructure:"hostname,omitempty"`
+
+	// IngressClassName specifies the Ingress class when Mode is Ingress.
+	IngressClassName string `mapstructure:"ingressClassName,omitempty"`
+
+	// ControllerType specifies the ingress controller type for TLS passthrough.
+	// Used when Mode is Ingress. Supported: haproxy, nginx, traefik, generic.
+	ControllerType string `mapstructure:"controllerType,omitempty"`
+
+	// GatewayRef references the Gateway resource when Mode is Gateway.
+	// Format: "namespace/name"
+	GatewayRef string `mapstructure:"gatewayRef,omitempty"`
 }
 
 // ClusterConfig defines cluster specifications
@@ -447,7 +477,7 @@ func LoadConfig() (*Config, error) {
 		cfg.Network.ServiceCIDR = "10.96.0.0/12"
 	}
 	if cfg.Talos.Version == "" {
-		cfg.Talos.Version = "v1.9.0"
+		cfg.Talos.Version = "v1.12.1"
 	}
 	if cfg.Addons.CNI.Type == "" {
 		cfg.Addons.CNI.Type = "cilium"
@@ -493,6 +523,20 @@ func LoadConfig() (*Config, error) {
 		// Default ingress host based on cluster name
 		if cfg.Addons.Console.Ingress.Enabled && cfg.Addons.Console.Ingress.Host == "" {
 			cfg.Addons.Console.Ingress.Host = fmt.Sprintf("butler.%s.local", cfg.Cluster.Name)
+		}
+	}
+
+	// ControlPlaneExposure validation
+	if cfg.ControlPlaneExposure != nil && cfg.ControlPlaneExposure.Mode != "" {
+		mode := cfg.ControlPlaneExposure.Mode
+		if mode != "LoadBalancer" && mode != "Ingress" && mode != "Gateway" {
+			return nil, fmt.Errorf("invalid controlPlaneExposure.mode %q, must be 'LoadBalancer', 'Ingress', or 'Gateway'", mode)
+		}
+		if (mode == "Ingress" || mode == "Gateway") && cfg.ControlPlaneExposure.Hostname == "" {
+			return nil, fmt.Errorf("controlPlaneExposure.hostname is required when mode is %q", mode)
+		}
+		if mode == "Gateway" && cfg.ControlPlaneExposure.GatewayRef == "" {
+			return nil, fmt.Errorf("controlPlaneExposure.gatewayRef is required when mode is 'Gateway'")
 		}
 	}
 
