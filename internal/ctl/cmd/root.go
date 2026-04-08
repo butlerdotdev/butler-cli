@@ -18,8 +18,11 @@ limitations under the License.
 package cmd
 
 import (
+	"fmt"
+
 	"github.com/butlerdotdev/butler/internal/common/log"
 	"github.com/butlerdotdev/butler/internal/common/output"
+	"github.com/butlerdotdev/butler/internal/common/version"
 	"github.com/butlerdotdev/butler/internal/ctl/cluster"
 	"github.com/butlerdotdev/butler/internal/ctl/image"
 	"github.com/spf13/cobra"
@@ -97,9 +100,9 @@ func NewVersionCmd() *cobra.Command {
 		Use:   "version",
 		Short: "Print version information",
 		Run: func(cmd *cobra.Command, args []string) {
-			cmd.Println(output.Binary("butlerctl") + " version v0.1.0-dev")
-			cmd.Println("Butler Kubernetes-as-a-Service Platform")
-			cmd.Println(output.Dim("https://github.com/butlerdotdev/butler"))
+			cmd.Println(output.Binary("butlerctl") + " version " + version.Version)
+			cmd.Println(fmt.Sprintf("  commit: %s", version.Commit))
+			cmd.Println(fmt.Sprintf("  built:  %s", version.Date))
 		},
 	}
 }
