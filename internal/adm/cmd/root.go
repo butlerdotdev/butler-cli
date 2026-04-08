@@ -18,11 +18,12 @@ limitations under the License.
 package cmd
 
 import (
+	"fmt"
+
 	"github.com/butlerdotdev/butler/internal/adm/bootstrap"
 	"github.com/butlerdotdev/butler/internal/adm/provider"
 	"github.com/butlerdotdev/butler/internal/adm/status"
-	"fmt"
-
+	"github.com/butlerdotdev/butler/internal/common/completion"
 	"github.com/butlerdotdev/butler/internal/common/log"
 	"github.com/butlerdotdev/butler/internal/common/output"
 	"github.com/butlerdotdev/butler/internal/common/version"
@@ -96,6 +97,7 @@ Examples:
 	cmd.AddCommand(bootstrap.NewBootstrapCmd(logger))
 	cmd.AddCommand(status.NewStatusCmd(logger))
 	cmd.AddCommand(provider.NewProviderCmd(logger))
+	cmd.AddCommand(completion.NewCompletionCmd("butleradm"))
 	cmd.AddCommand(NewVersionCmd())
 
 	// TODO: Add upgrade, backup, restore commands

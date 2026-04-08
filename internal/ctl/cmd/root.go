@@ -20,6 +20,7 @@ package cmd
 import (
 	"fmt"
 
+	"github.com/butlerdotdev/butler/internal/common/completion"
 	"github.com/butlerdotdev/butler/internal/common/log"
 	"github.com/butlerdotdev/butler/internal/common/output"
 	"github.com/butlerdotdev/butler/internal/common/version"
@@ -91,6 +92,7 @@ Examples:
 	// Register subcommands
 	cmd.AddCommand(cluster.NewClusterCmd(logger))
 	cmd.AddCommand(image.NewImageCmd(logger))
+	cmd.AddCommand(completion.NewCompletionCmd("butlerctl"))
 	cmd.AddCommand(NewVersionCmd())
 
 	return cmd

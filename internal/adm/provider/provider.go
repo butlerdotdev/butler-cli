@@ -131,6 +131,12 @@ func runList(ctx context.Context, logger *log.Logger, opts *listOptions) error {
 			projectID := client.GetNestedString(pc.Object, "spec", "gcp", "projectID")
 			region := client.GetNestedString(pc.Object, "spec", "gcp", "region")
 			endpoint = fmt.Sprintf("%s/%s", projectID, region)
+		case "aws":
+			region := client.GetNestedString(pc.Object, "spec", "aws", "region")
+			endpoint = region
+		case "azure":
+			subID := client.GetNestedString(pc.Object, "spec", "azure", "subscriptionID")
+			endpoint = subID
 		default:
 			endpoint = "-"
 		}
@@ -218,6 +224,10 @@ func runValidate(ctx context.Context, logger *log.Logger, name string, opts *val
 		validationErr = validateProxmox(ctx, c, pc, opts, logger)
 	case "gcp":
 		validationErr = validateGCP(ctx, c, pc, opts, logger)
+	case "aws":
+		validationErr = validateAWS(ctx, c, pc, opts, logger)
+	case "azure":
+		validationErr = validateAzure(ctx, c, pc, opts, logger)
 	default:
 		return fmt.Errorf("unknown provider type: %s", provider)
 	}
@@ -461,6 +471,91 @@ func validateGCP(ctx context.Context, c *client.Client, pc *unstructured.Unstruc
 	return nil
 }
 
+func validateAWS(ctx context.Context, c *client.Client, pc *unstructured.Unstructured, opts *validateOptions, logger *log.Logger) error {
+	region := client.GetNestedString(pc.Object, "spec", "aws", "region")
+	if region == "" {
+		return fmt.Errorf("aws region not configured")
+	}
+
+	// Get credentials from secret
+	secretName := client.GetNestedString(pc.Object, "spec", "credentialsRef", "name")
+	if secretName == "" {
+		return fmt.Errorf("credentials secret not configured (spec.credentialsRef.name)")
+	}
+
+	secret, err := c.Clientset.CoreV1().Secrets(butlerSystem).Get(ctx, secretName, metav1.GetOptions{})
+	if err != nil {
+		return fmt.Errorf("getting credentials secret %s: %w", secretName, err)
+	}
+
+	accessKey := string(secret.Data["accessKeyID"])
+	secretKey := string(secret.Data["secretAccessKey"])
+
+	// Try alternate key names used by CAPA
+	if accessKey == "" {
+		accessKey = string(secret.Data["AWS_ACCESS_KEY_ID"])
+	}
+	if secretKey == "" {
+		secretKey = string(secret.Data["AWS_SECRET_ACCESS_KEY"])
+	}
+
+	if accessKey == "" {
+		return fmt.Errorf("credentials secret %s missing accessKeyID (or AWS_ACCESS_KEY_ID)", secretName)
+	}
+	if secretKey == "" {
+		return fmt.Errorf("credentials secret %s missing secretAccessKey (or AWS_SECRET_ACCESS_KEY)", secretName)
+	}
+
+	logger.Success("AWS credentials validated", "region", region)
+	return nil
+}
+
+func validateAzure(ctx context.Context, c *client.Client, pc *unstructured.Unstructured, opts *validateOptions, logger *log.Logger) error {
+	subscriptionID := client.GetNestedString(pc.Object, "spec", "azure", "subscriptionID")
+	if subscriptionID == "" {
+		return fmt.Errorf("azure subscriptionID not configured")
+	}
+
+	// Get credentials from secret
+	secretName := client.GetNestedString(pc.Object, "spec", "credentialsRef", "name")
+	if secretName == "" {
+		return fmt.Errorf("credentials secret not configured (spec.credentialsRef.name)")
+	}
+
+	secret, err := c.Clientset.CoreV1().Secrets(butlerSystem).Get(ctx, secretName, metav1.GetOptions{})
+	if err != nil {
+		return fmt.Errorf("getting credentials secret %s: %w", secretName, err)
+	}
+
+	tenantID := string(secret.Data["tenantID"])
+	clientID := string(secret.Data["clientID"])
+	clientSecret := string(secret.Data["clientSecret"])
+
+	// Try alternate key names used by CAPZ
+	if tenantID == "" {
+		tenantID = string(secret.Data["AZURE_TENANT_ID"])
+	}
+	if clientID == "" {
+		clientID = string(secret.Data["AZURE_CLIENT_ID"])
+	}
+	if clientSecret == "" {
+		clientSecret = string(secret.Data["AZURE_CLIENT_SECRET"])
+	}
+
+	if tenantID == "" {
+		return fmt.Errorf("credentials secret %s missing tenantID (or AZURE_TENANT_ID)", secretName)
+	}
+	if clientID == "" {
+		return fmt.Errorf("credentials secret %s missing clientID (or AZURE_CLIENT_ID)", secretName)
+	}
+	if clientSecret == "" {
+		return fmt.Errorf("credentials secret %s missing clientSecret (or AZURE_CLIENT_SECRET)", secretName)
+	}
+
+	logger.Success("Azure credentials validated", "subscription", subscriptionID)
+	return nil
+}
+
 func updateProviderConfigStatus(ctx context.Context, c *client.Client, pc *unstructured.Unstructured, validationErr error) error {
 	// Get current status or create new
 	currentStatus, _, _ := unstructured.NestedMap(pc.Object, "status")
@@ -546,6 +641,10 @@ func extractProviderInfo(pc *unstructured.Unstructured) ProviderInfo {
 		projectID := client.GetNestedString(pc.Object, "spec", "gcp", "projectID")
 		region := client.GetNestedString(pc.Object, "spec", "gcp", "region")
 		endpoint = fmt.Sprintf("%s/%s", projectID, region)
+	case "aws":
+		endpoint = client.GetNestedString(pc.Object, "spec", "aws", "region")
+	case "azure":
+		endpoint = client.GetNestedString(pc.Object, "spec", "azure", "subscriptionID")
 	}
 
 	return ProviderInfo{
