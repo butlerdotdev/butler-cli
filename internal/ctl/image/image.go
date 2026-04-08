@@ -138,7 +138,7 @@ func runList(ctx context.Context, logger *log.Logger, opts *listOptions) error {
 		return err
 	}
 
-	c, err := getClient(opts.kubeconfig)
+	c, err := client.New(opts.kubeconfig, "")
 	if err != nil {
 		return err
 	}
@@ -152,19 +152,19 @@ func runList(ctx context.Context, logger *log.Logger, opts *listOptions) error {
 	var filtered []unstructured.Unstructured
 	for _, item := range list.Items {
 		if opts.provider != "" {
-			providerName := getNestedString(item.Object, "spec", "providerConfigRef", "name")
+			providerName := client.GetNestedString(item.Object, "spec", "providerConfigRef", "name")
 			if providerName != opts.provider {
 				continue
 			}
 		}
 		if opts.status != "" {
-			phase := getNestedString(item.Object, "status", "phase")
+			phase := client.GetNestedString(item.Object, "status", "phase")
 			if !strings.EqualFold(phase, opts.status) {
 				continue
 			}
 		}
 		if opts.schematic != "" {
-			schematicID := getNestedString(item.Object, "spec", "factoryRef", "schematicID")
+			schematicID := client.GetNestedString(item.Object, "spec", "factoryRef", "schematicID")
 			if !strings.HasPrefix(schematicID, opts.schematic) {
 				continue
 			}
@@ -201,11 +201,11 @@ func printImageSyncTable(w io.Writer, items []unstructured.Unstructured) error {
 
 	for _, item := range items {
 		name := item.GetName()
-		provider := getNestedString(item.Object, "spec", "providerConfigRef", "name")
-		phase := getNestedString(item.Object, "status", "phase")
-		schematicID := getNestedString(item.Object, "spec", "factoryRef", "schematicID")
-		version := getNestedString(item.Object, "spec", "factoryRef", "version")
-		imageRef := getNestedString(item.Object, "status", "providerImageRef")
+		provider := client.GetNestedString(item.Object, "spec", "providerConfigRef", "name")
+		phase := client.GetNestedString(item.Object, "status", "phase")
+		schematicID := client.GetNestedString(item.Object, "spec", "factoryRef", "schematicID")
+		version := client.GetNestedString(item.Object, "spec", "factoryRef", "version")
+		imageRef := client.GetNestedString(item.Object, "status", "providerImageRef")
 
 		// Truncate schematic ID to first 8 chars
 		if len(schematicID) > 8 {
@@ -333,7 +333,7 @@ func runSync(ctx context.Context, logger *log.Logger, opts *syncOptions) error {
 		name = strings.TrimRight(name, "-")
 	}
 
-	c, err := getClient(opts.kubeconfig)
+	c, err := client.New(opts.kubeconfig, "")
 	if err != nil {
 		return err
 	}
@@ -446,7 +446,7 @@ Examples:
 }
 
 func runStatus(ctx context.Context, logger *log.Logger, name string, opts *statusOptions) error {
-	c, err := getClient(opts.kubeconfig)
+	c, err := client.New(opts.kubeconfig, "")
 	if err != nil {
 		return err
 	}
@@ -468,24 +468,24 @@ func runStatus(ctx context.Context, logger *log.Logger, name string, opts *statu
 
 	// Human-readable output
 	obj := imageSync.Object
-	phase := getNestedString(obj, "status", "phase")
+	phase := client.GetNestedString(obj, "status", "phase")
 	if phase == "" {
 		phase = "Pending"
 	}
 
-	schematicID := getNestedString(obj, "spec", "factoryRef", "schematicID")
-	version := getNestedString(obj, "spec", "factoryRef", "version")
-	arch := getNestedString(obj, "spec", "factoryRef", "arch")
-	providerName := getNestedString(obj, "spec", "providerConfigRef", "name")
-	providerNS := getNestedString(obj, "spec", "providerConfigRef", "namespace")
-	imgFormat := getNestedString(obj, "spec", "format")
-	transferMode := getNestedString(obj, "spec", "transferMode")
-	displayName := getNestedString(obj, "spec", "displayName")
-	providerImageRef := getNestedString(obj, "status", "providerImageRef")
-	artifactURL := getNestedString(obj, "status", "artifactURL")
-	artifactSHA := getNestedString(obj, "status", "artifactSHA256")
-	failureReason := getNestedString(obj, "status", "failureReason")
-	failureMessage := getNestedString(obj, "status", "failureMessage")
+	schematicID := client.GetNestedString(obj, "spec", "factoryRef", "schematicID")
+	version := client.GetNestedString(obj, "spec", "factoryRef", "version")
+	arch := client.GetNestedString(obj, "spec", "factoryRef", "arch")
+	providerName := client.GetNestedString(obj, "spec", "providerConfigRef", "name")
+	providerNS := client.GetNestedString(obj, "spec", "providerConfigRef", "namespace")
+	imgFormat := client.GetNestedString(obj, "spec", "format")
+	transferMode := client.GetNestedString(obj, "spec", "transferMode")
+	displayName := client.GetNestedString(obj, "spec", "displayName")
+	providerImageRef := client.GetNestedString(obj, "status", "providerImageRef")
+	artifactURL := client.GetNestedString(obj, "status", "artifactURL")
+	artifactSHA := client.GetNestedString(obj, "status", "artifactSHA256")
+	failureReason := client.GetNestedString(obj, "status", "failureReason")
+	failureMessage := client.GetNestedString(obj, "status", "failureMessage")
 
 	providerDisplay := providerName
 	if providerNS != "" {
@@ -539,10 +539,10 @@ func runStatus(ctx context.Context, logger *log.Logger, name string, opts *statu
 			if !ok {
 				continue
 			}
-			condType := getNestedString(cond, "type")
-			condStatus := getNestedString(cond, "status")
-			reason := getNestedString(cond, "reason")
-			message := getNestedString(cond, "message")
+			condType := client.GetNestedString(cond, "type")
+			condStatus := client.GetNestedString(cond, "status")
+			reason := client.GetNestedString(cond, "reason")
+			message := client.GetNestedString(cond, "message")
 			line := fmt.Sprintf("  %s: %s", condType, condStatus)
 			if reason != "" {
 				line += fmt.Sprintf(" (%s)", reason)
@@ -599,7 +599,7 @@ Examples:
 }
 
 func runDelete(ctx context.Context, logger *log.Logger, name string, opts *deleteOptions) error {
-	c, err := getClient(opts.kubeconfig)
+	c, err := client.New(opts.kubeconfig, "")
 	if err != nil {
 		return err
 	}
@@ -671,7 +671,7 @@ type catalogEntry struct {
 }
 
 func runCatalog(ctx context.Context, logger *log.Logger, kubeconfigPath string) error {
-	c, err := getClient(kubeconfigPath)
+	c, err := client.New(kubeconfigPath, "")
 	if err != nil {
 		return err
 	}
@@ -693,10 +693,10 @@ func runCatalog(ctx context.Context, logger *log.Logger, kubeconfigPath string) 
 	entries := make(map[string]*catalogEntry)
 
 	for _, item := range list.Items {
-		schematicID := getNestedString(item.Object, "spec", "factoryRef", "schematicID")
-		version := getNestedString(item.Object, "spec", "factoryRef", "version")
-		imgFormat := getNestedString(item.Object, "spec", "format")
-		phase := getNestedString(item.Object, "status", "phase")
+		schematicID := client.GetNestedString(item.Object, "spec", "factoryRef", "schematicID")
+		version := client.GetNestedString(item.Object, "spec", "factoryRef", "version")
+		imgFormat := client.GetNestedString(item.Object, "spec", "format")
+		phase := client.GetNestedString(item.Object, "status", "phase")
 
 		key := schematicID
 		if len(key) > 8 {
@@ -753,28 +753,6 @@ func runCatalog(ctx context.Context, logger *log.Logger, kubeconfigPath string) 
 // Helpers
 // ---------------------------------------------------------------------------
 
-// getClient creates a Kubernetes client from the given kubeconfig path or defaults.
-func getClient(kubeconfigPath string) (*client.Client, error) {
-	if kubeconfigPath != "" {
-		c, err := client.NewFromKubeconfig(kubeconfigPath)
-		if err != nil {
-			return nil, fmt.Errorf("connecting to cluster: %w", err)
-		}
-		return c, nil
-	}
-	c, err := client.NewFromDefault()
-	if err != nil {
-		return nil, fmt.Errorf("connecting to cluster: %w", err)
-	}
-	return c, nil
-}
-
-// getNestedString extracts a string from nested map fields.
-func getNestedString(obj map[string]interface{}, fields ...string) string {
-	val, _, _ := unstructured.NestedString(obj, fields...)
-	return val
-}
-
 // parseProviderRef parses a provider reference in "namespace/name" or "name" format.
 func parseProviderRef(ref string) (namespace, name string, err error) {
 	if ref == "" {
@@ -796,25 +774,25 @@ func extractImageSyncData(item *unstructured.Unstructured) map[string]interface{
 		"namespace": item.GetNamespace(),
 		"spec": map[string]interface{}{
 			"factoryRef": map[string]interface{}{
-				"schematicID": getNestedString(obj, "spec", "factoryRef", "schematicID"),
-				"version":     getNestedString(obj, "spec", "factoryRef", "version"),
-				"arch":        getNestedString(obj, "spec", "factoryRef", "arch"),
+				"schematicID": client.GetNestedString(obj, "spec", "factoryRef", "schematicID"),
+				"version":     client.GetNestedString(obj, "spec", "factoryRef", "version"),
+				"arch":        client.GetNestedString(obj, "spec", "factoryRef", "arch"),
 			},
 			"providerConfigRef": map[string]interface{}{
-				"name":      getNestedString(obj, "spec", "providerConfigRef", "name"),
-				"namespace": getNestedString(obj, "spec", "providerConfigRef", "namespace"),
+				"name":      client.GetNestedString(obj, "spec", "providerConfigRef", "name"),
+				"namespace": client.GetNestedString(obj, "spec", "providerConfigRef", "namespace"),
 			},
-			"format":       getNestedString(obj, "spec", "format"),
-			"transferMode": getNestedString(obj, "spec", "transferMode"),
-			"displayName":  getNestedString(obj, "spec", "displayName"),
+			"format":       client.GetNestedString(obj, "spec", "format"),
+			"transferMode": client.GetNestedString(obj, "spec", "transferMode"),
+			"displayName":  client.GetNestedString(obj, "spec", "displayName"),
 		},
 		"status": map[string]interface{}{
-			"phase":            getNestedString(obj, "status", "phase"),
-			"providerImageRef": getNestedString(obj, "status", "providerImageRef"),
-			"artifactURL":      getNestedString(obj, "status", "artifactURL"),
-			"artifactSHA256":   getNestedString(obj, "status", "artifactSHA256"),
-			"failureReason":    getNestedString(obj, "status", "failureReason"),
-			"failureMessage":   getNestedString(obj, "status", "failureMessage"),
+			"phase":            client.GetNestedString(obj, "status", "phase"),
+			"providerImageRef": client.GetNestedString(obj, "status", "providerImageRef"),
+			"artifactURL":      client.GetNestedString(obj, "status", "artifactURL"),
+			"artifactSHA256":   client.GetNestedString(obj, "status", "artifactSHA256"),
+			"failureReason":    client.GetNestedString(obj, "status", "failureReason"),
+			"failureMessage":   client.GetNestedString(obj, "status", "failureMessage"),
 		},
 		"creationTimestamp": item.GetCreationTimestamp().UTC().Format(time.RFC3339),
 	}

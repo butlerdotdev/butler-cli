@@ -45,7 +45,7 @@ var (
 type Logger struct {
 	*slog.Logger
 	name  string
-	level slog.Level
+	level *slog.LevelVar
 }
 
 // New creates a new Logger with the given name
@@ -55,30 +55,44 @@ func New(name string) *Logger {
 
 // NewWithLevel creates a new Logger with the given name and level
 func NewWithLevel(name string, level slog.Level) *Logger {
+	lv := &slog.LevelVar{}
+	lv.Set(level)
+
 	handler := &prettyHandler{
 		name:   name,
-		level:  level,
+		level:  lv,
 		output: os.Stderr,
 	}
 
 	return &Logger{
 		Logger: slog.New(handler),
 		name:   name,
-		level:  level,
+		level:  lv,
 	}
 }
 
 // SetVerbose enables debug logging
 func (l *Logger) SetVerbose(verbose bool) {
 	if verbose {
-		l.level = slog.LevelDebug
+		l.level.Set(slog.LevelDebug)
 	}
 }
 
 // WithComponent returns a new logger with a component name suffix
 func (l *Logger) WithComponent(component string) *Logger {
 	newName := l.name + "/" + component
-	return NewWithLevel(newName, l.level)
+
+	handler := &prettyHandler{
+		name:   newName,
+		level:  l.level,
+		output: os.Stderr,
+	}
+
+	return &Logger{
+		Logger: slog.New(handler),
+		name:   newName,
+		level:  l.level,
+	}
 }
 
 // Phase logs a phase transition (used for bootstrap phases)
@@ -106,14 +120,14 @@ func (l *Logger) Waiting(msg string, args ...any) {
 // prettyHandler is a custom slog handler for pretty terminal output
 type prettyHandler struct {
 	name   string
-	level  slog.Level
+	level  *slog.LevelVar
 	output io.Writer
 	attrs  []slog.Attr
 	groups []string
 }
 
 func (h *prettyHandler) Enabled(_ context.Context, level slog.Level) bool {
-	return level >= h.level
+	return level >= h.level.Level()
 }
 
 func (h *prettyHandler) Handle(_ context.Context, r slog.Record) error {

@@ -170,7 +170,7 @@ func runScale(ctx context.Context, opts *ScaleOptions) error {
 	}
 
 	// Get current replica count
-	currentReplicas := GetNestedInt64(tc.Object, "spec", "workers", "replicas")
+	currentReplicas := client.GetNestedInt64(tc.Object, "spec", "workers", "replicas")
 	if currentReplicas == 0 {
 		currentReplicas = 1 // Default if not set
 	}

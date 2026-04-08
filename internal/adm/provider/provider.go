@@ -91,7 +91,7 @@ func newListCmd(logger *log.Logger) *cobra.Command {
 }
 
 func runList(ctx context.Context, logger *log.Logger, opts *listOptions) error {
-	c, err := getClient(opts.kubeconfig)
+	c, err := client.New(opts.kubeconfig, "")
 	if err != nil {
 		return err
 	}
@@ -116,20 +116,20 @@ func runList(ctx context.Context, logger *log.Logger, opts *listOptions) error {
 
 	for _, pc := range list.Items {
 		name := pc.GetName()
-		provider := getNestedString(pc.Object, "spec", "provider")
-		validated := getNestedBool(pc.Object, "status", "validated")
+		provider := client.GetNestedString(pc.Object, "spec", "provider")
+		validated := client.GetNestedBool(pc.Object, "status", "validated")
 
 		var endpoint string
 		switch provider {
 		case "nutanix":
-			endpoint = getNestedString(pc.Object, "spec", "nutanix", "endpoint")
+			endpoint = client.GetNestedString(pc.Object, "spec", "nutanix", "endpoint")
 		case "harvester":
 			endpoint = "(in-cluster)"
 		case "proxmox":
-			endpoint = getNestedString(pc.Object, "spec", "proxmox", "endpoint")
+			endpoint = client.GetNestedString(pc.Object, "spec", "proxmox", "endpoint")
 		case "gcp":
-			projectID := getNestedString(pc.Object, "spec", "gcp", "projectID")
-			region := getNestedString(pc.Object, "spec", "gcp", "region")
+			projectID := client.GetNestedString(pc.Object, "spec", "gcp", "projectID")
+			region := client.GetNestedString(pc.Object, "spec", "gcp", "region")
 			endpoint = fmt.Sprintf("%s/%s", projectID, region)
 		default:
 			endpoint = "-"
@@ -194,7 +194,7 @@ Examples:
 }
 
 func runValidate(ctx context.Context, logger *log.Logger, name string, opts *validateOptions) error {
-	c, err := getClient(opts.kubeconfig)
+	c, err := client.New(opts.kubeconfig, "")
 	if err != nil {
 		return err
 	}
@@ -205,7 +205,7 @@ func runValidate(ctx context.Context, logger *log.Logger, name string, opts *val
 		return fmt.Errorf("getting ProviderConfig %s: %w", name, err)
 	}
 
-	provider := getNestedString(pc.Object, "spec", "provider")
+	provider := client.GetNestedString(pc.Object, "spec", "provider")
 	logger.Info("validating provider", "name", name, "type", provider)
 
 	var validationErr error
@@ -237,25 +237,25 @@ func runValidate(ctx context.Context, logger *log.Logger, name string, opts *val
 }
 
 func validateNutanix(ctx context.Context, c *client.Client, pc *unstructured.Unstructured, opts *validateOptions, logger *log.Logger) error {
-	endpoint := getNestedString(pc.Object, "spec", "nutanix", "endpoint")
+	endpoint := client.GetNestedString(pc.Object, "spec", "nutanix", "endpoint")
 	if endpoint == "" {
 		return fmt.Errorf("nutanix endpoint not configured")
 	}
 
 	// Get port from spec (default 9440 for Prism Central)
-	port := getNestedInt64(pc.Object, "spec", "nutanix", "port")
+	port := client.GetNestedInt64(pc.Object, "spec", "nutanix", "port")
 	if port == 0 {
 		port = 9440
 	}
 
 	// Get insecure flag from provider config
-	insecure := getNestedBool(pc.Object, "spec", "nutanix", "insecure")
+	insecure := client.GetNestedBool(pc.Object, "spec", "nutanix", "insecure")
 	if opts.insecure {
 		insecure = true
 	}
 
 	// Get credentials from secret - credentialsRef is at spec level, not nested under nutanix
-	secretName := getNestedString(pc.Object, "spec", "credentialsRef", "name")
+	secretName := client.GetNestedString(pc.Object, "spec", "credentialsRef", "name")
 	if secretName == "" {
 		return fmt.Errorf("credentials secret not configured (spec.credentialsRef.name)")
 	}
@@ -345,19 +345,19 @@ func validateHarvester(ctx context.Context, c *client.Client, pc *unstructured.U
 }
 
 func validateProxmox(ctx context.Context, c *client.Client, pc *unstructured.Unstructured, opts *validateOptions, logger *log.Logger) error {
-	endpoint := getNestedString(pc.Object, "spec", "proxmox", "endpoint")
+	endpoint := client.GetNestedString(pc.Object, "spec", "proxmox", "endpoint")
 	if endpoint == "" {
 		return fmt.Errorf("proxmox endpoint not configured")
 	}
 
 	// Get insecure flag from provider config
-	insecure := getNestedBool(pc.Object, "spec", "proxmox", "insecure")
+	insecure := client.GetNestedBool(pc.Object, "spec", "proxmox", "insecure")
 	if opts.insecure {
 		insecure = true
 	}
 
 	// Get credentials from secret - credentialsRef is at spec level
-	secretName := getNestedString(pc.Object, "spec", "credentialsRef", "name")
+	secretName := client.GetNestedString(pc.Object, "spec", "credentialsRef", "name")
 	if secretName == "" {
 		return fmt.Errorf("credentials secret not configured (spec.credentialsRef.name)")
 	}
@@ -427,8 +427,8 @@ func validateProxmox(ctx context.Context, c *client.Client, pc *unstructured.Uns
 }
 
 func validateGCP(ctx context.Context, c *client.Client, pc *unstructured.Unstructured, opts *validateOptions, logger *log.Logger) error {
-	projectID := getNestedString(pc.Object, "spec", "gcp", "projectID")
-	region := getNestedString(pc.Object, "spec", "gcp", "region")
+	projectID := client.GetNestedString(pc.Object, "spec", "gcp", "projectID")
+	region := client.GetNestedString(pc.Object, "spec", "gcp", "region")
 	if projectID == "" {
 		return fmt.Errorf("gcp projectID not configured")
 	}
@@ -437,7 +437,7 @@ func validateGCP(ctx context.Context, c *client.Client, pc *unstructured.Unstruc
 	}
 
 	// Get credentials from secret
-	secretName := getNestedString(pc.Object, "spec", "credentialsRef", "name")
+	secretName := client.GetNestedString(pc.Object, "spec", "credentialsRef", "name")
 	if secretName == "" {
 		return fmt.Errorf("credentials secret not configured (spec.credentialsRef.name)")
 	}
@@ -521,28 +521,6 @@ func updateProviderConfigStatus(ctx context.Context, c *client.Client, pc *unstr
 	return err
 }
 
-func getClient(kubeconfigPath string) (*client.Client, error) {
-	if kubeconfigPath != "" {
-		return client.NewFromKubeconfig(kubeconfigPath)
-	}
-	return client.NewFromDefault()
-}
-
-func getNestedString(obj map[string]interface{}, fields ...string) string {
-	val, _, _ := unstructured.NestedString(obj, fields...)
-	return val
-}
-
-func getNestedBool(obj map[string]interface{}, fields ...string) bool {
-	val, _, _ := unstructured.NestedBool(obj, fields...)
-	return val
-}
-
-func getNestedInt64(obj map[string]interface{}, fields ...string) int64 {
-	val, _, _ := unstructured.NestedInt64(obj, fields...)
-	return val
-}
-
 // ProviderInfo is used for JSON/YAML output
 type ProviderInfo struct {
 	Name            string `json:"name"`
@@ -554,29 +532,29 @@ type ProviderInfo struct {
 }
 
 func extractProviderInfo(pc *unstructured.Unstructured) ProviderInfo {
-	provider := getNestedString(pc.Object, "spec", "provider")
+	provider := client.GetNestedString(pc.Object, "spec", "provider")
 
 	var endpoint string
 	switch provider {
 	case "nutanix":
-		endpoint = getNestedString(pc.Object, "spec", "nutanix", "endpoint")
+		endpoint = client.GetNestedString(pc.Object, "spec", "nutanix", "endpoint")
 	case "harvester":
 		endpoint = "(in-cluster)"
 	case "proxmox":
-		endpoint = getNestedString(pc.Object, "spec", "proxmox", "endpoint")
+		endpoint = client.GetNestedString(pc.Object, "spec", "proxmox", "endpoint")
 	case "gcp":
-		projectID := getNestedString(pc.Object, "spec", "gcp", "projectID")
-		region := getNestedString(pc.Object, "spec", "gcp", "region")
+		projectID := client.GetNestedString(pc.Object, "spec", "gcp", "projectID")
+		region := client.GetNestedString(pc.Object, "spec", "gcp", "region")
 		endpoint = fmt.Sprintf("%s/%s", projectID, region)
 	}
 
 	return ProviderInfo{
 		Name:            pc.GetName(),
 		Provider:        provider,
-		Validated:       getNestedBool(pc.Object, "status", "validated"),
+		Validated:       client.GetNestedBool(pc.Object, "status", "validated"),
 		Endpoint:        endpoint,
-		ValidationError: getNestedString(pc.Object, "status", "validationError"),
-		LastValidatedAt: getNestedString(pc.Object, "status", "lastValidatedAt"),
+		ValidationError: client.GetNestedString(pc.Object, "status", "validationError"),
+		LastValidatedAt: client.GetNestedString(pc.Object, "status", "lastValidatedAt"),
 	}
 }
 

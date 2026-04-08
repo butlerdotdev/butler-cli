@@ -100,10 +100,10 @@ func runKubeconfig(ctx context.Context, logger *log.Logger, clusterName string, 
 	}
 
 	// Extract tenant namespace from status
-	tenantNS := GetNestedString(tc.Object, "status", "tenantNamespace")
+	tenantNS := client.GetNestedString(tc.Object, "status", "tenantNamespace")
 	if tenantNS == "" {
 		return fmt.Errorf("TenantCluster %s does not have a tenant namespace yet (phase: %s)",
-			clusterName, GetNestedString(tc.Object, "status", "phase"))
+			clusterName, client.GetNestedString(tc.Object, "status", "phase"))
 	}
 
 	// The kubeconfig secret follows Steward's pattern: <name>-admin-kubeconfig

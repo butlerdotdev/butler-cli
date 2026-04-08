@@ -265,7 +265,7 @@ func waitForDestruction(ctx context.Context, c *client.Client, opts *DestroyOpti
 			}
 
 			// Check phase for progress updates
-			phase := GetNestedString(tc.Object, "status", "phase")
+			phase := client.GetNestedString(tc.Object, "status", "phase")
 			if phase != lastPhase {
 				elapsed := time.Since(startTime).Round(time.Second)
 				opts.Logger.Info("destruction progress", "phase", phase, "elapsed", elapsed)

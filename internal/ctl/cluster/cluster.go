@@ -181,9 +181,9 @@ func runGet(ctx context.Context, logger *log.Logger, name, namespace, outputForm
 			if !ok {
 				continue
 			}
-			condType := GetNestedString(cond, "type")
-			status := GetNestedString(cond, "status")
-			reason := GetNestedString(cond, "reason")
+			condType := client.GetNestedString(cond, "type")
+			status := client.GetNestedString(cond, "status")
+			reason := client.GetNestedString(cond, "reason")
 			fmt.Printf("  %s: %s (%s)\n", condType, status, reason)
 		}
 	}
@@ -197,9 +197,9 @@ func runGet(ctx context.Context, logger *log.Logger, name, namespace, outputForm
 			if !ok {
 				continue
 			}
-			name := GetNestedString(addon, "name")
-			version := GetNestedString(addon, "version")
-			status := GetNestedString(addon, "status")
+			name := client.GetNestedString(addon, "name")
+			version := client.GetNestedString(addon, "version")
+			status := client.GetNestedString(addon, "status")
 			fmt.Printf("  %s: %s (%s)\n", name, version, status)
 		}
 	}
