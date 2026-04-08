@@ -20,10 +20,12 @@ package cluster
 import (
 	"context"
 	"fmt"
+	"os"
 	"time"
 
 	"github.com/butlerdotdev/butler/internal/common/client"
 	"github.com/butlerdotdev/butler/internal/common/log"
+	"github.com/butlerdotdev/butler/internal/common/output"
 	"github.com/spf13/cobra"
 )
 
@@ -137,9 +139,10 @@ func runGet(ctx context.Context, logger *log.Logger, name, namespace, outputForm
 
 	// For YAML/JSON output, print the raw resource
 	if outputFormat == "yaml" || outputFormat == "json" {
-		// TODO: Implement proper yaml/json output
-		fmt.Printf("Output format %s not yet implemented\n", outputFormat)
-		return nil
+		if outputFormat == "json" {
+			return output.PrintJSON(os.Stdout, tc.Object)
+		}
+		return output.PrintYAML(os.Stdout, tc.Object)
 	}
 
 	// Extract info
