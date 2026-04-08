@@ -18,9 +18,26 @@ limitations under the License.
 package bootstrap
 
 import (
+	"context"
+	"os"
+	"os/signal"
+	"syscall"
+
 	"github.com/butlerdotdev/butler/internal/common/log"
 	"github.com/spf13/cobra"
 )
+
+func setupSignalHandler(cmd *cobra.Command, logger *log.Logger) (context.Context, context.CancelFunc) {
+	ctx, cancel := context.WithCancel(cmd.Context())
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
+	go func() {
+		<-sigCh
+		logger.Warn("received interrupt, cleaning up...")
+		cancel()
+	}()
+	return ctx, cancel
+}
 
 // NewBootstrapCmd creates the bootstrap parent command
 func NewBootstrapCmd(logger *log.Logger) *cobra.Command {

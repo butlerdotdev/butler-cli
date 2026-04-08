@@ -17,11 +17,8 @@ limitations under the License.
 package bootstrap
 
 import (
-	"context"
 	"fmt"
 	"os"
-	"os/signal"
-	"syscall"
 	"time"
 
 	"github.com/butlerdotdev/butler/internal/adm/bootstrap/orchestrator"
@@ -69,16 +66,8 @@ Example:
 Local Development:
   butleradm bootstrap aws --config bootstrap-aws.yaml --local`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			ctx, cancel := context.WithCancel(cmd.Context())
+			ctx, cancel := setupSignalHandler(cmd, logger)
 			defer cancel()
-
-			sigCh := make(chan os.Signal, 1)
-			signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
-			go func() {
-				<-sigCh
-				logger.Warn("received interrupt, cleaning up...")
-				cancel()
-			}()
 
 			if configFile != "" {
 				viper.SetConfigFile(configFile)
