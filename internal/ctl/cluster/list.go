@@ -36,6 +36,7 @@ type listOptions struct {
 	nsFlags      NamespaceFlags
 	outputFormat string
 	kubeconfig   string
+	kubeContext  string
 }
 
 // newListCmd creates the cluster list command
@@ -67,6 +68,7 @@ Examples:
   # Output as JSON
   butlerctl cluster list -o json`,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			opts.kubeContext, _ = cmd.Flags().GetString("context")
 			return runList(cmd.Context(), logger, opts)
 		},
 	}
@@ -86,12 +88,7 @@ func runList(ctx context.Context, logger *log.Logger, opts *listOptions) error {
 	}
 
 	// Connect to management cluster
-	var c *client.Client
-	if opts.kubeconfig != "" {
-		c, err = client.NewFromKubeconfig(opts.kubeconfig)
-	} else {
-		c, err = client.NewFromDefault()
-	}
+	c, err := client.New(opts.kubeconfig, opts.kubeContext)
 	if err != nil {
 		return fmt.Errorf("connecting to management cluster: %w", err)
 	}

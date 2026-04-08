@@ -37,6 +37,7 @@ type kubeconfigOptions struct {
 	merge          bool
 	setContext     bool
 	kubeconfigPath string
+	kubeContext    string
 }
 
 // newKubeconfigCmd creates the cluster kubeconfig command
@@ -71,6 +72,7 @@ Examples:
   butlerctl cluster kubeconfig my-cluster --kubeconfig ~/.butler/butler-ntnx-kubeconfig`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			opts.kubeContext, _ = cmd.Flags().GetString("context")
 			return runKubeconfig(cmd.Context(), logger, args[0], opts)
 		},
 	}
@@ -86,13 +88,7 @@ Examples:
 
 func runKubeconfig(ctx context.Context, logger *log.Logger, clusterName string, opts *kubeconfigOptions) error {
 	// Connect to management cluster
-	var c *client.Client
-	var err error
-	if opts.kubeconfigPath != "" {
-		c, err = client.NewFromKubeconfig(opts.kubeconfigPath)
-	} else {
-		c, err = client.NewFromDefault()
-	}
+	c, err := client.New(opts.kubeconfigPath, opts.kubeContext)
 	if err != nil {
 		return fmt.Errorf("connecting to management cluster: %w", err)
 	}

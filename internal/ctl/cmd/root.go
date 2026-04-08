@@ -29,7 +29,8 @@ import (
 )
 
 var (
-	verbose bool
+	verbose    bool
+	kubeCtx    string
 )
 
 // Execute runs the butlerctl CLI
@@ -85,6 +86,7 @@ Examples:
 
 	// Global flags
 	cmd.PersistentFlags().BoolVarP(&verbose, "verbose", "v", false, "enable verbose output")
+	cmd.PersistentFlags().StringVar(&kubeCtx, "context", "", "kubeconfig context to use")
 
 	// Register subcommands
 	cmd.AddCommand(cluster.NewClusterCmd(logger))

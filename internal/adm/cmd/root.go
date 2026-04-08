@@ -33,6 +33,7 @@ import (
 var (
 	cfgFile string
 	verbose bool
+	kubeCtx string
 )
 
 // Execute runs the butleradm CLI
@@ -86,6 +87,7 @@ Examples:
 	// Global flags
 	cmd.PersistentFlags().StringVar(&cfgFile, "config", "", "config file (default: ./bootstrap.yaml or ~/.butler/config.yaml)")
 	cmd.PersistentFlags().BoolVarP(&verbose, "verbose", "v", false, "enable verbose output")
+	cmd.PersistentFlags().StringVar(&kubeCtx, "context", "", "kubeconfig context to use")
 
 	// Bind to viper
 	viper.BindPFlag("config", cmd.PersistentFlags().Lookup("config"))

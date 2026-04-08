@@ -32,12 +32,14 @@ import (
 
 // ScaleOptions holds options for the scale command.
 type ScaleOptions struct {
-	Name      string
-	Namespace string
-	Workers   int32
-	Wait      bool
-	Timeout   time.Duration
-	Logger    *log.Logger
+	Name       string
+	Namespace  string
+	Workers    int32
+	Wait       bool
+	Timeout    time.Duration
+	Kubeconfig  string
+	KubeContext string
+	Logger      *log.Logger
 }
 
 // DefaultScaleOptions returns ScaleOptions with sensible defaults.
@@ -93,6 +95,9 @@ Examples:
 				opts.Namespace = ns
 			}
 
+			// Read persistent context flag
+			opts.KubeContext, _ = cmd.Flags().GetString("context")
+
 			return runScale(cmd.Context(), opts)
 		},
 	}
@@ -101,6 +106,8 @@ Examples:
 	cmd.Flags().StringVarP(&opts.Namespace, "namespace", "n", opts.Namespace, "Namespace of the TenantCluster")
 	cmd.Flags().BoolVar(&opts.Wait, "wait", false, "Wait for scaling to complete")
 	cmd.Flags().DurationVar(&opts.Timeout, "timeout", opts.Timeout, "Timeout when using --wait")
+
+	cmd.Flags().StringVar(&opts.Kubeconfig, "kubeconfig", "", "path to management cluster kubeconfig")
 
 	// Mark workers as required
 	_ = cmd.MarkFlagRequired("workers")
@@ -148,7 +155,7 @@ func runScale(ctx context.Context, opts *ScaleOptions) error {
 		return err
 	}
 
-	c, err := client.NewFromDefault()
+	c, err := client.New(opts.Kubeconfig, opts.KubeContext)
 	if err != nil {
 		return fmt.Errorf("creating client: %w", err)
 	}

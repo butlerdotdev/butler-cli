@@ -89,6 +89,8 @@ func newGetCmd(logger *log.Logger) *cobra.Command {
 		kubeconfig   string
 	)
 
+	var kubeContext string
+
 	cmd := &cobra.Command{
 		Use:   "get NAME",
 		Short: "Get details of a tenant cluster",
@@ -107,7 +109,8 @@ Examples:
   butlerctl cluster get my-cluster -o yaml`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runGet(cmd.Context(), logger, args[0], namespace, outputFormat, kubeconfig)
+			kubeContext, _ = cmd.Flags().GetString("context")
+			return runGet(cmd.Context(), logger, args[0], namespace, outputFormat, kubeconfig, kubeContext)
 		},
 	}
 
@@ -118,15 +121,9 @@ Examples:
 	return cmd
 }
 
-func runGet(ctx context.Context, logger *log.Logger, name, namespace, outputFormat, kubeconfigPath string) error {
+func runGet(ctx context.Context, logger *log.Logger, name, namespace, outputFormat, kubeconfigPath, kubeContext string) error {
 	// Connect to management cluster
-	var c *client.Client
-	var err error
-	if kubeconfigPath != "" {
-		c, err = client.NewFromKubeconfig(kubeconfigPath)
-	} else {
-		c, err = client.NewFromDefault()
-	}
+	c, err := client.New(kubeconfigPath, kubeContext)
 	if err != nil {
 		return fmt.Errorf("connecting to management cluster: %w", err)
 	}

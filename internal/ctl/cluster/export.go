@@ -44,6 +44,10 @@ type ExportOptions struct {
 	AsName        string // Rename the exported cluster
 	IncludeStatus bool
 
+	// Connection
+	Kubeconfig  string
+	KubeContext string
+
 	// Internal
 	Logger *log.Logger
 }
@@ -104,6 +108,9 @@ Examples:
 				opts.Namespace = ns
 			}
 
+			// Read persistent context flag
+			opts.KubeContext, _ = cmd.Flags().GetString("context")
+
 			return runExport(cmd.Context(), opts)
 		},
 	}
@@ -114,6 +121,7 @@ Examples:
 	cmd.Flags().BoolVar(&opts.AllClusters, "all", false, "Export all clusters in namespace")
 	cmd.Flags().BoolVarP(&opts.AllNamespace, "all-namespaces", "A", false, "Export from all namespaces (with --all)")
 	cmd.Flags().BoolVar(&opts.IncludeStatus, "include-status", false, "Include status in output (excluded by default)")
+	cmd.Flags().StringVar(&opts.Kubeconfig, "kubeconfig", "", "path to management cluster kubeconfig")
 
 	return cmd
 }
@@ -128,7 +136,7 @@ func runExport(ctx context.Context, opts *ExportOptions) error {
 		return fmt.Errorf("--as cannot be used with --all")
 	}
 
-	c, err := client.NewFromDefault()
+	c, err := client.New(opts.Kubeconfig, opts.KubeContext)
 	if err != nil {
 		return fmt.Errorf("creating client: %w", err)
 	}

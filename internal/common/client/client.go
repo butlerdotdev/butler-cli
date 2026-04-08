@@ -119,6 +119,70 @@ func NewFromBytes(kubeconfig []byte) (*Client, error) {
 	return newClient(config)
 }
 
+// NewFromKubeconfigWithContext creates a client from a kubeconfig path using a specific context.
+func NewFromKubeconfigWithContext(kubeconfigPath, context string) (*Client, error) {
+	overrides := &clientcmd.ConfigOverrides{
+		CurrentContext: context,
+	}
+	config, err := clientcmd.NewNonInteractiveDeferredLoadingClientConfig(
+		&clientcmd.ClientConfigLoadingRules{ExplicitPath: kubeconfigPath},
+		overrides,
+	).ClientConfig()
+	if err != nil {
+		return nil, fmt.Errorf("building config from %s with context %s: %w", kubeconfigPath, context, err)
+	}
+	return newClient(config)
+}
+
+// NewFromDefaultWithContext creates a client using standard kubeconfig discovery
+// with a specific context override. Uses the same discovery logic as NewFromDefault
+// but selects the given context instead of the current-context in the kubeconfig.
+func NewFromDefaultWithContext(context string) (*Client, error) {
+	kubeconfigPath := resolveKubeconfigPath()
+	if kubeconfigPath == "" {
+		return nil, fmt.Errorf("no kubeconfig found; set KUBECONFIG env var, use --kubeconfig flag, or ensure ~/.kube/config exists")
+	}
+	return NewFromKubeconfigWithContext(kubeconfigPath, context)
+}
+
+// resolveKubeconfigPath returns the path to the kubeconfig file using the same
+// discovery logic as NewFromDefault: KUBECONFIG env, ~/.butler/, ~/.kube/config.
+func resolveKubeconfigPath() string {
+	// 1. Check KUBECONFIG environment variable
+	if kubeconfigEnv := os.Getenv("KUBECONFIG"); kubeconfigEnv != "" {
+		paths := strings.Split(kubeconfigEnv, string(os.PathListSeparator))
+		for _, p := range paths {
+			p = strings.TrimSpace(p)
+			if p == "" {
+				continue
+			}
+			if _, err := os.Stat(p); err == nil {
+				return p
+			}
+		}
+		return ""
+	}
+
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+
+	// 2. Try Butler-specific kubeconfigs in ~/.butler/
+	butlerDir := filepath.Join(home, ".butler")
+	if kubeconfigPath := findButlerKubeconfig(butlerDir); kubeconfigPath != "" {
+		return kubeconfigPath
+	}
+
+	// 3. Fall back to standard kubeconfig
+	defaultConfig := filepath.Join(home, ".kube", "config")
+	if _, err := os.Stat(defaultConfig); err == nil {
+		return defaultConfig
+	}
+
+	return ""
+}
+
 // NewFromDefault creates a client using standard kubeconfig discovery.
 // Priority order:
 //  1. KUBECONFIG environment variable
@@ -188,6 +252,22 @@ func findButlerKubeconfig(butlerDir string) string {
 	}
 
 	return ""
+}
+
+// New creates a client based on the provided kubeconfig path and context name.
+// If kubeconfig is empty, standard discovery is used.
+// If context is empty, the kubeconfig's current-context is used.
+func New(kubeconfig, context string) (*Client, error) {
+	switch {
+	case kubeconfig != "" && context != "":
+		return NewFromKubeconfigWithContext(kubeconfig, context)
+	case kubeconfig != "":
+		return NewFromKubeconfig(kubeconfig)
+	case context != "":
+		return NewFromDefaultWithContext(context)
+	default:
+		return NewFromDefault()
+	}
 }
 
 // newClient creates a client from a rest config

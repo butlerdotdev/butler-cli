@@ -94,6 +94,10 @@ type CreateOptions struct {
 	// File-based creation
 	Filename string
 
+	// Connection
+	Kubeconfig  string
+	KubeContext string
+
 	// Output
 	Output io.Writer
 	Logger *log.Logger
@@ -250,6 +254,9 @@ Examples:
 				opts.Namespace = ns
 			}
 
+			// Read persistent context flag
+			opts.KubeContext, _ = cmd.Flags().GetString("context")
+
 			return runCreate(cmd.Context(), opts)
 		},
 	}
@@ -300,6 +307,9 @@ Examples:
 	// File-based
 	cmd.Flags().StringVarP(&opts.Filename, "filename", "f", "", "Create from YAML file")
 
+	// Connection
+	cmd.Flags().StringVar(&opts.Kubeconfig, "kubeconfig", "", "path to management cluster kubeconfig")
+
 	return cmd
 }
 
@@ -344,7 +354,7 @@ func runCreate(ctx context.Context, opts *CreateOptions) error {
 	}
 
 	// Create client
-	c, err := client.NewFromDefault()
+	c, err := client.New(opts.Kubeconfig, opts.KubeContext)
 	if err != nil {
 		return fmt.Errorf("creating client: %w", err)
 	}
