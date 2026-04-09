@@ -85,6 +85,10 @@ Examples:
 	cmd.AddCommand(NewDestroyCmd(logger))
 	cmd.AddCommand(newCertsCmd(logger))
 	cmd.AddCommand(newGitopsCmd(logger))
+	cmd.AddCommand(newEventsCmd(logger))
+	cmd.AddCommand(newNodesCmd(logger))
+	cmd.AddCommand(newConditionsCmd(logger))
+	cmd.AddCommand(newWatchCmd(logger))
 
 	return cmd
 }
