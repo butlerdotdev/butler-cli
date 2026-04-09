@@ -178,7 +178,7 @@ func runCatalogGet(ctx context.Context, logger *log.Logger, name, kubeconfigPath
 	description := client.GetNestedString(ad.Object, "spec", "description")
 	category := client.GetNestedString(ad.Object, "spec", "category")
 	defaultVersion := client.GetNestedString(ad.Object, "spec", "chart", "defaultVersion")
-	repoURL := client.GetNestedString(ad.Object, "spec", "chart", "repoURL")
+	repoURL := client.GetNestedString(ad.Object, "spec", "chart", "repository")
 	chartName := client.GetNestedString(ad.Object, "spec", "chart", "name")
 	platform := client.GetNestedBool(ad.Object, "spec", "platform")
 	age := output.FormatAge(ad.GetCreationTimestamp().Time)

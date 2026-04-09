@@ -24,11 +24,10 @@ import (
 	"github.com/butlerdotdev/butler/internal/common/client"
 	"github.com/butlerdotdev/butler/internal/common/log"
 	"github.com/butlerdotdev/butler/internal/common/output"
+	"github.com/butlerdotdev/butler/internal/ctl/cluster"
 	"github.com/spf13/cobra"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
-
-const defaultTenantNamespace = "butler-tenants"
 
 // NewAddonCmd creates the addon parent command.
 func NewAddonCmd(logger *log.Logger) *cobra.Command {
@@ -150,7 +149,7 @@ Examples:
 		},
 	}
 
-	cmd.Flags().StringVarP(&namespace, "namespace", "n", defaultTenantNamespace, "namespace of the TenantCluster")
+	cmd.Flags().StringVarP(&namespace, "namespace", "n", cluster.DefaultTenantNamespace, "namespace of the TenantCluster")
 	cmd.Flags().StringVarP(&outputFmt, "output", "o", "", "output format (json, yaml)")
 	cmd.Flags().StringVar(&kubeconfig, "kubeconfig", "", "path to management cluster kubeconfig")
 
@@ -231,7 +230,7 @@ Examples:
 		},
 	}
 
-	cmd.Flags().StringVarP(&namespace, "namespace", "n", defaultTenantNamespace, "namespace of the TenantCluster")
+	cmd.Flags().StringVarP(&namespace, "namespace", "n", cluster.DefaultTenantNamespace, "namespace of the TenantCluster")
 	cmd.Flags().StringVarP(&outputFmt, "output", "o", "", "output format (json, yaml)")
 	cmd.Flags().StringVar(&kubeconfig, "kubeconfig", "", "path to management cluster kubeconfig")
 

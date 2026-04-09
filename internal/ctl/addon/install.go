@@ -22,6 +22,7 @@ import (
 
 	"github.com/butlerdotdev/butler/internal/common/client"
 	"github.com/butlerdotdev/butler/internal/common/log"
+	"github.com/butlerdotdev/butler/internal/ctl/cluster"
 	"github.com/spf13/cobra"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -53,7 +54,7 @@ Examples:
 		},
 	}
 
-	cmd.Flags().StringVarP(&namespace, "namespace", "n", defaultTenantNamespace, "namespace of the TenantCluster")
+	cmd.Flags().StringVarP(&namespace, "namespace", "n", cluster.DefaultTenantNamespace, "namespace of the TenantCluster")
 	cmd.Flags().StringVar(&version, "version", "", "addon version (defaults to catalog default)")
 	cmd.Flags().StringVar(&kubeconfig, "kubeconfig", "", "path to management cluster kubeconfig")
 
@@ -130,7 +131,7 @@ Examples:
 		},
 	}
 
-	cmd.Flags().StringVarP(&namespace, "namespace", "n", defaultTenantNamespace, "namespace of the TenantCluster")
+	cmd.Flags().StringVarP(&namespace, "namespace", "n", cluster.DefaultTenantNamespace, "namespace of the TenantCluster")
 	cmd.Flags().StringVar(&kubeconfig, "kubeconfig", "", "path to management cluster kubeconfig")
 
 	return cmd
