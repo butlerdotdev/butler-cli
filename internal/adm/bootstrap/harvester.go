@@ -17,11 +17,8 @@ limitations under the License.
 package bootstrap
 
 import (
-	"context"
 	"fmt"
 	"os"
-	"os/signal"
-	"syscall"
 	"time"
 
 	"github.com/butlerdotdev/butler/internal/adm/bootstrap/orchestrator"
@@ -66,17 +63,8 @@ Local Development:
   butleradm bootstrap harvester --config bootstrap.yaml --local
   butleradm bootstrap harvester --config bootstrap.yaml --local --repo-root ~/code/github.com/butlerdotdev`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			// Handle interrupts gracefully
-			ctx, cancel := context.WithCancel(cmd.Context())
+			ctx, cancel := setupSignalHandler(cmd, logger)
 			defer cancel()
-
-			sigCh := make(chan os.Signal, 1)
-			signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
-			go func() {
-				<-sigCh
-				logger.Warn("received interrupt, cleaning up...")
-				cancel()
-			}()
 
 			// Load config
 			if configFile != "" {

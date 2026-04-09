@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/butlerdotdev/butler/internal/common/client"
@@ -72,24 +73,6 @@ func (f *NamespaceFlags) ResolveNamespace() (string, bool) {
 	return DefaultTenantNamespace, false
 }
 
-// GetNestedString extracts a string from nested map fields
-func GetNestedString(obj map[string]interface{}, fields ...string) string {
-	val, _, _ := unstructured.NestedString(obj, fields...)
-	return val
-}
-
-// GetNestedInt64 extracts an int64 from nested map fields
-func GetNestedInt64(obj map[string]interface{}, fields ...string) int64 {
-	val, _, _ := unstructured.NestedInt64(obj, fields...)
-	return val
-}
-
-// GetNestedBool extracts a bool from nested map fields
-func GetNestedBool(obj map[string]interface{}, fields ...string) bool {
-	val, _, _ := unstructured.NestedBool(obj, fields...)
-	return val
-}
-
 // TenantClusterInfo holds extracted information from a TenantCluster resource
 // for display purposes
 type TenantClusterInfo struct {
@@ -110,24 +93,24 @@ func ExtractTenantClusterInfo(tc *unstructured.Unstructured) TenantClusterInfo {
 	obj := tc.Object
 
 	// Try to get workers from status.observedState first
-	workersReady := GetNestedInt64(obj, "status", "observedState", "workers", "ready")
-	workersDesired := GetNestedInt64(obj, "status", "observedState", "workers", "desired")
+	workersReady := client.GetNestedInt64(obj, "status", "observedState", "workers", "ready")
+	workersDesired := client.GetNestedInt64(obj, "status", "observedState", "workers", "desired")
 
 	// Fallback to spec.workers.replicas if status not populated
 	if workersDesired == 0 {
-		workersDesired = GetNestedInt64(obj, "spec", "workers", "replicas")
+		workersDesired = client.GetNestedInt64(obj, "spec", "workers", "replicas")
 	}
 
 	return TenantClusterInfo{
 		Name:              tc.GetName(),
 		Namespace:         tc.GetNamespace(),
-		Phase:             GetNestedString(obj, "status", "phase"),
-		KubernetesVersion: GetNestedString(obj, "spec", "kubernetesVersion"),
+		Phase:             client.GetNestedString(obj, "status", "phase"),
+		KubernetesVersion: client.GetNestedString(obj, "spec", "kubernetesVersion"),
 		WorkersReady:      workersReady,
 		WorkersDesired:    workersDesired,
-		Endpoint:          GetNestedString(obj, "status", "controlPlaneEndpoint"),
-		TenantNamespace:   GetNestedString(obj, "status", "tenantNamespace"),
-		ProviderConfig:    GetNestedString(obj, "spec", "providerConfigRef", "name"),
+		Endpoint:          client.GetNestedString(obj, "status", "controlPlaneEndpoint"),
+		TenantNamespace:   client.GetNestedString(obj, "status", "tenantNamespace"),
+		ProviderConfig:    client.GetNestedString(obj, "spec", "providerConfigRef", "name"),
 		CreationTime:      tc.GetCreationTimestamp().UTC().Format(time.RFC3339),
 	}
 }
@@ -154,27 +137,27 @@ func EnrichWithMachineDeploymentStatus(ctx context.Context, c *client.Client, in
 		}
 
 		// Get desired from spec.replicas
-		specReplicas := GetNestedInt64(md.Object, "spec", "replicas")
+		specReplicas := client.GetNestedInt64(md.Object, "spec", "replicas")
 		if specReplicas > 0 {
 			info.WorkersDesired = specReplicas
 		}
 
 		// Try multiple status fields for ready count
 		// CAPI MachineDeployment uses different fields than standard Deployment
-		readyReplicas := GetNestedInt64(md.Object, "status", "readyReplicas")
+		readyReplicas := client.GetNestedInt64(md.Object, "status", "readyReplicas")
 		if readyReplicas == 0 {
 			// Try availableReplicas
-			readyReplicas = GetNestedInt64(md.Object, "status", "availableReplicas")
+			readyReplicas = client.GetNestedInt64(md.Object, "status", "availableReplicas")
 		}
 		if readyReplicas == 0 {
 			// Try updatedReplicas
-			readyReplicas = GetNestedInt64(md.Object, "status", "updatedReplicas")
+			readyReplicas = client.GetNestedInt64(md.Object, "status", "updatedReplicas")
 		}
 		if readyReplicas == 0 {
 			// Check phase - if phase is Running/Available, assume replicas are ready
 			phase, _, _ := unstructured.NestedString(md.Object, "status", "phase")
 			if phase == "Running" || phase == "Available" || phase == "ScaledUp" {
-				replicas := GetNestedInt64(md.Object, "status", "replicas")
+				replicas := client.GetNestedInt64(md.Object, "status", "replicas")
 				if replicas > 0 {
 					readyReplicas = replicas
 				}
@@ -200,13 +183,13 @@ func EnrichWithControlPlaneEndpoint(ctx context.Context, c *client.Client, info 
 	}
 
 	// Check spec.controlPlaneEndpoint first (set by controller)
-	host := GetNestedString(cluster.Object, "spec", "controlPlaneEndpoint", "host")
-	port := GetNestedInt64(cluster.Object, "spec", "controlPlaneEndpoint", "port")
+	host := client.GetNestedString(cluster.Object, "spec", "controlPlaneEndpoint", "host")
+	port := client.GetNestedInt64(cluster.Object, "spec", "controlPlaneEndpoint", "port")
 
 	if host == "" {
 		// Try status
-		host = GetNestedString(cluster.Object, "status", "controlPlaneEndpoint", "host")
-		port = GetNestedInt64(cluster.Object, "status", "controlPlaneEndpoint", "port")
+		host = client.GetNestedString(cluster.Object, "status", "controlPlaneEndpoint", "host")
+		port = client.GetNestedInt64(cluster.Object, "status", "controlPlaneEndpoint", "port")
 	}
 
 	if host != "" {
@@ -278,8 +261,8 @@ func RequireManagementCluster(ctx context.Context) error {
 	if err != nil {
 		// Check if it's a "resource not found" type error (CRD doesn't exist)
 		errStr := err.Error()
-		if contains(errStr, "the server could not find the requested resource") ||
-			contains(errStr, "no matches for kind") {
+		if strings.Contains(errStr, "the server could not find the requested resource") ||
+			strings.Contains(errStr, "no matches for kind") {
 			return &ManagementClusterError{
 				CurrentContext: currentContext,
 				Reason:         "The TenantCluster CRD is not registered.\nButler CRDs are only installed on management clusters.",
@@ -316,64 +299,14 @@ func getCurrentContext() string {
 
 	// Simple parsing - look for current-context line
 	lines := string(data)
-	for _, line := range splitLines(lines) {
-		if contains(line, "current-context:") {
-			parts := splitOnColon(line)
+	for _, line := range strings.Split(lines, "\n") {
+		if strings.Contains(line, "current-context:") {
+			parts := strings.SplitN(line, ":", 2)
 			if len(parts) >= 2 {
-				return trimSpace(parts[1])
+				return strings.TrimSpace(parts[1])
 			}
 		}
 	}
 
 	return "(unknown)"
-}
-
-// Helper functions for string operations (avoiding regex for simple parsing)
-func contains(s, substr string) bool {
-	return len(s) >= len(substr) && (s == substr || len(s) > 0 && containsAt(s, substr))
-}
-
-func containsAt(s, substr string) bool {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return true
-		}
-	}
-	return false
-}
-
-func splitLines(s string) []string {
-	var lines []string
-	start := 0
-	for i := 0; i < len(s); i++ {
-		if s[i] == '\n' {
-			lines = append(lines, s[start:i])
-			start = i + 1
-		}
-	}
-	if start < len(s) {
-		lines = append(lines, s[start:])
-	}
-	return lines
-}
-
-func splitOnColon(s string) []string {
-	for i := 0; i < len(s); i++ {
-		if s[i] == ':' {
-			return []string{s[:i], s[i+1:]}
-		}
-	}
-	return []string{s}
-}
-
-func trimSpace(s string) string {
-	start := 0
-	end := len(s)
-	for start < end && (s[start] == ' ' || s[start] == '\t') {
-		start++
-	}
-	for end > start && (s[end-1] == ' ' || s[end-1] == '\t' || s[end-1] == '\n' || s[end-1] == '\r') {
-		end--
-	}
-	return s[start:end]
 }

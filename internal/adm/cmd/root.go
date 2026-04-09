@@ -18,11 +18,15 @@ limitations under the License.
 package cmd
 
 import (
+	"fmt"
+
 	"github.com/butlerdotdev/butler/internal/adm/bootstrap"
 	"github.com/butlerdotdev/butler/internal/adm/provider"
 	"github.com/butlerdotdev/butler/internal/adm/status"
+	"github.com/butlerdotdev/butler/internal/common/completion"
 	"github.com/butlerdotdev/butler/internal/common/log"
 	"github.com/butlerdotdev/butler/internal/common/output"
+	"github.com/butlerdotdev/butler/internal/common/version"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
@@ -30,6 +34,7 @@ import (
 var (
 	cfgFile string
 	verbose bool
+	kubeCtx string
 )
 
 // Execute runs the butleradm CLI
@@ -83,6 +88,7 @@ Examples:
 	// Global flags
 	cmd.PersistentFlags().StringVar(&cfgFile, "config", "", "config file (default: ./bootstrap.yaml or ~/.butler/config.yaml)")
 	cmd.PersistentFlags().BoolVarP(&verbose, "verbose", "v", false, "enable verbose output")
+	cmd.PersistentFlags().StringVar(&kubeCtx, "context", "", "kubeconfig context to use")
 
 	// Bind to viper
 	viper.BindPFlag("config", cmd.PersistentFlags().Lookup("config"))
@@ -91,6 +97,7 @@ Examples:
 	cmd.AddCommand(bootstrap.NewBootstrapCmd(logger))
 	cmd.AddCommand(status.NewStatusCmd(logger))
 	cmd.AddCommand(provider.NewProviderCmd(logger))
+	cmd.AddCommand(completion.NewCompletionCmd("butleradm"))
 	cmd.AddCommand(NewVersionCmd())
 
 	// TODO: Add upgrade, backup, restore commands
@@ -128,9 +135,9 @@ func NewVersionCmd() *cobra.Command {
 		Use:   "version",
 		Short: "Print version information",
 		Run: func(cmd *cobra.Command, args []string) {
-			cmd.Println(output.Binary("butleradm") + " version v0.1.0-dev")
-			cmd.Println("Butler Platform Administration")
-			cmd.Println(output.Dim("https://github.com/butlerdotdev/butler"))
+			cmd.Println(output.Binary("butleradm") + " version " + version.Version)
+			cmd.Println(fmt.Sprintf("  commit: %s", version.Commit))
+			cmd.Println(fmt.Sprintf("  built:  %s", version.Date))
 		},
 	}
 }

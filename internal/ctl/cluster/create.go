@@ -69,6 +69,11 @@ type CreateOptions struct {
 	LBPoolStart string
 	LBPoolEnd   string
 
+	// String flags that need parsing before use
+	MemoryFlag string
+	DiskFlag   string
+	LBPoolFlag string
+
 	// Control plane (optional)
 	ControlPlaneReplicas int32
 
@@ -93,6 +98,10 @@ type CreateOptions struct {
 
 	// File-based creation
 	Filename string
+
+	// Connection
+	Kubeconfig  string
+	KubeContext string
 
 	// Output
 	Output io.Writer
@@ -250,6 +259,9 @@ Examples:
 				opts.Namespace = ns
 			}
 
+			// Read persistent context flag
+			opts.KubeContext, _ = cmd.Flags().GetString("context")
+
 			return runCreate(cmd.Context(), opts)
 		},
 	}
@@ -260,8 +272,8 @@ Examples:
 	// Machine configuration
 	cmd.Flags().Int32VarP(&opts.Workers, "workers", "w", opts.Workers, "Number of worker nodes (1-10)")
 	cmd.Flags().Int32Var(&opts.CPU, "cpu", opts.CPU, "CPU cores per worker (1-128)")
-	cmd.Flags().StringVar(&memoryFlag, "memory", "8Gi", "Memory per worker (e.g., 8Gi, 16384Mi)")
-	cmd.Flags().StringVar(&diskFlag, "disk", "50Gi", "Disk size per worker (e.g., 50Gi, 100Gi)")
+	cmd.Flags().StringVar(&opts.MemoryFlag, "memory", "8Gi", "Memory per worker (e.g., 8Gi, 16384Mi)")
+	cmd.Flags().StringVar(&opts.DiskFlag, "disk", "50Gi", "Disk size per worker (e.g., 50Gi, 100Gi)")
 	cmd.Flags().StringVar(&opts.ImageRef, "image", "", "OS image reference (UUID for Nutanix, namespace/name for Harvester)")
 	cmd.Flags().StringVar(&opts.SchematicID, "schematic-id", "", "Image Factory schematic ID (resolves via ImageSync)")
 
@@ -271,7 +283,7 @@ Examples:
 	// Networking
 	cmd.Flags().StringVar(&opts.PodCIDR, "pod-cidr", "", "Pod network CIDR (default: 10.244.0.0/16)")
 	cmd.Flags().StringVar(&opts.ServiceCIDR, "service-cidr", "", "Service network CIDR (default: 10.96.0.0/12)")
-	cmd.Flags().StringVar(&lbPoolFlag, "lb-pool", "", "LoadBalancer IP pool (SINGLE_IP or START-END range)")
+	cmd.Flags().StringVar(&opts.LBPoolFlag, "lb-pool", "", "LoadBalancer IP pool (SINGLE_IP or START-END range)")
 	cmd.Flags().StringVar(&opts.LBPoolStart, "lb-pool-start", "", "LoadBalancer pool start IP")
 	cmd.Flags().StringVar(&opts.LBPoolEnd, "lb-pool-end", "", "LoadBalancer pool end IP")
 
@@ -300,39 +312,35 @@ Examples:
 	// File-based
 	cmd.Flags().StringVarP(&opts.Filename, "filename", "f", "", "Create from YAML file")
 
+	// Connection
+	cmd.Flags().StringVar(&opts.Kubeconfig, "kubeconfig", "", "path to management cluster kubeconfig")
+
 	return cmd
 }
-
-// Global vars for string flags that need parsing
-var (
-	memoryFlag string
-	diskFlag   string
-	lbPoolFlag string
-)
 
 // runCreate executes the create operation.
 func runCreate(ctx context.Context, opts *CreateOptions) error {
 	// Parse memory and disk flags
-	if memoryFlag != "" {
-		memMB, err := parseMemoryToMB(memoryFlag)
+	if opts.MemoryFlag != "" {
+		memMB, err := parseMemoryToMB(opts.MemoryFlag)
 		if err != nil {
-			return fmt.Errorf("invalid memory value %q: %w", memoryFlag, err)
+			return fmt.Errorf("invalid memory value %q: %w", opts.MemoryFlag, err)
 		}
 		opts.MemoryMB = memMB
 	}
-	if diskFlag != "" {
-		diskGB, err := parseDiskToGB(diskFlag)
+	if opts.DiskFlag != "" {
+		diskGB, err := parseDiskToGB(opts.DiskFlag)
 		if err != nil {
-			return fmt.Errorf("invalid disk value %q: %w", diskFlag, err)
+			return fmt.Errorf("invalid disk value %q: %w", opts.DiskFlag, err)
 		}
 		opts.DiskGB = diskGB
 	}
 
 	// Parse lb-pool flag (supports "IP" or "START-END" format)
-	if lbPoolFlag != "" {
-		start, end, err := parseLBPool(lbPoolFlag)
+	if opts.LBPoolFlag != "" {
+		start, end, err := parseLBPool(opts.LBPoolFlag)
 		if err != nil {
-			return fmt.Errorf("invalid --lb-pool value %q: %w", lbPoolFlag, err)
+			return fmt.Errorf("invalid --lb-pool value %q: %w", opts.LBPoolFlag, err)
 		}
 		opts.LBPoolStart = start
 		opts.LBPoolEnd = end
@@ -344,7 +352,7 @@ func runCreate(ctx context.Context, opts *CreateOptions) error {
 	}
 
 	// Create client
-	c, err := client.NewFromDefault()
+	c, err := client.New(opts.Kubeconfig, opts.KubeContext)
 	if err != nil {
 		return fmt.Errorf("creating client: %w", err)
 	}
@@ -623,7 +631,7 @@ func waitForReady(ctx context.Context, c *client.Client, opts *CreateOptions) er
 				continue
 			}
 
-			phase := GetNestedString(tc.Object, "status", "phase")
+			phase := client.GetNestedString(tc.Object, "status", "phase")
 			elapsed := time.Since(startTime).Round(time.Second)
 
 			// Log phase transitions

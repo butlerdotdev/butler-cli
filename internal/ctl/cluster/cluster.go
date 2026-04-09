@@ -20,10 +20,12 @@ package cluster
 import (
 	"context"
 	"fmt"
+	"os"
 	"time"
 
 	"github.com/butlerdotdev/butler/internal/common/client"
 	"github.com/butlerdotdev/butler/internal/common/log"
+	"github.com/butlerdotdev/butler/internal/common/output"
 	"github.com/spf13/cobra"
 )
 
@@ -87,6 +89,8 @@ func newGetCmd(logger *log.Logger) *cobra.Command {
 		kubeconfig   string
 	)
 
+	var kubeContext string
+
 	cmd := &cobra.Command{
 		Use:   "get NAME",
 		Short: "Get details of a tenant cluster",
@@ -105,7 +109,8 @@ Examples:
   butlerctl cluster get my-cluster -o yaml`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runGet(cmd.Context(), logger, args[0], namespace, outputFormat, kubeconfig)
+			kubeContext, _ = cmd.Flags().GetString("context")
+			return runGet(cmd.Context(), logger, args[0], namespace, outputFormat, kubeconfig, kubeContext)
 		},
 	}
 
@@ -116,15 +121,9 @@ Examples:
 	return cmd
 }
 
-func runGet(ctx context.Context, logger *log.Logger, name, namespace, outputFormat, kubeconfigPath string) error {
+func runGet(ctx context.Context, logger *log.Logger, name, namespace, outputFormat, kubeconfigPath, kubeContext string) error {
 	// Connect to management cluster
-	var c *client.Client
-	var err error
-	if kubeconfigPath != "" {
-		c, err = client.NewFromKubeconfig(kubeconfigPath)
-	} else {
-		c, err = client.NewFromDefault()
-	}
+	c, err := client.New(kubeconfigPath, kubeContext)
 	if err != nil {
 		return fmt.Errorf("connecting to management cluster: %w", err)
 	}
@@ -137,9 +136,10 @@ func runGet(ctx context.Context, logger *log.Logger, name, namespace, outputForm
 
 	// For YAML/JSON output, print the raw resource
 	if outputFormat == "yaml" || outputFormat == "json" {
-		// TODO: Implement proper yaml/json output
-		fmt.Printf("Output format %s not yet implemented\n", outputFormat)
-		return nil
+		if outputFormat == "json" {
+			return output.PrintJSON(os.Stdout, tc.Object)
+		}
+		return output.PrintYAML(os.Stdout, tc.Object)
 	}
 
 	// Extract info
@@ -181,9 +181,9 @@ func runGet(ctx context.Context, logger *log.Logger, name, namespace, outputForm
 			if !ok {
 				continue
 			}
-			condType := GetNestedString(cond, "type")
-			status := GetNestedString(cond, "status")
-			reason := GetNestedString(cond, "reason")
+			condType := client.GetNestedString(cond, "type")
+			status := client.GetNestedString(cond, "status")
+			reason := client.GetNestedString(cond, "reason")
 			fmt.Printf("  %s: %s (%s)\n", condType, status, reason)
 		}
 	}
@@ -197,9 +197,9 @@ func runGet(ctx context.Context, logger *log.Logger, name, namespace, outputForm
 			if !ok {
 				continue
 			}
-			name := GetNestedString(addon, "name")
-			version := GetNestedString(addon, "version")
-			status := GetNestedString(addon, "status")
+			name := client.GetNestedString(addon, "name")
+			version := client.GetNestedString(addon, "version")
+			status := client.GetNestedString(addon, "status")
 			fmt.Printf("  %s: %s (%s)\n", name, version, status)
 		}
 	}

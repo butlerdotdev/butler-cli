@@ -45,6 +45,10 @@ type DestroyOptions struct {
 	NoWait  bool // Don't wait for deletion to complete
 	Timeout time.Duration
 
+	// Connection
+	Kubeconfig  string
+	KubeContext string
+
 	// Future RBAC fields (not implemented yet)
 	// Team        string // Team owning this cluster
 	// RequireRole string // Minimum role required (owner, admin, member)
@@ -101,6 +105,7 @@ Examples:
 		ValidArgsFunction: completeClusterNames,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			opts.Name = args[0]
+			opts.KubeContext, _ = cmd.Flags().GetString("context")
 			return runDestroy(cmd.Context(), opts)
 		},
 	}
@@ -113,6 +118,9 @@ Examples:
 	// Aliases: --yes is common in other tools
 	cmd.Flags().BoolVarP(&opts.Force, "yes", "y", false, "Skip confirmation prompt (alias for --force)")
 
+	// Connection
+	cmd.Flags().StringVar(&opts.Kubeconfig, "kubeconfig", "", "path to management cluster kubeconfig")
+
 	return cmd
 }
 
@@ -123,7 +131,7 @@ func runDestroy(ctx context.Context, opts *DestroyOptions) error {
 		return err
 	}
 
-	c, err := client.NewFromDefault()
+	c, err := client.New(opts.Kubeconfig, opts.KubeContext)
 	if err != nil {
 		return fmt.Errorf("creating client: %w", err)
 	}
@@ -257,7 +265,7 @@ func waitForDestruction(ctx context.Context, c *client.Client, opts *DestroyOpti
 			}
 
 			// Check phase for progress updates
-			phase := GetNestedString(tc.Object, "status", "phase")
+			phase := client.GetNestedString(tc.Object, "status", "phase")
 			if phase != lastPhase {
 				elapsed := time.Since(startTime).Round(time.Second)
 				opts.Logger.Info("destruction progress", "phase", phase, "elapsed", elapsed)

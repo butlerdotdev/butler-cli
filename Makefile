@@ -13,9 +13,9 @@ BUILD_DATE := $(shell date -u +"%Y-%m-%dT%H:%M:%SZ")
 
 # Build flags
 LDFLAGS := -s -w \
-	-X github.com/butlerdotdev/butler/internal/version.Version=$(VERSION) \
-	-X github.com/butlerdotdev/butler/internal/version.GitCommit=$(GIT_COMMIT) \
-	-X github.com/butlerdotdev/butler/internal/version.BuildDate=$(BUILD_DATE)
+	-X github.com/butlerdotdev/butler/internal/common/version.Version=$(VERSION) \
+	-X github.com/butlerdotdev/butler/internal/common/version.Commit=$(GIT_COMMIT) \
+	-X github.com/butlerdotdev/butler/internal/common/version.Date=$(BUILD_DATE)
 
 # Output directories
 BIN_DIR := bin
