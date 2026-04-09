@@ -106,17 +106,25 @@ func runGitops(ctx context.Context, logger *log.Logger, clusterName string, opts
 	}
 
 	// Check whether any GitOps config is present
-	if cfg.Provider == "" && cfg.Version == "" && cfg.Repository == "" {
-		fmt.Println("GitOps is not configured on this cluster.")
-		return nil
-	}
+	notConfigured := cfg.Provider == "" && cfg.Version == "" && cfg.Repository == ""
 
 	// Handle structured output
 	if opts.outputFormat == "json" {
+		if notConfigured {
+			return output.PrintJSON(os.Stdout, nil)
+		}
 		return output.PrintJSON(os.Stdout, cfg)
 	}
 	if opts.outputFormat == "yaml" {
+		if notConfigured {
+			return output.PrintYAML(os.Stdout, nil)
+		}
 		return output.PrintYAML(os.Stdout, cfg)
+	}
+
+	if notConfigured {
+		fmt.Println("GitOps is not configured on this cluster.")
+		return nil
 	}
 
 	// Human-readable output
