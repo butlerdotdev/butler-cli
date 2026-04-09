@@ -241,7 +241,7 @@ func parseCertificates(data []byte) []*x509.Certificate {
 // certHealthStatus returns a human-readable health label based on how
 // many days remain until the certificate expires.
 func certHealthStatus(now, notAfter time.Time) string {
-	daysLeft := time.Until(notAfter).Hours() / 24
+	daysLeft := notAfter.Sub(now).Hours() / 24
 	switch {
 	case daysLeft < 0:
 		return "Expired"

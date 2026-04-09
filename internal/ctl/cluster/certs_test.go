@@ -40,11 +40,11 @@ func TestCertHealthStatus(t *testing.T) {
 		{"expired 1 second ago", now.Add(-1 * time.Second), "Expired"},
 		{"expires in 1 day", now.Add(24 * time.Hour), "Critical"},
 		{"expires in 6 days", now.Add(6 * 24 * time.Hour), "Critical"},
-		{"expires in exactly 7 days", now.Add(7 * 24 * time.Hour), "Critical"},
+		{"expires in exactly 7 days", now.Add(7 * 24 * time.Hour), "Warning"},
 		{"expires in 8 days", now.Add(8 * 24 * time.Hour), "Warning"},
 		{"expires in 15 days", now.Add(15 * 24 * time.Hour), "Warning"},
 		{"expires in 29 days", now.Add(29 * 24 * time.Hour), "Warning"},
-		{"expires in exactly 30 days", now.Add(30 * 24 * time.Hour), "Warning"},
+		{"expires in exactly 30 days", now.Add(30 * 24 * time.Hour), "Healthy"},
 		{"expires in 31 days", now.Add(31 * 24 * time.Hour), "Healthy"},
 		{"expires in 365 days", now.Add(365 * 24 * time.Hour), "Healthy"},
 	}
