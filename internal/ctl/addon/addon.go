@@ -150,13 +150,18 @@ Examples:
 	}
 
 	cmd.Flags().StringVarP(&namespace, "namespace", "n", cluster.DefaultTenantNamespace, "namespace of the TenantCluster")
-	cmd.Flags().StringVarP(&outputFmt, "output", "o", "", "output format (json, yaml)")
+	cmd.Flags().StringVarP(&outputFmt, "output", "o", "", "output format (table, wide, json, yaml)")
 	cmd.Flags().StringVar(&kubeconfig, "kubeconfig", "", "path to management cluster kubeconfig")
 
 	return cmd
 }
 
 func runList(ctx context.Context, logger *log.Logger, clusterName, namespace, kubeconfigPath, kubeContext, outputFormat string) error {
+	format, err := output.ParseFormat(outputFormat)
+	if err != nil {
+		return err
+	}
+
 	c, err := client.New(kubeconfigPath, kubeContext)
 	if err != nil {
 		return fmt.Errorf("connecting to management cluster: %w", err)
@@ -176,15 +181,21 @@ func runList(ctx context.Context, logger *log.Logger, clusterName, namespace, ku
 		}
 	}
 
-	if outputFormat == "json" {
+	if format == output.FormatJSON {
 		return output.PrintJSON(os.Stdout, filtered)
 	}
-	if outputFormat == "yaml" {
+	if format == output.FormatYAML {
 		return output.PrintYAML(os.Stdout, filtered)
 	}
 
+	wide := format == output.FormatWide
+
 	headers := []string{"NAME", "ADDON", "VERSION", "PHASE", "INSTALLED"}
-	var rows [][]string
+	if wide {
+		headers = append(headers, "NAMESPACE", "HELM RELEASE", "HELM NAMESPACE")
+	}
+
+	table := output.NewTable(os.Stdout, headers...)
 
 	for _, obj := range filtered {
 		name := client.GetNestedString(obj, "metadata", "name")
@@ -197,13 +208,17 @@ func runList(ctx context.Context, logger *log.Logger, clusterName, namespace, ku
 			addon = client.GetNestedString(obj, "spec", "helm", "chart")
 		}
 
-		rows = append(rows, []string{name, addon, version, phase, installed})
-	}
+		row := []string{name, addon, version, output.ColorizePhase(phase), installed}
+		if wide {
+			ns := client.GetNestedString(obj, "metadata", "namespace")
+			helmRelease := client.GetNestedString(obj, "status", "helmRelease", "name")
+			helmNs := client.GetNestedString(obj, "status", "helmRelease", "namespace")
+			row = append(row, ns, helmRelease, helmNs)
+		}
 
-	table := output.NewTable(os.Stdout, headers...)
-	for _, row := range rows {
 		table.AddRow(row...)
 	}
+
 	table.Flush()
 	return nil
 }

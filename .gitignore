@@ -25,6 +25,9 @@ Thumbs.db
 # Go
 vendor/
 
+# Generated completions (created by goreleaser)
+completions/
+
 # Temporary files
 *.tmp
 *.log

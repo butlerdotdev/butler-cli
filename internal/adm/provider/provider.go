@@ -99,7 +99,7 @@ func newListCmd(logger *log.Logger) *cobra.Command {
 	}
 
 	cmd.Flags().StringVar(&opts.kubeconfig, "kubeconfig", "", "path to kubeconfig")
-	cmd.Flags().StringVarP(&opts.outputFormat, "output", "o", "table", "output format (table, json, yaml)")
+	cmd.Flags().StringVarP(&opts.outputFormat, "output", "o", "table", "output format (table, wide, json, yaml)")
 
 	return cmd
 }
@@ -125,8 +125,15 @@ func runList(ctx context.Context, logger *log.Logger, opts *listOptions) error {
 		return printer.Print(list.Items, nil)
 	}
 
+	wide := format == output.FormatWide
+
 	// Table output
-	table := output.NewTable(os.Stdout, "NAME", "PROVIDER", "VALIDATED", "ENDPOINT", "AGE")
+	headers := []string{"NAME", "PROVIDER", "VALIDATED", "ENDPOINT", "AGE"}
+	if wide {
+		headers = append(headers, "NAMESPACE", "SCOPE")
+	}
+
+	table := output.NewTable(os.Stdout, headers...)
 
 	for _, pc := range list.Items {
 		name := pc.GetName()
@@ -164,7 +171,17 @@ func runList(ctx context.Context, logger *log.Logger, opts *listOptions) error {
 
 		age := output.FormatAge(pc.GetCreationTimestamp().Time)
 
-		table.AddRow(name, provider, validatedStr, endpoint, age)
+		row := []string{name, provider, validatedStr, endpoint, age}
+		if wide {
+			ns := pc.GetNamespace()
+			scope := client.GetNestedString(pc.Object, "spec", "scope")
+			if scope == "" {
+				scope = "platform"
+			}
+			row = append(row, ns, scope)
+		}
+
+		table.AddRow(row...)
 	}
 
 	return table.Flush()

@@ -5,6 +5,13 @@ project_name: butler
 before:
   hooks:
     - go mod tidy
+    - mkdir -p completions
+    - go run ./cmd/butlerctl completion bash > completions/butlerctl.bash
+    - go run ./cmd/butlerctl completion zsh > completions/_butlerctl
+    - go run ./cmd/butlerctl completion fish > completions/butlerctl.fish
+    - go run ./cmd/butleradm completion bash > completions/butleradm.bash
+    - go run ./cmd/butleradm completion zsh > completions/_butleradm
+    - go run ./cmd/butleradm completion fish > completions/butleradm.fish
 
 builds:
   - id: butleradm
@@ -44,16 +51,35 @@ builds:
       - -X github.com/butlerdotdev/butler/internal/common/version.Date={{.Date}}
 
 archives:
-  - id: default
-    ids:
-      - butleradm
+  - id: butlerctl
+    builds:
       - butlerctl
-    name_template: "{{ .ProjectName }}_{{ .Os }}_{{ .Arch }}"
+    name_template: "butlerctl_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
     files:
-      - README.md
       - LICENSE
+      - completions/butlerctl.*
+      - completions/_butlerctl
     formats:
       - tar.gz
+    format_overrides:
+      - goos: windows
+        formats:
+          - zip
+
+  - id: butleradm
+    builds:
+      - butleradm
+    name_template: "butleradm_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    files:
+      - LICENSE
+      - completions/butleradm.*
+      - completions/_butleradm
+    formats:
+      - tar.gz
+    format_overrides:
+      - goos: windows
+        formats:
+          - zip
 
 checksum:
   name_template: 'checksums.txt'
@@ -66,17 +92,36 @@ changelog:
       - '^test:'
       - '^chore:'
 
-homebrew_casks:
-  - name: butler
+brews:
+  - name: butlerctl
+    ids:
+      - butlerctl
     repository:
       owner: butlerdotdev
       name: homebrew-tap
       token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
-    homepage: "https://butler.dev"
-    description: "Butler Platform Engineering CLI"
-    binaries:
+    homepage: "https://butlerlabs.dev"
+    description: "Butler tenant cluster CLI"
+    install: |
+      bin.install "butlerctl"
+      bash_completion.install "completions/butlerctl.bash" => "butlerctl"
+      zsh_completion.install "completions/_butlerctl"
+      fish_completion.install "completions/butlerctl.fish"
+
+  - name: butleradm
+    ids:
       - butleradm
-      - butlerctl
+    repository:
+      owner: butlerdotdev
+      name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
+    homepage: "https://butlerlabs.dev"
+    description: "Butler platform administration CLI"
+    install: |
+      bin.install "butleradm"
+      bash_completion.install "completions/butleradm.bash" => "butleradm"
+      zsh_completion.install "completions/_butleradm"
+      fish_completion.install "completions/butleradm.fish"
 
 chocolateys:
   - name: butler-cli
@@ -91,8 +136,8 @@ chocolateys:
     tags: "kubernetes platform-engineering cli"
     summary: Butler Platform Engineering CLI
     description: |
-      Butler is a platform engineering toolkit that simplifies Kubernetes 
-      cluster management. Includes butleradm for cluster administration 
+      Butler is a platform engineering toolkit that simplifies Kubernetes
+      cluster management. Includes butleradm for cluster administration
       and butlerctl for day-to-day operations.
     release_notes: "https://github.com/butlerdotdev/butler-cli/releases/tag/v{{ .Version }}"
     api_key: "{{ .Env.CHOCOLATEY_API_KEY }}"

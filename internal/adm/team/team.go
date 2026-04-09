@@ -87,13 +87,18 @@ Examples:
 		},
 	}
 
-	cmd.Flags().StringVarP(&outputFmt, "output", "o", "", "output format (json, yaml)")
+	cmd.Flags().StringVarP(&outputFmt, "output", "o", "", "output format (table, wide, json, yaml)")
 	cmd.Flags().StringVar(&kubeconfig, "kubeconfig", "", "path to management cluster kubeconfig")
 
 	return cmd
 }
 
 func runList(ctx context.Context, logger *log.Logger, kubeconfigPath, kubeContext, outputFormat string) error {
+	format, err := output.ParseFormat(outputFormat)
+	if err != nil {
+		return err
+	}
+
 	c, err := client.New(kubeconfigPath, kubeContext)
 	if err != nil {
 		return fmt.Errorf("connecting to management cluster: %w", err)
@@ -105,15 +110,21 @@ func runList(ctx context.Context, logger *log.Logger, kubeconfigPath, kubeContex
 		return fmt.Errorf("listing teams: %w", err)
 	}
 
-	if outputFormat == "json" {
+	if format == output.FormatJSON {
 		return output.PrintJSON(os.Stdout, list.Items)
 	}
-	if outputFormat == "yaml" {
+	if format == output.FormatYAML {
 		return output.PrintYAML(os.Stdout, list.Items)
 	}
 
+	wide := format == output.FormatWide
+
 	headers := []string{"NAME", "DISPLAY NAME", "PHASE", "CLUSTERS", "MEMBERS", "NAMESPACE", "AGE"}
-	var rows [][]string
+	if wide {
+		headers = append(headers, "QUOTA STATUS", "PROVIDER")
+	}
+
+	table := output.NewTable(os.Stdout, headers...)
 
 	for _, tm := range list.Items {
 		name := tm.GetName()
@@ -124,7 +135,7 @@ func runList(ctx context.Context, logger *log.Logger, kubeconfigPath, kubeContex
 		namespace := client.GetNestedString(tm.Object, "status", "namespace")
 		age := output.FormatAge(tm.GetCreationTimestamp().Time)
 
-		rows = append(rows, []string{
+		row := []string{
 			name,
 			displayName,
 			output.ColorizePhase(phase),
@@ -132,13 +143,23 @@ func runList(ctx context.Context, logger *log.Logger, kubeconfigPath, kubeContex
 			fmt.Sprintf("%d", memberCount),
 			namespace,
 			age,
-		})
-	}
+		}
 
-	table := output.NewTable(os.Stdout, headers...)
-	for _, row := range rows {
+		if wide {
+			quotaStatus := client.GetNestedString(tm.Object, "status", "quotaStatus")
+			if quotaStatus == "" {
+				quotaStatus = "-"
+			}
+			providerRef := client.GetNestedString(tm.Object, "spec", "providerConfigRef", "name")
+			if providerRef == "" {
+				providerRef = "(default)"
+			}
+			row = append(row, quotaStatus, providerRef)
+		}
+
 		table.AddRow(row...)
 	}
+
 	table.Flush()
 	return nil
 }
