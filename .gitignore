@@ -28,5 +28,4 @@ vendor/
 # Temporary files
 *.tmp
 *.log
-CLAUDE.md
 .secrets/
