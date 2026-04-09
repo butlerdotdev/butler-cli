@@ -51,6 +51,23 @@ builds:
       - -X github.com/butlerdotdev/butler/internal/common/version.Date={{.Date}}
 
 archives:
+  # Combined archive (both binaries) for Chocolatey and users who want both
+  - id: default
+    builds:
+      - butleradm
+      - butlerctl
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    files:
+      - LICENSE
+      - completions/*
+    formats:
+      - tar.gz
+    format_overrides:
+      - goos: windows
+        formats:
+          - zip
+
+  # Per-binary archives for users who want only one
   - id: butlerctl
     builds:
       - butlerctl
