@@ -28,6 +28,8 @@ import (
 	"github.com/butlerdotdev/butler/internal/adm/network"
 	"github.com/butlerdotdev/butler/internal/adm/provider"
 	"github.com/butlerdotdev/butler/internal/adm/status"
+	"github.com/butlerdotdev/butler/internal/adm/team"
+	"github.com/butlerdotdev/butler/internal/adm/user"
 	"github.com/butlerdotdev/butler/internal/common/completion"
 	"github.com/butlerdotdev/butler/internal/common/log"
 	"github.com/butlerdotdev/butler/internal/common/output"
@@ -106,6 +108,8 @@ Examples:
 	cmd.AddCommand(idp.NewIDPCmd(logger))
 	cmd.AddCommand(network.NewNetworkCmd(logger))
 	cmd.AddCommand(status.NewStatusCmd(logger))
+	cmd.AddCommand(team.NewTeamCmd(logger))
+	cmd.AddCommand(user.NewUserCmd(logger))
 	cmd.AddCommand(provider.NewProviderCmd(logger))
 	cmd.AddCommand(completion.NewCompletionCmd("butleradm"))
 	cmd.AddCommand(NewVersionCmd())
