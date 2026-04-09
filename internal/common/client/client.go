@@ -24,6 +24,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/butlerdotdev/butler/internal/common/auth"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -124,6 +125,11 @@ type Client struct {
 
 	// Config is the underlying REST config
 	Config *rest.Config
+
+	// DefaultNamespace is set when the client is created from Butler
+	// credentials. Callers can use it to default the namespace to the
+	// active team's namespace (team-{name}).
+	DefaultNamespace string
 }
 
 // NewFromKubeconfig creates a client from a kubeconfig path
@@ -170,8 +176,10 @@ func NewFromDefaultWithContext(context string) (*Client, error) {
 	return NewFromKubeconfigWithContext(kubeconfigPath, context)
 }
 
-// resolveKubeconfigPath returns the path to the kubeconfig file using the same
-// discovery logic as NewFromDefault: KUBECONFIG env, ~/.butler/, ~/.kube/config.
+// resolveKubeconfigPath returns the path to the kubeconfig file.
+// This only handles file-path-based discovery: KUBECONFIG env, ~/.butler/*-kubeconfig,
+// ~/.kube/config. It does not handle credential-file-based kubeconfig (that path
+// goes through NewFromDefault -> newFromCredentialFile).
 func resolveKubeconfigPath() string {
 	// 1. Check KUBECONFIG environment variable
 	if kubeconfigEnv := os.Getenv("KUBECONFIG"); kubeconfigEnv != "" {
@@ -211,8 +219,9 @@ func resolveKubeconfigPath() string {
 // NewFromDefault creates a client using standard kubeconfig discovery.
 // Priority order:
 //  1. KUBECONFIG environment variable
-//  2. Butler kubeconfigs in ~/.butler/ (files ending in -kubeconfig)
-//  3. Standard ~/.kube/config
+//  2. ~/.butler/credentials.json (Butler CLI auth credential with embedded kubeconfig)
+//  3. Butler kubeconfigs in ~/.butler/ (files ending in -kubeconfig)
+//  4. Standard ~/.kube/config
 func NewFromDefault() (*Client, error) {
 	// 1. Check KUBECONFIG environment variable first (standard kubectl behavior)
 	if kubeconfigEnv := os.Getenv("KUBECONFIG"); kubeconfigEnv != "" {
@@ -232,24 +241,93 @@ func NewFromDefault() (*Client, error) {
 		return nil, fmt.Errorf("KUBECONFIG is set but no valid kubeconfig found at: %s", kubeconfigEnv)
 	}
 
+	// 2. Try Butler CLI credential file
+	if c, ns, err := newFromCredentialFile(); err == nil {
+		if ns != "" {
+			c.DefaultNamespace = ns
+		}
+		return c, nil
+	}
+
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return nil, fmt.Errorf("getting home directory: %w", err)
 	}
 
-	// 2. Try Butler-specific kubeconfigs in ~/.butler/
+	// 3. Try Butler-specific kubeconfigs in ~/.butler/
 	butlerDir := filepath.Join(home, ".butler")
 	if kubeconfigPath := findButlerKubeconfig(butlerDir); kubeconfigPath != "" {
 		return NewFromKubeconfig(kubeconfigPath)
 	}
 
-	// 3. Fall back to standard kubeconfig
+	// 4. Fall back to standard kubeconfig
 	defaultConfig := filepath.Join(home, ".kube", "config")
 	if _, err := os.Stat(defaultConfig); err == nil {
 		return NewFromKubeconfig(defaultConfig)
 	}
 
-	return nil, fmt.Errorf("no kubeconfig found; set KUBECONFIG env var, use --kubeconfig flag, or ensure ~/.kube/config exists")
+	return nil, fmt.Errorf("no kubeconfig found; set KUBECONFIG env var, use --kubeconfig flag, or run 'butlerctl login'")
+}
+
+// newFromCredentialFile attempts to build a client from the Butler credential
+// file (~/.butler/credentials.json). If the access token is expired but a
+// valid refresh token exists, it silently refreshes and updates the file.
+// Returns the client, a default namespace derived from the active team, and
+// any error. A non-nil error means the credential file should be skipped.
+func newFromCredentialFile() (*Client, string, error) {
+	creds, err := auth.LoadCredentials()
+	if err != nil {
+		return nil, "", err
+	}
+
+	sc := creds.ActiveCredential()
+	if sc == nil {
+		return nil, "", fmt.Errorf("no active credential")
+	}
+
+	// If the access token is expired, try refreshing
+	if sc.IsExpired() {
+		if !sc.CanRefresh() {
+			return nil, "", fmt.Errorf("credential expired and cannot refresh")
+		}
+
+		tr, err := auth.RefreshAccessToken(creds.ActiveServer, sc.RefreshToken)
+		if err != nil {
+			return nil, "", fmt.Errorf("refreshing token: %w", err)
+		}
+
+		// Update the stored credential
+		sc.User = tr.User
+		sc.Kubeconfig = tr.Kubeconfig
+		sc.ExpiresAt = tr.ExpiresAt
+		sc.RefreshToken = tr.RefreshToken
+		sc.RefreshExpiresAt = tr.RefreshExpiresAt
+
+		if saveErr := creds.Save(); saveErr != nil {
+			// Non-fatal: the refreshed token still works for this invocation
+			fmt.Fprintf(os.Stderr, "warning: could not save refreshed credentials: %v\n", saveErr)
+		}
+
+		fmt.Fprintln(os.Stderr, "Refreshed CLI session")
+	}
+
+	kubeconfigBytes, err := sc.KubeconfigBytes()
+	if err != nil {
+		return nil, "", err
+	}
+
+	c, err := NewFromBytes(kubeconfigBytes)
+	if err != nil {
+		return nil, "", err
+	}
+
+	// Derive default namespace from active team
+	var ns string
+	if sc.ActiveTeam != "" {
+		ns = "team-" + sc.ActiveTeam
+	}
+
+	return c, ns, nil
 }
 
 // findButlerKubeconfig looks for kubeconfig files in the Butler directory

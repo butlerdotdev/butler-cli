@@ -92,9 +92,9 @@ type TenantClusterInfo struct {
 func ExtractTenantClusterInfo(tc *unstructured.Unstructured) TenantClusterInfo {
 	obj := tc.Object
 
-	// Try to get workers from status.observedState first
-	workersReady := client.GetNestedInt64(obj, "status", "observedState", "workers", "ready")
-	workersDesired := client.GetNestedInt64(obj, "status", "observedState", "workers", "desired")
+	// Read worker counts from status
+	workersReady := client.GetNestedInt64(obj, "status", "workerNodesReady")
+	workersDesired := client.GetNestedInt64(obj, "status", "workerNodesDesired")
 
 	// Fallback to spec.workers.replicas if status not populated
 	if workersDesired == 0 {
