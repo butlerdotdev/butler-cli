@@ -49,6 +49,8 @@ Commands:
   scale       Scale worker node count
   export      Export cluster config as clean YAML
   kubeconfig  Download kubeconfig for cluster access
+  certs       Show certificate status for control plane
+  gitops      Show GitOps configuration
   destroy     Permanently destroy a cluster
 
 Examples:
@@ -81,6 +83,8 @@ Examples:
 	cmd.AddCommand(newEditCmd(logger))
 	cmd.AddCommand(newUpgradeCmd(logger))
 	cmd.AddCommand(NewDestroyCmd(logger))
+	cmd.AddCommand(newCertsCmd(logger))
+	cmd.AddCommand(newGitopsCmd(logger))
 
 	return cmd
 }
