@@ -182,19 +182,18 @@ Examples:
 	return cmd
 }
 
-func runSet(ctx context.Context, logger *log.Logger, kvPairs []string, kubeconfigPath, kubeContext string) error {
-	// Parse KEY=VALUE pairs into a nested map for JSON merge patch
+// parseKVPairs parses KEY=VALUE arguments into a nested map suitable for
+// JSON merge patch. Boolean strings ("true"/"false") are coerced to bool.
+func parseKVPairs(kvPairs []string) (map[string]interface{}, error) {
 	patch := make(map[string]interface{})
-
 	for _, kv := range kvPairs {
 		parts := strings.SplitN(kv, "=", 2)
 		if len(parts) != 2 {
-			return fmt.Errorf("invalid argument %q: expected KEY=VALUE format", kv)
+			return nil, fmt.Errorf("invalid argument %q: expected KEY=VALUE format", kv)
 		}
 		key := parts[0]
 		value := parts[1]
 
-		// Parse the value: try bool, then use as string
 		var parsed interface{}
 		switch strings.ToLower(value) {
 		case "true":
@@ -205,8 +204,15 @@ func runSet(ctx context.Context, logger *log.Logger, kvPairs []string, kubeconfi
 			parsed = value
 		}
 
-		// Build nested map from dot-separated key
 		setNestedField(patch, strings.Split(key, "."), parsed)
+	}
+	return patch, nil
+}
+
+func runSet(ctx context.Context, logger *log.Logger, kvPairs []string, kubeconfigPath, kubeContext string) error {
+	patch, err := parseKVPairs(kvPairs)
+	if err != nil {
+		return err
 	}
 
 	patchBytes, err := json.Marshal(patch)

@@ -26,6 +26,7 @@ import (
 	"github.com/butlerdotdev/butler/internal/common/client"
 	"github.com/butlerdotdev/butler/internal/common/log"
 	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/types"
@@ -43,11 +44,8 @@ type editOptions struct {
 	workersMemory     int32
 	kubernetesVersion string
 	logger            *log.Logger
-}
-
-// hasInlineFlags returns true if any inline edit flags were provided.
-func (o *editOptions) hasInlineFlags() bool {
-	return o.workersReplicas > 0 || o.workersCPU > 0 || o.workersMemory > 0 || o.kubernetesVersion != ""
+	// changedFlags tracks which flags were explicitly set by the user.
+	changedFlags map[string]bool
 }
 
 func newEditCmd(logger *log.Logger) *cobra.Command {
@@ -87,6 +85,10 @@ Examples:
 		RunE: func(cmd *cobra.Command, args []string) error {
 			opts.name = args[0]
 			opts.kubeContext, _ = cmd.Flags().GetString("context")
+			opts.changedFlags = make(map[string]bool)
+			cmd.Flags().Visit(func(f *pflag.Flag) {
+				opts.changedFlags[f.Name] = true
+			})
 			return runEdit(cmd.Context(), opts)
 		},
 	}
@@ -101,6 +103,12 @@ Examples:
 	return cmd
 }
 
+// hasInlineFlags reports whether any inline-edit flags were set.
+func (opts *editOptions) hasInlineFlags() bool {
+	return opts.changedFlags["workers-replicas"] || opts.changedFlags["workers-cpu"] ||
+		opts.changedFlags["workers-memory"] || opts.changedFlags["kubernetes-version"]
+}
+
 func runEdit(ctx context.Context, opts *editOptions) error {
 	c, err := client.New(opts.kubeconfig, opts.kubeContext)
 	if err != nil {
@@ -113,28 +121,25 @@ func runEdit(ctx context.Context, opts *editOptions) error {
 	return runEditInteractive(ctx, c, opts)
 }
 
-// runEditInline patches the TenantCluster using inline flags.
-func runEditInline(ctx context.Context, c *client.Client, opts *editOptions) error {
-	// Build the merge patch from flags
+// buildEditPatch constructs the merge-patch map from inline flag values.
+func (opts *editOptions) buildEditPatch() map[string]interface{} {
 	spec := make(map[string]interface{})
 
-	if opts.workersReplicas > 0 || opts.workersCPU > 0 || opts.workersMemory > 0 {
+	hasWorkerFlag := opts.changedFlags["workers-replicas"] || opts.changedFlags["workers-cpu"] || opts.changedFlags["workers-memory"]
+	if hasWorkerFlag {
 		workers := make(map[string]interface{})
-		if opts.workersReplicas > 0 {
+		machineTemplate := make(map[string]interface{})
+		if opts.changedFlags["workers-replicas"] {
 			workers["replicas"] = int64(opts.workersReplicas)
 		}
-		if opts.workersCPU > 0 {
-			machineTemplate := make(map[string]interface{})
+		if opts.changedFlags["workers-cpu"] {
 			machineTemplate["cpu"] = int64(opts.workersCPU)
-			workers["machineTemplate"] = machineTemplate
 		}
-		if opts.workersMemory > 0 {
-			mt, ok := workers["machineTemplate"].(map[string]interface{})
-			if !ok {
-				mt = make(map[string]interface{})
-			}
-			mt["memoryGiB"] = int64(opts.workersMemory)
-			workers["machineTemplate"] = mt
+		if opts.changedFlags["workers-memory"] {
+			machineTemplate["memoryGiB"] = int64(opts.workersMemory)
+		}
+		if len(machineTemplate) > 0 {
+			workers["machineTemplate"] = machineTemplate
 		}
 		spec["workers"] = workers
 	}
@@ -143,9 +148,14 @@ func runEditInline(ctx context.Context, c *client.Client, opts *editOptions) err
 		spec["kubernetesVersion"] = opts.kubernetesVersion
 	}
 
-	patch := map[string]interface{}{
+	return map[string]interface{}{
 		"spec": spec,
 	}
+}
+
+// runEditInline patches the TenantCluster using inline flags.
+func runEditInline(ctx context.Context, c *client.Client, opts *editOptions) error {
+	patch := opts.buildEditPatch()
 
 	patchBytes, err := json.Marshal(patch)
 	if err != nil {
