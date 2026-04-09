@@ -51,17 +51,27 @@ providers like Nutanix, Harvester, Proxmox, or cloud platforms.
 
 Commands:
   list      List all provider configurations
+  create    Create a new provider configuration
+  delete    Delete a provider configuration
   validate  Test connectivity to a provider
 
 Examples:
   # List all providers
   butleradm provider list
 
+  # Create a provider from file
+  butleradm provider create --from-file provider-harvester.yaml
+
+  # Delete a provider
+  butleradm provider delete harvester-prod
+
   # Validate a provider configuration
   butleradm provider validate nutanix`,
 	}
 
 	cmd.AddCommand(newListCmd(logger))
+	cmd.AddCommand(newCreateCmd(logger))
+	cmd.AddCommand(newDeleteCmd(logger))
 	cmd.AddCommand(newValidateCmd(logger))
 
 	return cmd

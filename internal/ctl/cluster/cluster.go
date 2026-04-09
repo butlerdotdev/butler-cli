@@ -44,6 +44,8 @@ Commands:
   create      Create a new tenant cluster
   list        List all tenant clusters
   get         Get details of a specific cluster
+  edit        Edit a cluster configuration
+  upgrade     Upgrade the Kubernetes version
   scale       Scale worker node count
   export      Export cluster config as clean YAML
   kubeconfig  Download kubeconfig for cluster access
@@ -76,6 +78,8 @@ Examples:
 	cmd.AddCommand(NewExportCmd(logger))
 	cmd.AddCommand(newKubeconfigCmd(logger))
 	cmd.AddCommand(newGetCmd(logger))
+	cmd.AddCommand(newEditCmd(logger))
+	cmd.AddCommand(newUpgradeCmd(logger))
 	cmd.AddCommand(NewDestroyCmd(logger))
 
 	return cmd
