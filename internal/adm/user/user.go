@@ -22,6 +22,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/butlerdotdev/butler/internal/common/auth"
 	"github.com/butlerdotdev/butler/internal/common/client"
@@ -91,13 +92,18 @@ Examples:
 		},
 	}
 
-	cmd.Flags().StringVarP(&outputFmt, "output", "o", "", "output format (json, yaml)")
+	cmd.Flags().StringVarP(&outputFmt, "output", "o", "", "output format (table, wide, json, yaml)")
 	cmd.Flags().StringVar(&kubeconfig, "kubeconfig", "", "path to management cluster kubeconfig")
 
 	return cmd
 }
 
 func runList(ctx context.Context, logger *log.Logger, kubeconfigPath, kubeContext, outputFormat string) error {
+	format, err := output.ParseFormat(outputFormat)
+	if err != nil {
+		return err
+	}
+
 	c, err := client.New(kubeconfigPath, kubeContext)
 	if err != nil {
 		return fmt.Errorf("connecting to management cluster: %w", err)
@@ -109,15 +115,21 @@ func runList(ctx context.Context, logger *log.Logger, kubeconfigPath, kubeContex
 		return fmt.Errorf("listing users: %w", err)
 	}
 
-	if outputFormat == "json" {
+	if format == output.FormatJSON {
 		return output.PrintJSON(os.Stdout, list.Items)
 	}
-	if outputFormat == "yaml" {
+	if format == output.FormatYAML {
 		return output.PrintYAML(os.Stdout, list.Items)
 	}
 
+	wide := format == output.FormatWide
+
 	headers := []string{"NAME", "EMAIL", "DISPLAY NAME", "PHASE", "AUTH TYPE", "ADMIN", "AGE"}
-	var rows [][]string
+	if wide {
+		headers = append(headers, "LAST LOGIN", "LOGINS", "TEAMS")
+	}
+
+	table := output.NewTable(os.Stdout, headers...)
 
 	for _, usr := range list.Items {
 		name := usr.GetName()
@@ -133,7 +145,7 @@ func runList(ctx context.Context, logger *log.Logger, kubeconfigPath, kubeContex
 			adminStr = "Yes"
 		}
 
-		rows = append(rows, []string{
+		row := []string{
 			name,
 			email,
 			displayName,
@@ -141,13 +153,41 @@ func runList(ctx context.Context, logger *log.Logger, kubeconfigPath, kubeContex
 			authType,
 			adminStr,
 			age,
-		})
-	}
+		}
 
-	table := output.NewTable(os.Stdout, headers...)
-	for _, row := range rows {
+		if wide {
+			lastLogin := client.GetNestedString(usr.Object, "status", "lastLoginTime")
+			if lastLogin == "" {
+				lastLogin = "-"
+			}
+			loginCount := client.GetNestedInt64(usr.Object, "status", "loginCount")
+
+			// Collect team names from status.teams[]
+			teams, teamsFound := unstructuredNestedSlice(usr.Object, "status", "teams")
+			teamNames := "-"
+			if teamsFound && len(teams) > 0 {
+				var names []string
+				for _, t := range teams {
+					tMap, ok := t.(map[string]interface{})
+					if !ok {
+						continue
+					}
+					teamName := client.GetNestedString(tMap, "name")
+					if teamName != "" {
+						names = append(names, teamName)
+					}
+				}
+				if len(names) > 0 {
+					teamNames = strings.Join(names, ",")
+				}
+			}
+
+			row = append(row, lastLogin, fmt.Sprintf("%d", loginCount), teamNames)
+		}
+
 		table.AddRow(row...)
 	}
+
 	table.Flush()
 	return nil
 }
