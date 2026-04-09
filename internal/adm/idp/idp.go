@@ -24,6 +24,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/butlerdotdev/butler/internal/common/auth"
 	"github.com/butlerdotdev/butler/internal/common/client"
 	"github.com/butlerdotdev/butler/internal/common/log"
 	"github.com/butlerdotdev/butler/internal/common/output"
@@ -49,6 +50,9 @@ Examples:
   butleradm idp list
   butleradm idp get google-workspace
   butleradm idp delete old-provider`,
+		PersistentPreRun: func(cmd *cobra.Command, args []string) {
+			auth.WarnIfUnauthenticated()
+		},
 	}
 
 	cmd.AddCommand(newListCmd(logger))

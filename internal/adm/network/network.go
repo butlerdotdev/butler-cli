@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/butlerdotdev/butler/internal/common/auth"
 	"github.com/butlerdotdev/butler/internal/common/client"
 	"github.com/butlerdotdev/butler/internal/common/log"
 	"github.com/butlerdotdev/butler/internal/common/output"
@@ -51,6 +52,9 @@ Examples:
   butleradm network list
   butleradm network get node-pool
   butleradm network delete old-pool`,
+		PersistentPreRun: func(cmd *cobra.Command, args []string) {
+			auth.WarnIfUnauthenticated()
+		},
 	}
 
 	cmd.AddCommand(newListCmd(logger))

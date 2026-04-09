@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/butlerdotdev/butler/internal/common/auth"
 	"github.com/butlerdotdev/butler/internal/common/client"
 	"github.com/butlerdotdev/butler/internal/common/log"
 	"github.com/butlerdotdev/butler/internal/common/output"
@@ -50,6 +51,9 @@ Examples:
   butleradm addon uninstall cilium
   butleradm addon catalog list
   butleradm addon catalog get cilium`,
+		PersistentPreRun: func(cmd *cobra.Command, args []string) {
+			auth.WarnIfUnauthenticated()
+		},
 	}
 
 	cmd.AddCommand(newListCmd(logger))

@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/butlerdotdev/butler/internal/common/auth"
 	"github.com/butlerdotdev/butler/internal/common/client"
 	"github.com/butlerdotdev/butler/internal/common/log"
 	"github.com/butlerdotdev/butler/internal/common/output"
@@ -49,6 +50,9 @@ Examples:
   butleradm team delete old-team
   butleradm team add-member engineering --email user@example.com --role admin
   butleradm team remove-member engineering --email user@example.com`,
+		PersistentPreRun: func(cmd *cobra.Command, args []string) {
+			auth.WarnIfUnauthenticated()
+		},
 	}
 
 	cmd.AddCommand(newListCmd(logger))

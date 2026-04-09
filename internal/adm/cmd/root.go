@@ -23,8 +23,11 @@ import (
 	"github.com/butlerdotdev/butler/internal/adm/addon"
 	"github.com/butlerdotdev/butler/internal/adm/bootstrap"
 	butlerconfig "github.com/butlerdotdev/butler/internal/adm/config"
+	butlercontext "github.com/butlerdotdev/butler/internal/adm/context"
 	"github.com/butlerdotdev/butler/internal/adm/doctor"
 	"github.com/butlerdotdev/butler/internal/adm/idp"
+	"github.com/butlerdotdev/butler/internal/adm/login"
+	"github.com/butlerdotdev/butler/internal/adm/logout"
 	"github.com/butlerdotdev/butler/internal/adm/network"
 	"github.com/butlerdotdev/butler/internal/adm/provider"
 	"github.com/butlerdotdev/butler/internal/adm/status"
@@ -101,6 +104,9 @@ Examples:
 	viper.BindPFlag("config", cmd.PersistentFlags().Lookup("config"))
 
 	// Register subcommands
+	cmd.AddCommand(login.NewLoginCmd(logger))
+	cmd.AddCommand(logout.NewLogoutCmd(logger))
+	cmd.AddCommand(butlercontext.NewContextCmd(logger))
 	cmd.AddCommand(addon.NewAddonCmd(logger))
 	cmd.AddCommand(bootstrap.NewBootstrapCmd(logger))
 	cmd.AddCommand(butlerconfig.NewConfigCmd(logger))
