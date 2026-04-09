@@ -108,6 +108,11 @@ var (
 		Version:  "v1beta1",
 		Resource: "machinedeployments",
 	}
+	MachineGVR = schema.GroupVersionResource{
+		Group:    "cluster.x-k8s.io",
+		Version:  "v1beta1",
+		Resource: "machines",
+	}
 	ClusterGVR = schema.GroupVersionResource{
 		Group:    "cluster.x-k8s.io",
 		Version:  "v1beta1",

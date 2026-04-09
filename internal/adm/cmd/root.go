@@ -23,6 +23,7 @@ import (
 	"github.com/butlerdotdev/butler/internal/adm/addon"
 	"github.com/butlerdotdev/butler/internal/adm/bootstrap"
 	butlerconfig "github.com/butlerdotdev/butler/internal/adm/config"
+	"github.com/butlerdotdev/butler/internal/adm/doctor"
 	"github.com/butlerdotdev/butler/internal/adm/idp"
 	"github.com/butlerdotdev/butler/internal/adm/network"
 	"github.com/butlerdotdev/butler/internal/adm/provider"
@@ -101,6 +102,7 @@ Examples:
 	cmd.AddCommand(addon.NewAddonCmd(logger))
 	cmd.AddCommand(bootstrap.NewBootstrapCmd(logger))
 	cmd.AddCommand(butlerconfig.NewConfigCmd(logger))
+	cmd.AddCommand(doctor.NewDoctorCmd(logger))
 	cmd.AddCommand(idp.NewIDPCmd(logger))
 	cmd.AddCommand(network.NewNetworkCmd(logger))
 	cmd.AddCommand(status.NewStatusCmd(logger))
