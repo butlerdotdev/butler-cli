@@ -76,6 +76,21 @@ var (
 		Version:  ButlerAPIVersion,
 		Resource: "imagesyncs",
 	}
+	TenantAddonGVR = schema.GroupVersionResource{
+		Group:    ButlerAPIGroup,
+		Version:  ButlerAPIVersion,
+		Resource: "tenantaddons",
+	}
+	AddonDefinitionGVR = schema.GroupVersionResource{
+		Group:    ButlerAPIGroup,
+		Version:  ButlerAPIVersion,
+		Resource: "addondefinitions",
+	}
+	ManagementAddonGVR = schema.GroupVersionResource{
+		Group:    ButlerAPIGroup,
+		Version:  ButlerAPIVersion,
+		Resource: "managementaddons",
+	}
 	// CAPI resources
 	MachineDeploymentGVR = schema.GroupVersionResource{
 		Group:    "cluster.x-k8s.io",
