@@ -91,6 +91,16 @@ var (
 		Version:  ButlerAPIVersion,
 		Resource: "managementaddons",
 	}
+	IdentityProviderGVR = schema.GroupVersionResource{
+		Group:    ButlerAPIGroup,
+		Version:  ButlerAPIVersion,
+		Resource: "identityproviders",
+	}
+	NetworkPoolGVR = schema.GroupVersionResource{
+		Group:    ButlerAPIGroup,
+		Version:  ButlerAPIVersion,
+		Resource: "networkpools",
+	}
 	// CAPI resources
 	MachineDeploymentGVR = schema.GroupVersionResource{
 		Group:    "cluster.x-k8s.io",
