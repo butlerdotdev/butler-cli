@@ -26,7 +26,10 @@ import (
 	"github.com/butlerdotdev/butler/internal/common/version"
 	"github.com/butlerdotdev/butler/internal/ctl/addon"
 	"github.com/butlerdotdev/butler/internal/ctl/cluster"
+	butlercontext "github.com/butlerdotdev/butler/internal/ctl/context"
 	"github.com/butlerdotdev/butler/internal/ctl/image"
+	"github.com/butlerdotdev/butler/internal/ctl/login"
+	"github.com/butlerdotdev/butler/internal/ctl/logout"
 	"github.com/spf13/cobra"
 )
 
@@ -91,6 +94,9 @@ Examples:
 	cmd.PersistentFlags().StringVar(&kubeCtx, "context", "", "kubeconfig context to use")
 
 	// Register subcommands
+	cmd.AddCommand(login.NewLoginCmd(logger))
+	cmd.AddCommand(logout.NewLogoutCmd(logger))
+	cmd.AddCommand(butlercontext.NewContextCmd(logger))
 	cmd.AddCommand(cluster.NewClusterCmd(logger))
 	cmd.AddCommand(addon.NewAddonCmd(logger))
 	cmd.AddCommand(image.NewImageCmd(logger))
