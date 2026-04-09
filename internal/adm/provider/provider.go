@@ -27,6 +27,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/butlerdotdev/butler/internal/common/auth"
 	"github.com/butlerdotdev/butler/internal/common/client"
 	"github.com/butlerdotdev/butler/internal/common/log"
 	"github.com/butlerdotdev/butler/internal/common/output"
@@ -67,6 +68,9 @@ Examples:
 
   # Validate a provider configuration
   butleradm provider validate nutanix`,
+		PersistentPreRun: func(cmd *cobra.Command, args []string) {
+			auth.WarnIfUnauthenticated()
+		},
 	}
 
 	cmd.AddCommand(newListCmd(logger))

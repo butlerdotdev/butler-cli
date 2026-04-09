@@ -25,6 +25,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/butlerdotdev/butler/internal/common/auth"
 	"github.com/butlerdotdev/butler/internal/common/client"
 	"github.com/butlerdotdev/butler/internal/common/log"
 	"github.com/butlerdotdev/butler/internal/common/output"
@@ -54,6 +55,9 @@ Examples:
   butleradm config get -o yaml
   butleradm config set spec.multiTenancy.enabled=true
   butleradm config set spec.defaultProvider=harvester-prod`,
+		PersistentPreRun: func(cmd *cobra.Command, args []string) {
+			auth.WarnIfUnauthenticated()
+		},
 	}
 
 	cmd.AddCommand(newGetCmd(logger))
