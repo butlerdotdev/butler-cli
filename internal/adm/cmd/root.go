@@ -20,6 +20,7 @@ package cmd
 import (
 	"fmt"
 
+	"github.com/butlerdotdev/butler/internal/adm/addon"
 	"github.com/butlerdotdev/butler/internal/adm/bootstrap"
 	"github.com/butlerdotdev/butler/internal/adm/provider"
 	"github.com/butlerdotdev/butler/internal/adm/status"
@@ -94,6 +95,7 @@ Examples:
 	viper.BindPFlag("config", cmd.PersistentFlags().Lookup("config"))
 
 	// Register subcommands
+	cmd.AddCommand(addon.NewAddonCmd(logger))
 	cmd.AddCommand(bootstrap.NewBootstrapCmd(logger))
 	cmd.AddCommand(status.NewStatusCmd(logger))
 	cmd.AddCommand(provider.NewProviderCmd(logger))
