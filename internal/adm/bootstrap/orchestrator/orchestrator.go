@@ -92,8 +92,9 @@ type Options struct {
 
 // Orchestrator manages the bootstrap process
 type Orchestrator struct {
-	logger  *log.Logger
-	options Options
+	logger    *log.Logger
+	options   Options
+	eventSink EventSink
 }
 
 // New creates a new orchestrator
@@ -101,6 +102,20 @@ func New(logger *log.Logger, options Options) *Orchestrator {
 	return &Orchestrator{
 		logger:  logger,
 		options: options,
+	}
+}
+
+// SetEventSink sets an optional event sink for TUI integration. Events are
+// emitted at phase boundaries and during watchBootstrap status polling. The
+// sink implementation must be safe for concurrent use.
+func (o *Orchestrator) SetEventSink(sink EventSink) {
+	o.eventSink = sink
+}
+
+// emit sends an event to the configured sink, if any.
+func (o *Orchestrator) emit(e Event) {
+	if o.eventSink != nil {
+		o.eventSink.Send(e)
 	}
 }
 
@@ -119,6 +134,7 @@ func (o *Orchestrator) Run(ctx context.Context, cfg *Config) error {
 	}
 
 	o.logger.Phase("Initializing bootstrap")
+	o.emit(Event{Type: EventPhaseChange, Phase: "Initializing", Message: "Initializing bootstrap"})
 
 	// Create context with timeout
 	ctx, cancel := context.WithTimeout(ctx, o.options.Timeout)
@@ -126,6 +142,7 @@ func (o *Orchestrator) Run(ctx context.Context, cfg *Config) error {
 
 	// Phase 1: Create KIND cluster
 	o.logger.Phase("Creating temporary KIND cluster")
+	o.emit(Event{Type: EventPhaseChange, Phase: "CreatingKIND", Message: "Creating temporary KIND cluster"})
 	kindProvider := cluster.NewProvider()
 
 	kubeconfigPath, err := o.createKINDCluster(ctx, kindProvider)
@@ -135,6 +152,7 @@ func (o *Orchestrator) Run(ctx context.Context, cfg *Config) error {
 	defer func() {
 		if !o.options.SkipCleanup {
 			o.logger.Phase("Cleaning up KIND cluster")
+			o.emit(Event{Type: EventPhaseChange, Phase: "CleaningUp", Message: "Cleaning up KIND cluster"})
 			if err := kindProvider.Delete(kindClusterName, ""); err != nil {
 				o.logger.Error("failed to delete KIND cluster", "error", err)
 			}
@@ -152,6 +170,7 @@ func (o *Orchestrator) Run(ctx context.Context, cfg *Config) error {
 	// Build and load images in local dev mode
 	if o.options.LocalDev {
 		o.logger.Phase("Building and loading controller images (local dev mode)")
+		o.emit(Event{Type: EventPhaseChange, Phase: "BuildingImages", Message: "Building and loading controller images"})
 		if err := o.buildAndLoadImages(ctx, cfg.Provider); err != nil {
 			return fmt.Errorf("building/loading images: %w", err)
 		}
@@ -159,6 +178,7 @@ func (o *Orchestrator) Run(ctx context.Context, cfg *Config) error {
 
 	// Create Kubernetes clients
 	o.logger.Phase("Connecting to KIND cluster")
+	o.emit(Event{Type: EventPhaseChange, Phase: "ConnectingKIND", Message: "Connecting to KIND cluster"})
 	clientset, dynamicClient, err := o.createClients(kubeconfigPath)
 	if err != nil {
 		return fmt.Errorf("creating clients: %w", err)
@@ -166,24 +186,28 @@ func (o *Orchestrator) Run(ctx context.Context, cfg *Config) error {
 
 	// Deploy Butler CRDs
 	o.logger.Phase("Deploying Butler CRDs")
+	o.emit(Event{Type: EventPhaseChange, Phase: "DeployingCRDs", Message: "Deploying Butler CRDs"})
 	if err := o.deployCRDs(ctx, clientset, dynamicClient); err != nil {
 		return fmt.Errorf("deploying CRDs: %w", err)
 	}
 
 	// Create namespace and provider secret
 	o.logger.Phase("Creating namespace and secrets")
+	o.emit(Event{Type: EventPhaseChange, Phase: "CreatingSecrets", Message: "Creating namespace and secrets"})
 	if err := o.createNamespaceAndSecrets(ctx, clientset, cfg); err != nil {
 		return fmt.Errorf("creating namespace/secrets: %w", err)
 	}
 
 	// Deploy controllers
 	o.logger.Phase("Deploying Butler controllers")
+	o.emit(Event{Type: EventPhaseChange, Phase: "DeployingControllers", Message: "Deploying Butler controllers"})
 	if err := o.deployControllers(ctx, clientset, dynamicClient, cfg); err != nil {
 		return fmt.Errorf("deploying controllers: %w", err)
 	}
 
 	// Create ProviderConfig CR
 	o.logger.Phase("Creating ProviderConfig")
+	o.emit(Event{Type: EventPhaseChange, Phase: "CreatingProviderConfig", Message: "Creating ProviderConfig"})
 	if err := o.createProviderConfig(ctx, dynamicClient, cfg); err != nil {
 		return fmt.Errorf("creating ProviderConfig: %w", err)
 	}
@@ -198,12 +222,14 @@ func (o *Orchestrator) Run(ctx context.Context, cfg *Config) error {
 
 	// Create ClusterBootstrap CR
 	o.logger.Phase("Creating ClusterBootstrap")
+	o.emit(Event{Type: EventPhaseChange, Phase: "CreatingBootstrap", Message: "Creating ClusterBootstrap"})
 	if err := o.createClusterBootstrap(ctx, dynamicClient, cfg); err != nil {
 		return fmt.Errorf("creating ClusterBootstrap: %w", err)
 	}
 
 	// Watch for completion
 	o.logger.Phase("Waiting for cluster bootstrap")
+	o.emit(Event{Type: EventPhaseChange, Phase: "WatchingBootstrap", Message: "Waiting for cluster bootstrap"})
 	creds, err := o.watchBootstrap(ctx, dynamicClient, cfg)
 	if err != nil {
 		return fmt.Errorf("watching bootstrap: %w", err)
@@ -211,11 +237,13 @@ func (o *Orchestrator) Run(ctx context.Context, cfg *Config) error {
 
 	// Save cluster credentials
 	o.logger.Phase("Saving cluster credentials")
+	o.emit(Event{Type: EventPhaseChange, Phase: "SavingCredentials", Message: "Saving cluster credentials"})
 	if err := o.saveClusterCredentials(cfg.Cluster.Name, creds); err != nil {
 		return fmt.Errorf("saving cluster credentials: %w", err)
 	}
 
 	o.logger.Success("Bootstrap complete!")
+	o.emit(Event{Type: EventSuccess, Phase: "Complete", Message: "Bootstrap complete"})
 	o.logger.Info("")
 	o.logger.Info("Cluster credentials saved to:")
 	o.logger.Info("  Kubeconfig:   ~/.butler/" + cfg.Cluster.Name + "-kubeconfig")
@@ -1130,26 +1158,72 @@ func (o *Orchestrator) watchBootstrap(ctx context.Context, client dynamic.Interf
 				lastPhase = phase
 			}
 
-			// Collect control plane IPs from machine status
+			// Build machine status list and collect control plane IPs
 			var controlPlaneIPs []string
+			var machineStatuses []MachineStatus
 			if machines, ok := status["machines"].([]interface{}); ok {
 				for _, m := range machines {
 					if machine, ok := m.(map[string]interface{}); ok {
+						name, _ := machine["name"].(string)
+						role, _ := machine["role"].(string)
+						mPhase, _ := machine["phase"].(string)
+						ip, _ := machine["ipAddress"].(string)
+						talosConfigured, _ := machine["talosConfigured"].(bool)
+						ready, _ := machine["ready"].(bool)
+
 						o.logger.Debug("machine status",
-							"name", machine["name"],
-							"phase", machine["phase"],
-							"ip", machine["ipAddress"],
-							"ready", machine["ready"],
+							"name", name,
+							"phase", mPhase,
+							"ip", ip,
+							"ready", ready,
 						)
-						// Collect control plane IPs for talosconfig endpoints
-						if role, _ := machine["role"].(string); role == "control-plane" {
-							if ip, _ := machine["ipAddress"].(string); ip != "" {
-								controlPlaneIPs = append(controlPlaneIPs, ip)
-							}
+
+						machineStatuses = append(machineStatuses, MachineStatus{
+							Name:            name,
+							Role:            role,
+							Phase:           mPhase,
+							IPAddress:       ip,
+							TalosConfigured: talosConfigured,
+							Ready:           ready,
+						})
+
+						if role == "control-plane" && ip != "" {
+							controlPlaneIPs = append(controlPlaneIPs, ip)
 						}
 					}
 				}
 			}
+
+			// Build addons installed map
+			addonsInstalled := make(map[string]bool)
+			if addons, ok := status["addonsInstalled"].(map[string]interface{}); ok {
+				for k, v := range addons {
+					if b, ok := v.(bool); ok {
+						addonsInstalled[k] = b
+					}
+				}
+			}
+
+			endpoint, _ := status["controlPlaneEndpoint"].(string)
+			consoleURL, _ := status["consoleURL"].(string)
+			failureReason, _ := status["failureReason"].(string)
+			failureMessage, _ := status["failureMessage"].(string)
+
+			// Emit full status snapshot for TUI
+			o.emit(Event{
+				Type:    EventBootstrapStatus,
+				Phase:   phase,
+				Message: "bootstrap status update",
+				Status: &BootstrapSnapshot{
+					Phase:           phase,
+					Machines:        machineStatuses,
+					AddonsInstalled: addonsInstalled,
+					FailureReason:   failureReason,
+					FailureMessage:  failureMessage,
+					Endpoint:        endpoint,
+					ConsoleURL:      consoleURL,
+				},
+			})
 
 			switch phase {
 			case "Ready":
@@ -1169,18 +1243,33 @@ func (o *Orchestrator) watchBootstrap(ctx context.Context, client dynamic.Interf
 					return nil, fmt.Errorf("decoding talosconfig: %w", err)
 				}
 
-				consoleURL, _ := status["consoleURL"].(string)
-
-				return &clusterCredentials{
+				creds := &clusterCredentials{
 					kubeconfig:      kubeconfigBytes,
 					talosconfig:     talosconfigBytes,
 					controlPlaneIPs: controlPlaneIPs,
 					consoleURL:      consoleURL,
-				}, nil
+				}
+				o.emit(Event{
+					Type:    EventComplete,
+					Phase:   phase,
+					Message: "Bootstrap complete",
+					Creds: &ClusterCredentials{
+						Kubeconfig:      kubeconfigBytes,
+						Talosconfig:     talosconfigBytes,
+						ControlPlaneIPs: controlPlaneIPs,
+						ConsoleURL:      consoleURL,
+					},
+				})
+				return creds, nil
 			case "Failed":
-				reason, _ := status["failureReason"].(string)
-				message, _ := status["failureMessage"].(string)
-				return nil, fmt.Errorf("bootstrap failed: %s - %s", reason, message)
+				err := fmt.Errorf("bootstrap failed: %s - %s", failureReason, failureMessage)
+				o.emit(Event{
+					Type:    EventFailed,
+					Phase:   phase,
+					Message: failureMessage,
+					Error:   err,
+				})
+				return nil, err
 			}
 		}
 	}

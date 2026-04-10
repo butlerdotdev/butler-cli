@@ -23,6 +23,8 @@ import (
 
 	"github.com/butlerdotdev/butler/internal/adm/bootstrap/orchestrator"
 	"github.com/butlerdotdev/butler/internal/common/log"
+	"github.com/butlerdotdev/butler/internal/common/output"
+	"github.com/butlerdotdev/butler/internal/tui/bootstrap"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
@@ -39,6 +41,7 @@ func NewAzureCmd(logger *log.Logger) *cobra.Command {
 		clientSecret   string
 		tenantID       string
 		subscriptionID string
+		noTUI          bool
 	)
 
 	cmd := &cobra.Command{
@@ -133,14 +136,26 @@ Local Development:
 				repoRoot = home + "/code/github.com/butlerdotdev"
 			}
 
-			orch := orchestrator.New(logger, orchestrator.Options{
+			orchOptions := orchestrator.Options{
 				DryRun:      dryRun,
 				SkipCleanup: skipCleanup,
 				Timeout:     60 * time.Minute,
 				LocalDev:    localDev,
 				RepoRoot:    repoRoot,
-			})
+			}
 
+			if output.IsTTY() && !noTUI && !dryRun {
+				return bootstrap.Run(bootstrap.RunConfig{
+					Ctx:        ctx,
+					Cancel:     cancel,
+					Cfg:        cfg,
+					OrcOptions: orchOptions,
+					LoggerName: logger.Name(),
+					LogLevel:   logger.Level(),
+				})
+			}
+
+			orch := orchestrator.New(logger, orchOptions)
 			if err := orch.Run(ctx, cfg); err != nil {
 				return err
 			}
@@ -158,6 +173,7 @@ Local Development:
 	cmd.Flags().StringVar(&clientSecret, "client-secret", "", "Azure service principal password (overrides config file)")
 	cmd.Flags().StringVar(&tenantID, "tenant-id", "", "Azure tenant ID (overrides config file)")
 	cmd.Flags().StringVar(&subscriptionID, "subscription-id", "", "Azure subscription ID (overrides config file)")
+	cmd.Flags().BoolVar(&noTUI, "no-tui", false, "disable interactive TUI and use line-by-line output")
 
 	cmd.MarkFlagRequired("config")
 
