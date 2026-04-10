@@ -89,7 +89,7 @@ func Run() (*orchestrator.Config, error) {
 			clusterAndSizingStep(s),
 			workersStep(s),
 			networkingStep(s),
-			reviewStep(s, buildSummary(s), &confirmed),
+			reviewStep(s, &confirmed),
 		).
 			WithTheme(theme).
 			WithKeyMap(km).

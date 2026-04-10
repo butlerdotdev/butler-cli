@@ -348,12 +348,18 @@ func networkingStep(s *wizardState) *huh.Group {
 	)
 }
 
-// reviewStep shows a summary of the collected config and asks for confirmation.
-func reviewStep(s *wizardState, summary string, confirmed *bool) *huh.Group {
+// reviewStep shows a summary of the collected config and asks for
+// confirmation. The summary is rendered via DescriptionFunc so huh
+// re-evaluates it whenever any wizardState field changes — a static
+// Description would be captured at form construction time, before the
+// user has filled in namespace, cluster name, sizing, etc.
+func reviewStep(s *wizardState, confirmed *bool) *huh.Group {
 	return huh.NewGroup(
 		huh.NewNote().
 			Title("Review").
-			Description(summary),
+			DescriptionFunc(func() string {
+				return buildSummary(s)
+			}, s),
 
 		huh.NewConfirm().
 			Title("Launch bootstrap with this configuration?").
