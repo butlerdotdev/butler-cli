@@ -21,79 +21,85 @@ import (
 )
 
 // wizardState holds all user input collected across wizard steps.
+//
+// Fields are exported so that huh's DescriptionFunc binding can hash
+// them via hashstructure, which only considers exported fields. The
+// type itself is unexported so the struct stays package-internal —
+// only the fields inside are visible to hashing.
+//
 // Fields are intentionally restricted to those that map directly to
 // orchestrator.Config on main. New config fields should be added here
 // when the wizard needs to surface them.
 type wizardState struct {
 	// Provider and image source
-	provider    string // "harvester" or "nutanix"
-	imageSource string // "factory" or "existing"
+	Provider    string // "harvester" or "nutanix"
+	ImageSource string // "factory" or "existing"
 
 	// Cluster identity and topology
-	clusterName string
-	topology    string // "ha" or "single-node"
+	ClusterName string
+	Topology    string // "ha" or "single-node"
 
 	// Control plane sizing
-	cpReplicas string
-	cpCPU      string
-	cpMemoryMB string
-	cpDiskGB   string
+	CPReplicas string
+	CPCPU      string
+	CPMemoryMB string
+	CPDiskGB   string
 
 	// Worker sizing (unused for single-node)
-	workerReplicas string
-	workerCPU      string
-	workerMemoryMB string
-	workerDiskGB   string
+	WorkerReplicas string
+	WorkerCPU      string
+	WorkerMemoryMB string
+	WorkerDiskGB   string
 
 	// Cluster networking
-	podCIDR     string
-	serviceCIDR string
-	vip         string
+	PodCIDR     string
+	ServiceCIDR string
+	VIP         string
 
 	// Management cluster LB pool (MetalLB)
-	lbStart string
-	lbEnd   string
+	LBStart string
+	LBEnd   string
 
 	// Talos image (populated from factory or existing)
-	talosVersion   string
-	talosSchematic string
+	TalosVersion   string
+	TalosSchematic string
 
 	// Harvester provider inputs
-	harvKubeconfig string
-	harvNamespace  string
-	harvNetwork    string
-	harvImage      string
+	HarvKubeconfig string
+	HarvNamespace  string
+	HarvNetwork    string
+	HarvImage      string
 
 	// Nutanix provider inputs
-	nutEndpoint    string
-	nutPort        string
-	nutInsecure    bool
-	nutUsername    string
-	nutPassword    string
-	nutClusterUUID string
-	nutSubnetUUID  string
-	nutImageUUID   string
+	NutEndpoint    string
+	NutPort        string
+	NutInsecure    bool
+	NutUsername    string
+	NutPassword    string
+	NutClusterUUID string
+	NutSubnetUUID  string
+	NutImageUUID   string
 }
 
 // newWizardState returns a state seeded with sensible defaults so the
 // wizard fields are pre-populated with reasonable starting values.
 func newWizardState() *wizardState {
 	return &wizardState{
-		topology:       "ha",
-		cpReplicas:     "3",
-		cpCPU:          "4",
-		cpMemoryMB:     "8192",
-		cpDiskGB:       "50",
-		workerReplicas: "3",
-		workerCPU:      "4",
-		workerMemoryMB: "16384",
-		workerDiskGB:   "100",
-		podCIDR:        "10.244.0.0/16",
-		serviceCIDR:    "10.96.0.0/12",
-		imageSource:    "factory",
-		talosVersion:   "v1.12.2",
-		talosSchematic: discovery.DefaultTalosSchematic,
-		nutPort:        "9440",
+		Topology:       "ha",
+		CPReplicas:     "3",
+		CPCPU:          "4",
+		CPMemoryMB:     "8192",
+		CPDiskGB:       "50",
+		WorkerReplicas: "3",
+		WorkerCPU:      "4",
+		WorkerMemoryMB: "16384",
+		WorkerDiskGB:   "100",
+		PodCIDR:        "10.244.0.0/16",
+		ServiceCIDR:    "10.96.0.0/12",
+		ImageSource:    "factory",
+		TalosVersion:   "v1.12.2",
+		TalosSchematic: discovery.DefaultTalosSchematic,
+		NutPort:        "9440",
 	}
 }
 
@@ -104,29 +110,29 @@ type stateCredentials struct {
 }
 
 func (c *stateCredentials) Get(key string) string {
-	switch c.s.provider {
+	switch c.s.Provider {
 	case "harvester":
 		if key == "kubeconfig" {
-			return c.s.harvKubeconfig
+			return c.s.HarvKubeconfig
 		}
 	case "nutanix":
 		switch key {
 		case "endpoint":
-			return c.s.nutEndpoint
+			return c.s.NutEndpoint
 		case "port":
-			return c.s.nutPort
+			return c.s.NutPort
 		case "username":
-			return c.s.nutUsername
+			return c.s.NutUsername
 		case "password":
-			return c.s.nutPassword
+			return c.s.NutPassword
 		}
 	}
 	return ""
 }
 
 func (c *stateCredentials) GetBool(key string) bool {
-	if c.s.provider == "nutanix" && key == "insecure" {
-		return c.s.nutInsecure
+	if c.s.Provider == "nutanix" && key == "insecure" {
+		return c.s.NutInsecure
 	}
 	return false
 }

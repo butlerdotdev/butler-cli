@@ -41,7 +41,7 @@ func providerSelectGroup(s *wizardState) *huh.Group {
 				huh.NewOption("Harvester (HCI)", "harvester"),
 				huh.NewOption("Nutanix (AHV)", "nutanix"),
 			).
-			Value(&s.provider),
+			Value(&s.Provider),
 	)
 }
 
@@ -55,10 +55,10 @@ func harvesterCredGroup(s *wizardState) *huh.Group {
 		huh.NewInput().
 			Title("Kubeconfig Path").
 			Description("Path to the Harvester cluster kubeconfig file").
-			Value(&s.harvKubeconfig).
+			Value(&s.HarvKubeconfig).
 			Validate(validateNotEmpty),
 	).WithHideFunc(func() bool {
-		return s.provider != "harvester"
+		return s.Provider != "harvester"
 	})
 }
 
@@ -72,31 +72,31 @@ func nutanixCredGroup(s *wizardState) *huh.Group {
 		huh.NewInput().
 			Title("Prism Central Endpoint").
 			Description("URL of the Prism Central instance").
-			Value(&s.nutEndpoint).
+			Value(&s.NutEndpoint).
 			Validate(validateNotEmpty),
 
 		huh.NewInput().
 			Title("API Port").
-			Value(&s.nutPort).
+			Value(&s.NutPort).
 			Validate(validatePort),
 
 		huh.NewConfirm().
 			Title("Allow Insecure TLS").
 			Description("Skip TLS verification (self-signed certs)").
-			Value(&s.nutInsecure),
+			Value(&s.NutInsecure),
 
 		huh.NewInput().
 			Title("Username").
-			Value(&s.nutUsername).
+			Value(&s.NutUsername).
 			Validate(validateNotEmpty),
 
 		huh.NewInput().
 			Title("Password").
-			Value(&s.nutPassword).
+			Value(&s.NutPassword).
 			EchoMode(huh.EchoModePassword).
 			Validate(validateNotEmpty),
 	).WithHideFunc(func() bool {
-		return s.provider != "nutanix"
+		return s.Provider != "nutanix"
 	})
 }
 
@@ -134,7 +134,7 @@ func fetchOptions(disc discovery.ProviderDiscovery, resourceType string, parentI
 
 // resourceSelectGroup dispatches to the provider-specific resource group.
 func resourceSelectGroup(s *wizardState, disc discovery.ProviderDiscovery, resources map[string][]discovery.ProviderResource) *huh.Group {
-	switch s.provider {
+	switch s.Provider {
 	case "harvester":
 		return harvesterResourceGroup(s, disc, resources)
 	case "nutanix":
@@ -157,12 +157,12 @@ func harvesterResourceGroup(s *wizardState, disc discovery.ProviderDiscovery, re
 		huh.NewSelect[string]().
 			Title("Namespace").
 			Options(nsOpts...).
-			Value(&s.harvNamespace),
+			Value(&s.HarvNamespace),
 
 		huh.NewSelect[string]().
 			Title("Network").
-			OptionsFunc(fetchOptions(disc, discovery.ResourceNetworks, &s.harvNamespace), &s.harvNamespace).
-			Value(&s.harvNetwork),
+			OptionsFunc(fetchOptions(disc, discovery.ResourceNetworks, &s.HarvNamespace), &s.HarvNamespace).
+			Value(&s.HarvNetwork),
 
 		huh.NewSelect[string]().
 			Title("Image Source").
@@ -171,20 +171,20 @@ func harvesterResourceGroup(s *wizardState, disc discovery.ProviderDiscovery, re
 				huh.NewOption("Sync from Image Factory (recommended)", "factory"),
 				huh.NewOption("Use existing provider image", "existing"),
 			).
-			Value(&s.imageSource),
+			Value(&s.ImageSource),
 
 		huh.NewSelect[string]().
 			Title("Image").
 			Description("Talos image for VM boot disks").
 			OptionsFunc(func() []huh.Option[string] {
-				if s.imageSource == "factory" {
+				if s.ImageSource == "factory" {
 					return []huh.Option[string]{
 						huh.NewOption("(will sync after configuration)", "factory-pending"),
 					}
 				}
-				return fetchOptions(disc, discovery.ResourceImages, &s.harvNamespace)()
-			}, &s.imageSource).
-			Value(&s.harvImage),
+				return fetchOptions(disc, discovery.ResourceImages, &s.HarvNamespace)()
+			}, &s.ImageSource).
+			Value(&s.HarvImage),
 	)
 }
 
@@ -201,12 +201,12 @@ func nutanixResourceGroup(s *wizardState, resources map[string][]discovery.Provi
 		huh.NewSelect[string]().
 			Title("Cluster").
 			Options(clusterOpts...).
-			Value(&s.nutClusterUUID),
+			Value(&s.NutClusterUUID),
 
 		huh.NewSelect[string]().
 			Title("Subnet").
 			Options(subnetOpts...).
-			Value(&s.nutSubnetUUID),
+			Value(&s.NutSubnetUUID),
 
 		huh.NewSelect[string]().
 			Title("Image Source").
@@ -215,20 +215,20 @@ func nutanixResourceGroup(s *wizardState, resources map[string][]discovery.Provi
 				huh.NewOption("Sync from Image Factory (recommended)", "factory"),
 				huh.NewOption("Use existing provider image", "existing"),
 			).
-			Value(&s.imageSource),
+			Value(&s.ImageSource),
 
 		huh.NewSelect[string]().
 			Title("Image").
 			Description("Talos image for VM boot disks").
 			OptionsFunc(func() []huh.Option[string] {
-				if s.imageSource == "factory" {
+				if s.ImageSource == "factory" {
 					return []huh.Option[string]{
 						huh.NewOption("(will sync after configuration)", "factory-pending"),
 					}
 				}
 				return resourcesToOptions(resources[discovery.ResourceImages])
-			}, &s.imageSource).
-			Value(&s.nutImageUUID),
+			}, &s.ImageSource).
+			Value(&s.NutImageUUID),
 	)
 }
 
@@ -243,7 +243,7 @@ func clusterAndSizingStep(s *wizardState) *huh.Group {
 			Title("Cluster Name").
 			Placeholder("butler-mgmt").
 			Description("Lowercase alphanumeric with hyphens, max 63 chars").
-			Value(&s.clusterName).
+			Value(&s.ClusterName).
 			Validate(validateClusterName),
 
 		huh.NewSelect[string]().
@@ -252,27 +252,27 @@ func clusterAndSizingStep(s *wizardState) *huh.Group {
 				huh.NewOption("High Availability (3 CP + workers)", "ha"),
 				huh.NewOption("Single Node (1 node, no workers)", "single-node"),
 			).
-			Value(&s.topology),
+			Value(&s.Topology),
 
 		huh.NewInput().
 			Title("CP Replicas").
 			Description("Control plane nodes (odd number for etcd quorum)").
-			Value(&s.cpReplicas).
+			Value(&s.CPReplicas).
 			Validate(validateIntRange(1, 7)),
 
 		huh.NewInput().
 			Title("CP vCPUs").
-			Value(&s.cpCPU).
+			Value(&s.CPCPU).
 			Validate(validateIntRange(1, 64)),
 
 		huh.NewInput().
 			Title("CP Memory (MB)").
-			Value(&s.cpMemoryMB).
+			Value(&s.CPMemoryMB).
 			Validate(validateIntRange(1024, 131072)),
 
 		huh.NewInput().
 			Title("CP Disk (GB)").
-			Value(&s.cpDiskGB).
+			Value(&s.CPDiskGB).
 			Validate(validateIntRange(20, 2048)),
 	)
 }
@@ -286,25 +286,25 @@ func workersStep(s *wizardState) *huh.Group {
 
 		huh.NewInput().
 			Title("Worker Replicas").
-			Value(&s.workerReplicas).
+			Value(&s.WorkerReplicas).
 			Validate(validateIntRange(1, 100)),
 
 		huh.NewInput().
 			Title("Worker vCPUs").
-			Value(&s.workerCPU).
+			Value(&s.WorkerCPU).
 			Validate(validateIntRange(1, 128)),
 
 		huh.NewInput().
 			Title("Worker Memory (MB)").
-			Value(&s.workerMemoryMB).
+			Value(&s.WorkerMemoryMB).
 			Validate(validateIntRange(1024, 524288)),
 
 		huh.NewInput().
 			Title("Worker Disk (GB)").
-			Value(&s.workerDiskGB).
+			Value(&s.WorkerDiskGB).
 			Validate(validateIntRange(20, 4096)),
 	).WithHideFunc(func() bool {
-		return s.topology == "single-node"
+		return s.Topology == "single-node"
 	})
 }
 
@@ -317,33 +317,33 @@ func networkingStep(s *wizardState) *huh.Group {
 
 		huh.NewInput().
 			Title("Pod CIDR").
-			Value(&s.podCIDR).
+			Value(&s.PodCIDR).
 			Validate(validateCIDR),
 
 		huh.NewInput().
 			Title("Service CIDR").
-			Value(&s.serviceCIDR).
+			Value(&s.ServiceCIDR).
 			Validate(validateCIDR),
 
 		huh.NewInput().
 			Title("Control Plane VIP").
 			Description("Unused IP for kube-vip HA. Must be outside DHCP range.").
 			Placeholder("10.40.0.100").
-			Value(&s.vip).
+			Value(&s.VIP).
 			Validate(validateOptional(validateIP)),
 
 		huh.NewInput().
 			Title("LB Pool Start").
 			Description("First IP for MetalLB LoadBalancer services").
 			Placeholder("10.40.0.200").
-			Value(&s.lbStart).
+			Value(&s.LBStart).
 			Validate(validateIP),
 
 		huh.NewInput().
 			Title("LB Pool End").
 			Description("Last IP for MetalLB LoadBalancer services").
 			Placeholder("10.40.0.250").
-			Value(&s.lbEnd).
+			Value(&s.LBEnd).
 			Validate(validateIP),
 	)
 }
@@ -373,38 +373,38 @@ func reviewStep(s *wizardState, confirmed *bool) *huh.Group {
 // for display on the review screen.
 func buildSummary(s *wizardState) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "Provider:       %s\n", s.provider)
-	fmt.Fprintf(&b, "Cluster Name:   %s\n", s.clusterName)
-	fmt.Fprintf(&b, "Topology:       %s\n", s.topology)
+	fmt.Fprintf(&b, "Provider:       %s\n", s.Provider)
+	fmt.Fprintf(&b, "Cluster Name:   %s\n", s.ClusterName)
+	fmt.Fprintf(&b, "Topology:       %s\n", s.Topology)
 	fmt.Fprintf(&b, "Control Plane:  %s × (%s vCPU, %s MB, %s GB)\n",
-		s.cpReplicas, s.cpCPU, s.cpMemoryMB, s.cpDiskGB)
-	if s.topology != "single-node" {
+		s.CPReplicas, s.CPCPU, s.CPMemoryMB, s.CPDiskGB)
+	if s.Topology != "single-node" {
 		fmt.Fprintf(&b, "Workers:        %s × (%s vCPU, %s MB, %s GB)\n",
-			s.workerReplicas, s.workerCPU, s.workerMemoryMB, s.workerDiskGB)
+			s.WorkerReplicas, s.WorkerCPU, s.WorkerMemoryMB, s.WorkerDiskGB)
 	}
-	fmt.Fprintf(&b, "Pod CIDR:       %s\n", s.podCIDR)
-	fmt.Fprintf(&b, "Service CIDR:   %s\n", s.serviceCIDR)
-	if s.vip != "" {
-		fmt.Fprintf(&b, "VIP:            %s\n", s.vip)
+	fmt.Fprintf(&b, "Pod CIDR:       %s\n", s.PodCIDR)
+	fmt.Fprintf(&b, "Service CIDR:   %s\n", s.ServiceCIDR)
+	if s.VIP != "" {
+		fmt.Fprintf(&b, "VIP:            %s\n", s.VIP)
 	}
-	fmt.Fprintf(&b, "LB Pool:        %s - %s\n", s.lbStart, s.lbEnd)
+	fmt.Fprintf(&b, "LB Pool:        %s - %s\n", s.LBStart, s.LBEnd)
 
-	switch s.provider {
+	switch s.Provider {
 	case "harvester":
-		fmt.Fprintf(&b, "Namespace:      %s\n", s.harvNamespace)
-		fmt.Fprintf(&b, "Network:        %s\n", s.harvNetwork)
-		if s.imageSource == "factory" {
+		fmt.Fprintf(&b, "Namespace:      %s\n", s.HarvNamespace)
+		fmt.Fprintf(&b, "Network:        %s\n", s.HarvNetwork)
+		if s.ImageSource == "factory" {
 			fmt.Fprintf(&b, "Image:          (will sync from Butler Image Factory)\n")
 		} else {
-			fmt.Fprintf(&b, "Image:          %s\n", s.harvImage)
+			fmt.Fprintf(&b, "Image:          %s\n", s.HarvImage)
 		}
 	case "nutanix":
-		fmt.Fprintf(&b, "Cluster:        %s\n", s.nutClusterUUID)
-		fmt.Fprintf(&b, "Subnet:         %s\n", s.nutSubnetUUID)
-		if s.imageSource == "factory" {
+		fmt.Fprintf(&b, "Cluster:        %s\n", s.NutClusterUUID)
+		fmt.Fprintf(&b, "Subnet:         %s\n", s.NutSubnetUUID)
+		if s.ImageSource == "factory" {
 			fmt.Fprintf(&b, "Image:          (will sync from Butler Image Factory)\n")
 		} else {
-			fmt.Fprintf(&b, "Image:          %s\n", s.nutImageUUID)
+			fmt.Fprintf(&b, "Image:          %s\n", s.NutImageUUID)
 		}
 	}
 	return b.String()

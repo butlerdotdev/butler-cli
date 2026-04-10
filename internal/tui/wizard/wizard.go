@@ -73,12 +73,12 @@ func Run() (*orchestrator.Config, error) {
 		// provider, fetching root resources concurrently.
 		creds := &stateCredentials{s: s}
 		var err error
-		disc, err = discovery.NewDiscovery(s.provider, creds)
+		disc, err = discovery.NewDiscovery(s.Provider, creds)
 		if err != nil {
 			return nil, fmt.Errorf("creating discovery client: %w", err)
 		}
 
-		resources, err = runDiscovery(s.provider, disc)
+		resources, err = runDiscovery(s.Provider, disc)
 		if err != nil {
 			return nil, err
 		}
@@ -115,22 +115,22 @@ func Run() (*orchestrator.Config, error) {
 	// factory upload polls until the provider reports the image as ready,
 	// then we store the provider-specific reference (Harvester image name,
 	// Nutanix image UUID) back into wizard state before building Config.
-	if s.imageSource == "factory" {
+	if s.ImageSource == "factory" {
 		factory := discovery.NewFactoryClient("")
 		artifactURL := factory.ArtifactURL(
-			s.talosSchematic, s.talosVersion, "talos", "amd64", "qcow2")
+			s.TalosSchematic, s.TalosVersion, "talos", "amd64", "qcow2")
 		displayName := discovery.ProviderImageName(
-			"talos", s.talosVersion, "amd64", s.talosSchematic)
+			"talos", s.TalosVersion, "amd64", s.TalosSchematic)
 
 		providerRef, err := runImageSync(disc, artifactURL, displayName)
 		if err != nil {
 			return nil, fmt.Errorf("image sync failed: %w", err)
 		}
-		switch s.provider {
+		switch s.Provider {
 		case "harvester":
-			s.harvImage = providerRef
+			s.HarvImage = providerRef
 		case "nutanix":
-			s.nutImageUUID = providerRef
+			s.NutImageUUID = providerRef
 		}
 	}
 
@@ -141,28 +141,28 @@ func Run() (*orchestrator.Config, error) {
 // the current main schema. Field-by-field drift from the feat branch wizard
 // lives here — keep this function in sync with orchestrator/config.go.
 func buildConfig(s *wizardState) (*orchestrator.Config, error) {
-	cpReplicas, err := parseInt32(s.cpReplicas)
+	cpReplicas, err := parseInt32(s.CPReplicas)
 	if err != nil {
 		return nil, fmt.Errorf("control plane replicas: %w", err)
 	}
-	cpCPU, err := parseInt32(s.cpCPU)
+	cpCPU, err := parseInt32(s.CPCPU)
 	if err != nil {
 		return nil, fmt.Errorf("control plane CPU: %w", err)
 	}
-	cpMem, err := parseInt32(s.cpMemoryMB)
+	cpMem, err := parseInt32(s.CPMemoryMB)
 	if err != nil {
 		return nil, fmt.Errorf("control plane memory: %w", err)
 	}
-	cpDisk, err := parseInt32(s.cpDiskGB)
+	cpDisk, err := parseInt32(s.CPDiskGB)
 	if err != nil {
 		return nil, fmt.Errorf("control plane disk: %w", err)
 	}
 
 	cfg := &orchestrator.Config{
-		Provider: s.provider,
+		Provider: s.Provider,
 		Cluster: orchestrator.ClusterConfig{
-			Name:     s.clusterName,
-			Topology: s.topology,
+			Name:     s.ClusterName,
+			Topology: s.Topology,
 			ControlPlane: orchestrator.NodePoolConfig{
 				Replicas: cpReplicas,
 				CPU:      cpCPU,
@@ -171,24 +171,24 @@ func buildConfig(s *wizardState) (*orchestrator.Config, error) {
 			},
 		},
 		Network: orchestrator.NetworkConfig{
-			PodCIDR:     s.podCIDR,
-			ServiceCIDR: s.serviceCIDR,
-			VIP:         s.vip,
+			PodCIDR:     s.PodCIDR,
+			ServiceCIDR: s.ServiceCIDR,
+			VIP:         s.VIP,
 			LoadBalancerPool: &orchestrator.LBPoolConfig{
-				Start: s.lbStart,
-				End:   s.lbEnd,
+				Start: s.LBStart,
+				End:   s.LBEnd,
 			},
 		},
 		Talos: orchestrator.TalosConfig{
-			Version:   s.talosVersion,
-			Schematic: s.talosSchematic,
+			Version:   s.TalosVersion,
+			Schematic: s.TalosSchematic,
 		},
 		Addons: orchestrator.AddonsConfig{
 			CNI:     orchestrator.CNIConfig{Type: "cilium"},
 			Storage: orchestrator.StorageConfig{Type: "longhorn"},
 			LoadBalancer: orchestrator.LoadBalancerConfig{
 				Type:        "metallb",
-				AddressPool: s.lbStart + "-" + s.lbEnd,
+				AddressPool: s.LBStart + "-" + s.LBEnd,
 			},
 			GitOps:           orchestrator.GitOpsConfig{Type: "flux"},
 			CAPI:             orchestrator.CAPIConfig{Enabled: true},
@@ -198,22 +198,22 @@ func buildConfig(s *wizardState) (*orchestrator.Config, error) {
 	}
 
 	// Single-node forces 1 replica, no workers.
-	if s.topology == "single-node" {
+	if s.Topology == "single-node" {
 		cfg.Cluster.ControlPlane.Replicas = 1
 	} else {
-		wReplicas, err := parseInt32(s.workerReplicas)
+		wReplicas, err := parseInt32(s.WorkerReplicas)
 		if err != nil {
 			return nil, fmt.Errorf("worker replicas: %w", err)
 		}
-		wCPU, err := parseInt32(s.workerCPU)
+		wCPU, err := parseInt32(s.WorkerCPU)
 		if err != nil {
 			return nil, fmt.Errorf("worker CPU: %w", err)
 		}
-		wMem, err := parseInt32(s.workerMemoryMB)
+		wMem, err := parseInt32(s.WorkerMemoryMB)
 		if err != nil {
 			return nil, fmt.Errorf("worker memory: %w", err)
 		}
-		wDisk, err := parseInt32(s.workerDiskGB)
+		wDisk, err := parseInt32(s.WorkerDiskGB)
 		if err != nil {
 			return nil, fmt.Errorf("worker disk: %w", err)
 		}
@@ -226,25 +226,25 @@ func buildConfig(s *wizardState) (*orchestrator.Config, error) {
 	}
 
 	// Provider-specific config.
-	switch s.provider {
+	switch s.Provider {
 	case "harvester":
 		cfg.ProviderConfig.Harvester = &orchestrator.HarvesterProviderConfig{
-			KubeconfigPath: s.harvKubeconfig,
-			Namespace:      s.harvNamespace,
-			NetworkName:    s.harvNetwork,
-			ImageName:      s.harvImage,
+			KubeconfigPath: s.HarvKubeconfig,
+			Namespace:      s.HarvNamespace,
+			NetworkName:    s.HarvNetwork,
+			ImageName:      s.HarvImage,
 		}
 	case "nutanix":
-		port, _ := parseInt32(s.nutPort)
+		port, _ := parseInt32(s.NutPort)
 		cfg.ProviderConfig.Nutanix = &orchestrator.NutanixProviderConfig{
-			Endpoint:    s.nutEndpoint,
+			Endpoint:    s.NutEndpoint,
 			Port:        port,
-			Insecure:    s.nutInsecure,
-			Username:    s.nutUsername,
-			Password:    s.nutPassword,
-			ClusterUUID: s.nutClusterUUID,
-			SubnetUUID:  s.nutSubnetUUID,
-			ImageUUID:   s.nutImageUUID,
+			Insecure:    s.NutInsecure,
+			Username:    s.NutUsername,
+			Password:    s.NutPassword,
+			ClusterUUID: s.NutClusterUUID,
+			SubnetUUID:  s.NutSubnetUUID,
+			ImageUUID:   s.NutImageUUID,
 		}
 	}
 
