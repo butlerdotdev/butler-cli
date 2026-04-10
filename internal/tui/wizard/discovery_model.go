@@ -286,10 +286,14 @@ func providerDisplayName(provider string) string {
 	}
 }
 
-// runDiscovery runs provider discovery between form1 and form2.
+// runDiscovery runs provider discovery between form1 and form2. Uses
+// alt-screen so the transition from form1 to discovery to form2 is
+// seamless — without this the discovery spinner renders inline in the
+// normal terminal buffer and you see a flash of whatever was on screen
+// before the wizard started.
 func runDiscovery(provider string, disc discovery.ProviderDiscovery) (map[string][]discovery.ProviderResource, error) {
 	m := newDiscoveryModel(provider, disc)
-	p := tea.NewProgram(m)
+	p := tea.NewProgram(m, tea.WithAltScreen())
 
 	finalModel, err := p.Run()
 	if err != nil {

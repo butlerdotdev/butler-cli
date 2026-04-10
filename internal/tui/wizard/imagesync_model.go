@@ -226,10 +226,12 @@ func (m imageSyncModel) Err() error {
 	return m.err
 }
 
-// runImageSync uploads an image and polls until the provider reports it ready.
+// runImageSync uploads an image and polls until the provider reports it
+// ready. Uses alt-screen to match the dashboard and wizard forms so the
+// image-sync spinner doesn't flash the previous terminal buffer.
 func runImageSync(disc discovery.ProviderDiscovery, artifactURL, displayName string) (string, error) {
 	m := newImageSyncModel(disc, artifactURL, displayName)
-	p := tea.NewProgram(m)
+	p := tea.NewProgram(m, tea.WithAltScreen())
 
 	finalModel, err := p.Run()
 	if err != nil {
