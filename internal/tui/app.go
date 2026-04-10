@@ -106,11 +106,12 @@ func NewApp(c *client.Client, contextName string, admin bool) *App {
 		}
 	}
 
-	// Default landing view: admin + no cluster → bootstrap tab 0.
-	// Admin + connected → clusters tab 1.
-	// Non-admin → clusters tab 1 (tab 0 is admin-only).
+	// Default landing view: admins always start on tab 0 (the bootstrap
+	// launcher, which doubles as the admin home — shows current cluster
+	// status and offers a path to bootstrap a new one). Tenant users
+	// (butlerctl) start on tab 1 (Clusters) since tab 0 is admin-only.
 	defaultView := ViewClusters
-	if admin && c == nil {
+	if admin {
 		defaultView = ViewBootstrap
 	}
 

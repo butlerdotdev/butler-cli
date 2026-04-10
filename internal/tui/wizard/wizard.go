@@ -25,6 +25,7 @@ import (
 	"strconv"
 	"strings"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/huh"
 	"github.com/charmbracelet/lipgloss"
 
@@ -75,12 +76,16 @@ func Run() (*orchestrator.Config, error) {
 	confirmed := false
 
 	for {
-		// Form 1: Provider selection and credentials.
+		// Form 1: Provider selection and credentials. Runs fullscreen
+		// (alt-screen) to match the dashboard and bootstrap TUI feel.
 		form1 := huh.NewForm(
 			providerSelectGroup(s),
 			harvesterCredGroup(s),
 			nutanixCredGroup(s),
-		).WithTheme(theme).WithKeyMap(km)
+		).
+			WithTheme(theme).
+			WithKeyMap(km).
+			WithProgramOptions(tea.WithAltScreen())
 
 		if err := form1.Run(); err != nil {
 			return nil, fmt.Errorf("wizard cancelled: %w", err)
@@ -107,7 +112,10 @@ func Run() (*orchestrator.Config, error) {
 			workersStep(s),
 			networkingStep(s),
 			reviewStep(s, buildSummary(s), &confirmed),
-		).WithTheme(theme).WithKeyMap(km)
+		).
+			WithTheme(theme).
+			WithKeyMap(km).
+			WithProgramOptions(tea.WithAltScreen())
 
 		if err := form2.Run(); err != nil {
 			// Ctrl+C on form2 → loop back to form1 so the user can
