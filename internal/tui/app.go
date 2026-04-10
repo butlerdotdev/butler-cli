@@ -84,8 +84,8 @@ type App struct {
 }
 
 // NewApp creates a new dashboard application.
-func NewApp(c *client.Client, contextName string, admin bool) App {
-	return App{
+func NewApp(c *client.Client, contextName string, admin bool) *App {
+	return &App{
 		client:      c,
 		view:        ViewClusters,
 		keys:        DefaultKeyMap(),
@@ -103,7 +103,7 @@ func (a App) Init() tea.Cmd {
 }
 
 // Update handles incoming messages and dispatches to the active view.
-func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		a.width = msg.Width
