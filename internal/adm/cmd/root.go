@@ -22,6 +22,7 @@ import (
 
 	"github.com/butlerdotdev/butler/internal/adm/addon"
 	"github.com/butlerdotdev/butler/internal/adm/bootstrap"
+	"github.com/butlerdotdev/butler/internal/tui"
 	butlerconfig "github.com/butlerdotdev/butler/internal/adm/config"
 	butlercontext "github.com/butlerdotdev/butler/internal/adm/context"
 	"github.com/butlerdotdev/butler/internal/adm/doctor"
@@ -117,6 +118,7 @@ Examples:
 	cmd.AddCommand(team.NewTeamCmd(logger))
 	cmd.AddCommand(user.NewUserCmd(logger))
 	cmd.AddCommand(provider.NewProviderCmd(logger))
+	cmd.AddCommand(tui.NewTUICmd(true))
 	cmd.AddCommand(completion.NewCompletionCmd("butleradm"))
 	cmd.AddCommand(NewVersionCmd())
 

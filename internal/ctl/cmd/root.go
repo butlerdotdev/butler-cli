@@ -30,6 +30,7 @@ import (
 	"github.com/butlerdotdev/butler/internal/ctl/image"
 	"github.com/butlerdotdev/butler/internal/ctl/login"
 	"github.com/butlerdotdev/butler/internal/ctl/logout"
+	"github.com/butlerdotdev/butler/internal/tui"
 	"github.com/spf13/cobra"
 )
 
@@ -100,6 +101,7 @@ Examples:
 	cmd.AddCommand(cluster.NewClusterCmd(logger))
 	cmd.AddCommand(addon.NewAddonCmd(logger))
 	cmd.AddCommand(image.NewImageCmd(logger))
+	cmd.AddCommand(tui.NewTUICmd(false))
 	cmd.AddCommand(completion.NewCompletionCmd("butlerctl"))
 	cmd.AddCommand(NewVersionCmd())
 
