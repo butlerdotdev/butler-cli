@@ -17,7 +17,6 @@ limitations under the License.
 package views
 
 import (
-	"context"
 	"fmt"
 	"sort"
 
@@ -122,7 +121,8 @@ func (v ClusterListView) View() string {
 func (v ClusterListView) fetchClusters() tea.Cmd {
 	c := v.client
 	return func() tea.Msg {
-		ctx := context.Background()
+		ctx, cancel := apiContext()
+		defer cancel()
 		list, err := c.Dynamic.Resource(client.TenantClusterGVR).List(ctx, metav1.ListOptions{})
 		if err != nil {
 			return clusterListMsg{err: fmt.Errorf("listing TenantClusters: %w", err)}

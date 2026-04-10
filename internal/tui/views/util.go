@@ -17,11 +17,22 @@ limitations under the License.
 package views
 
 import (
+	"context"
 	"strings"
 	"time"
 
 	"github.com/butlerdotdev/butler/internal/common/output"
 )
+
+// apiTimeout is the maximum duration for any Kubernetes API call made from
+// a TUI view. A hung apiserver must not freeze the dashboard.
+const apiTimeout = 30 * time.Second
+
+// apiContext returns a background context with the standard TUI API timeout.
+// Callers MUST defer the returned cancel function.
+func apiContext() (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.Background(), apiTimeout)
+}
 
 // formatAge parses an RFC3339 timestamp and returns a human-readable age.
 func formatAge(ts string) string {

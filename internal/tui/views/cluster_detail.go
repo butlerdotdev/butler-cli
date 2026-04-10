@@ -37,15 +37,17 @@ import (
 
 // Tab indices for the cluster detail view.
 const (
-	tabOverview    = 0
-	tabNodes       = 1
-	tabAddons      = 2
-	tabConditions  = 3
-	tabEvents      = 4
-	tabCount       = 5
+	tabOverview = iota
+	tabNodes
+	tabAddons
+	tabConditions
+	tabEvents
 )
 
 var tabNames = []string{"Overview", "Nodes", "Addons", "Conditions", "Events"}
+
+// tabCount derives from tabNames so adding a tab doesn't require updating a constant.
+var tabCount = len(tabNames)
 
 // actionMode tracks the current interaction state for inline actions.
 type actionMode int
@@ -70,7 +72,6 @@ const (
 // clusterDetailMsg carries fetched detail data.
 type clusterDetailMsg struct {
 	info       clusterhelpers.TenantClusterInfo
-	raw        *unstructured.Unstructured
 	machines   []machineInfo
 	addons     []addonInfo
 	conditions []conditionInfo
@@ -351,6 +352,11 @@ func (v ClusterDetailView) updateResultMode(msg tea.KeyMsg) (ClusterDetailView, 
 }
 
 // executeAction runs the pending action asynchronously.
+//
+// The returned closure MUST NOT capture the receiver pointer v — the App
+// model is replaced by value on each Update, so by the time the Bubbletea
+// runtime dispatches this Cmd, v would point at a stale heap-escaped
+// snapshot. Capture all inputs as locals and call package-level do* helpers.
 func (v *ClusterDetailView) executeAction(inputValue string) tea.Cmd {
 	c := v.client
 	name := v.name
@@ -360,19 +366,19 @@ func (v *ClusterDetailView) executeAction(inputValue string) tea.Cmd {
 	switch action {
 	case actionScale:
 		return func() tea.Msg {
-			return v.doScale(c, ns, name, inputValue)
+			return doScale(c, ns, name, inputValue)
 		}
 	case actionUpgrade:
 		return func() tea.Msg {
-			return v.doUpgrade(c, ns, name, inputValue)
+			return doUpgrade(c, ns, name, inputValue)
 		}
 	case actionDelete:
 		return func() tea.Msg {
-			return v.doDelete(c, ns, name)
+			return doDelete(c, ns, name)
 		}
 	case actionInstallAddon:
 		return func() tea.Msg {
-			return v.doInstallAddon(c, ns, name, inputValue)
+			return doInstallAddon(c, ns, name, inputValue)
 		}
 	case actionUninstallAddon:
 		addonName := ""
@@ -381,7 +387,7 @@ func (v *ClusterDetailView) executeAction(inputValue string) tea.Cmd {
 			addonName = row[0]
 		}
 		return func() tea.Msg {
-			return v.doUninstallAddon(c, ns, addonName)
+			return doUninstallAddon(c, ns, addonName)
 		}
 	}
 
@@ -389,8 +395,9 @@ func (v *ClusterDetailView) executeAction(inputValue string) tea.Cmd {
 }
 
 // doScale patches spec.workers.replicas.
-func (v *ClusterDetailView) doScale(c *client.Client, ns, name, countStr string) clusterActionResultMsg {
-	ctx := context.Background()
+func doScale(c *client.Client, ns, name, countStr string) clusterActionResultMsg {
+	ctx, cancel := apiContext()
+	defer cancel()
 
 	var count int
 	if _, err := fmt.Sscanf(countStr, "%d", &count); err != nil || count < 1 {
@@ -420,8 +427,9 @@ func (v *ClusterDetailView) doScale(c *client.Client, ns, name, countStr string)
 }
 
 // doUpgrade patches spec.kubernetesVersion.
-func (v *ClusterDetailView) doUpgrade(c *client.Client, ns, name, version string) clusterActionResultMsg {
-	ctx := context.Background()
+func doUpgrade(c *client.Client, ns, name, version string) clusterActionResultMsg {
+	ctx, cancel := apiContext()
+	defer cancel()
 
 	patch := map[string]interface{}{
 		"spec": map[string]interface{}{
@@ -444,8 +452,9 @@ func (v *ClusterDetailView) doUpgrade(c *client.Client, ns, name, version string
 }
 
 // doDelete deletes the TenantCluster.
-func (v *ClusterDetailView) doDelete(c *client.Client, ns, name string) clusterActionResultMsg {
-	ctx := context.Background()
+func doDelete(c *client.Client, ns, name string) clusterActionResultMsg {
+	ctx, cancel := apiContext()
+	defer cancel()
 
 	err := c.Dynamic.Resource(client.TenantClusterGVR).Namespace(ns).Delete(
 		ctx, name, metav1.DeleteOptions{},
@@ -458,8 +467,9 @@ func (v *ClusterDetailView) doDelete(c *client.Client, ns, name string) clusterA
 }
 
 // doInstallAddon creates a TenantAddon resource.
-func (v *ClusterDetailView) doInstallAddon(c *client.Client, ns, clusterName, addonName string) clusterActionResultMsg {
-	ctx := context.Background()
+func doInstallAddon(c *client.Client, ns, clusterName, addonName string) clusterActionResultMsg {
+	ctx, cancel := apiContext()
+	defer cancel()
 
 	// Resolve version from AddonDefinition catalog
 	version := ""
@@ -495,8 +505,9 @@ func (v *ClusterDetailView) doInstallAddon(c *client.Client, ns, clusterName, ad
 }
 
 // doUninstallAddon deletes a TenantAddon resource.
-func (v *ClusterDetailView) doUninstallAddon(c *client.Client, ns, addonName string) clusterActionResultMsg {
-	ctx := context.Background()
+func doUninstallAddon(c *client.Client, ns, addonName string) clusterActionResultMsg {
+	ctx, cancel := apiContext()
+	defer cancel()
 
 	err := c.Dynamic.Resource(client.TenantAddonGVR).Namespace(ns).Delete(ctx, addonName, metav1.DeleteOptions{})
 	if err != nil {
@@ -695,7 +706,8 @@ func (v ClusterDetailView) fetchDetail() tea.Cmd {
 	name := v.name
 	ns := v.namespace
 	return func() tea.Msg {
-		ctx := context.Background()
+		ctx, cancel := apiContext()
+		defer cancel()
 
 		tc, err := c.GetTenantCluster(ctx, ns, name)
 		if err != nil {
@@ -720,7 +732,6 @@ func (v ClusterDetailView) fetchDetail() tea.Cmd {
 
 		return clusterDetailMsg{
 			info:       info,
-			raw:        tc,
 			machines:   machines,
 			addons:     addons,
 			conditions: conditions,
@@ -805,8 +816,11 @@ func extractConditions(tc *unstructured.Unstructured) []conditionInfo {
 }
 
 func fetchEvents(ctx context.Context, c *client.Client, ns, name string) []eventInfo {
+	// Scope strictly to events involving this TenantCluster — name alone
+	// would leak events from any Pod/ConfigMap/etc. that happens to share
+	// the name in this namespace.
 	events, err := c.Clientset.CoreV1().Events(ns).List(ctx, metav1.ListOptions{
-		FieldSelector: fmt.Sprintf("involvedObject.name=%s", name),
+		FieldSelector: fmt.Sprintf("involvedObject.name=%s,involvedObject.kind=TenantCluster", name),
 	})
 	if err != nil {
 		return nil

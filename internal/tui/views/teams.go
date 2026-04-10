@@ -17,7 +17,6 @@ limitations under the License.
 package views
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -351,7 +350,8 @@ func (v TeamListView) updateResultMode(msg tea.KeyMsg) (TeamListView, tea.Cmd) {
 
 // doAddMember patches the Team to add a user to spec.access.users.
 func (v *TeamListView) doAddMember(teamName, email, role string) teamActionResultMsg {
-	ctx := context.Background()
+	ctx, cancel := apiContext()
+	defer cancel()
 
 	// Get the current Team resource
 	team, err := v.client.Dynamic.Resource(client.TeamGVR).Get(ctx, teamName, metav1.GetOptions{})
@@ -405,7 +405,8 @@ func (v *TeamListView) doAddMember(teamName, email, role string) teamActionResul
 
 // doCreateTeam creates a new Team CRD.
 func (v *TeamListView) doCreateTeam(name, displayName string) teamActionResultMsg {
-	ctx := context.Background()
+	ctx, cancel := apiContext()
+	defer cancel()
 
 	team := &unstructured.Unstructured{
 		Object: map[string]interface{}{
@@ -430,7 +431,8 @@ func (v *TeamListView) doCreateTeam(name, displayName string) teamActionResultMs
 
 // doDeleteTeam deletes a Team CRD.
 func (v *TeamListView) doDeleteTeam(name string) teamActionResultMsg {
-	ctx := context.Background()
+	ctx, cancel := apiContext()
+	defer cancel()
 
 	err := v.client.Dynamic.Resource(client.TeamGVR).Delete(ctx, name, metav1.DeleteOptions{})
 	if err != nil {
@@ -515,7 +517,9 @@ func (v TeamListView) renderActionPrompt() string {
 func (v TeamListView) fetch() tea.Cmd {
 	c := v.client
 	return func() tea.Msg {
-		list, err := c.Dynamic.Resource(client.TeamGVR).List(context.Background(), metav1.ListOptions{})
+		ctx, cancel := apiContext()
+		defer cancel()
+		list, err := c.Dynamic.Resource(client.TeamGVR).List(ctx, metav1.ListOptions{})
 		if err != nil {
 			return teamListMsg{err: fmt.Errorf("listing Teams: %w", err)}
 		}

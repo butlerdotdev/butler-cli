@@ -17,7 +17,6 @@ limitations under the License.
 package views
 
 import (
-	"context"
 	"fmt"
 	"strings"
 	"time"
@@ -141,7 +140,8 @@ func (v HealthView) scheduleRefresh() tea.Cmd {
 func (v HealthView) runChecks() tea.Cmd {
 	c := v.client
 	return func() tea.Msg {
-		ctx := context.Background()
+		ctx, cancel := apiContext()
+		defer cancel()
 		var checks []healthCheck
 
 		// 1. K8s API connectivity

@@ -17,7 +17,6 @@ limitations under the License.
 package views
 
 import (
-	"context"
 	"fmt"
 	"strings"
 
@@ -175,7 +174,8 @@ func (v ProviderListView) updateConfirmMode(msg tea.KeyMsg) (ProviderListView, t
 		}
 		c := v.client
 		return v, func() tea.Msg {
-			ctx := context.Background()
+			ctx, cancel := apiContext()
+			defer cancel()
 			err := c.Dynamic.Resource(client.ProviderConfigGVR).Namespace(providerNamespace).Delete(
 				ctx, providerName, metav1.DeleteOptions{},
 			)
@@ -257,7 +257,9 @@ func (v ProviderListView) renderActionPrompt() string {
 func (v ProviderListView) fetch() tea.Cmd {
 	c := v.client
 	return func() tea.Msg {
-		list, err := c.Dynamic.Resource(client.ProviderConfigGVR).Namespace(providerNamespace).List(context.Background(), metav1.ListOptions{})
+		ctx, cancel := apiContext()
+		defer cancel()
+		list, err := c.Dynamic.Resource(client.ProviderConfigGVR).Namespace(providerNamespace).List(ctx, metav1.ListOptions{})
 		if err != nil {
 			return providerListMsg{err: fmt.Errorf("listing ProviderConfigs: %w", err)}
 		}

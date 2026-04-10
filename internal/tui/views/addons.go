@@ -17,7 +17,6 @@ limitations under the License.
 package views
 
 import (
-	"context"
 	"fmt"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -109,7 +108,9 @@ func (v AddonCatalogView) View() string {
 func (v AddonCatalogView) fetch() tea.Cmd {
 	c := v.client
 	return func() tea.Msg {
-		list, err := c.Dynamic.Resource(client.AddonDefinitionGVR).List(context.Background(), metav1.ListOptions{})
+		ctx, cancel := apiContext()
+		defer cancel()
+		list, err := c.Dynamic.Resource(client.AddonDefinitionGVR).List(ctx, metav1.ListOptions{})
 		if err != nil {
 			return addonListMsg{err: fmt.Errorf("listing AddonDefinitions: %w", err)}
 		}

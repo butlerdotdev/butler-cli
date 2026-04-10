@@ -17,7 +17,6 @@ limitations under the License.
 package views
 
 import (
-	"context"
 	"fmt"
 	"strings"
 
@@ -175,7 +174,8 @@ func (v NetworkListView) updateConfirmMode(msg tea.KeyMsg) (NetworkListView, tea
 		}
 		c := v.client
 		return v, func() tea.Msg {
-			ctx := context.Background()
+			ctx, cancel := apiContext()
+			defer cancel()
 			err := c.Dynamic.Resource(client.NetworkPoolGVR).Namespace(networkNamespace).Delete(
 				ctx, poolName, metav1.DeleteOptions{},
 			)
@@ -257,7 +257,9 @@ func (v NetworkListView) renderActionPrompt() string {
 func (v NetworkListView) fetch() tea.Cmd {
 	c := v.client
 	return func() tea.Msg {
-		list, err := c.Dynamic.Resource(client.NetworkPoolGVR).Namespace(networkNamespace).List(context.Background(), metav1.ListOptions{})
+		ctx, cancel := apiContext()
+		defer cancel()
+		list, err := c.Dynamic.Resource(client.NetworkPoolGVR).Namespace(networkNamespace).List(ctx, metav1.ListOptions{})
 		if err != nil {
 			return networkListMsg{err: fmt.Errorf("listing NetworkPools: %w", err)}
 		}

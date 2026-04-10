@@ -110,7 +110,7 @@ func NewApp(c *client.Client, contextName string, admin bool) *App {
 }
 
 // Init initializes the first view.
-func (a App) Init() tea.Cmd {
+func (a *App) Init() tea.Cmd {
 	a.initialized[ViewClusters] = true
 	return a.clusterList.Init()
 }
@@ -195,7 +195,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 // View renders the full dashboard layout.
-func (a App) View() string {
+func (a *App) View() string {
 	var b strings.Builder
 
 	// Header
@@ -250,7 +250,7 @@ func (a App) View() string {
 	return b.String()
 }
 
-func (a App) renderKeyLegend() string {
+func (a *App) renderKeyLegend() string {
 	dimStyle := styles.DimStyle
 	keyStyle := styles.KeyLegendStyle
 
@@ -276,7 +276,7 @@ func (a App) renderKeyLegend() string {
 	}
 }
 
-func (a App) renderTabs() string {
+func (a *App) renderTabs() string {
 	tabs := []struct {
 		key  string
 		name string
@@ -303,7 +303,7 @@ func (a App) renderTabs() string {
 	return strings.Join(parts, "")
 }
 
-func (a App) renderActiveView() string {
+func (a *App) renderActiveView() string {
 	switch a.view {
 	case ViewClusters:
 		return a.clusterList.View()

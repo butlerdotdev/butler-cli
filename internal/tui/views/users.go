@@ -17,7 +17,6 @@ limitations under the License.
 package views
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -307,7 +306,8 @@ func (v UserListView) updateResultMode(msg tea.KeyMsg) (UserListView, tea.Cmd) {
 
 // doCreateUser creates a new User CRD.
 func (v *UserListView) doCreateUser(email, displayName string) userActionResultMsg {
-	ctx := context.Background()
+	ctx, cancel := apiContext()
+	defer cancel()
 
 	// Derive resource name from email: replace @ and . with -
 	name := strings.ReplaceAll(email, "@", "-")
@@ -339,7 +339,8 @@ func (v *UserListView) doCreateUser(email, displayName string) userActionResultM
 
 // doDeleteUser deletes a User CRD.
 func (v *UserListView) doDeleteUser(name string) userActionResultMsg {
-	ctx := context.Background()
+	ctx, cancel := apiContext()
+	defer cancel()
 
 	err := v.client.Dynamic.Resource(client.UserGVR).Delete(ctx, name, metav1.DeleteOptions{})
 	if err != nil {
@@ -351,7 +352,8 @@ func (v *UserListView) doDeleteUser(name string) userActionResultMsg {
 
 // doToggleUser toggles the disabled field on a User CRD.
 func (v *UserListView) doToggleUser(name string) userActionResultMsg {
-	ctx := context.Background()
+	ctx, cancel := apiContext()
+	defer cancel()
 
 	user, err := v.client.Dynamic.Resource(client.UserGVR).Get(ctx, name, metav1.GetOptions{})
 	if err != nil {
@@ -456,7 +458,9 @@ func (v UserListView) renderActionPrompt() string {
 func (v UserListView) fetch() tea.Cmd {
 	c := v.client
 	return func() tea.Msg {
-		list, err := c.Dynamic.Resource(client.UserGVR).List(context.Background(), metav1.ListOptions{})
+		ctx, cancel := apiContext()
+		defer cancel()
+		list, err := c.Dynamic.Resource(client.UserGVR).List(ctx, metav1.ListOptions{})
 		if err != nil {
 			return userListMsg{err: fmt.Errorf("listing Users: %w", err)}
 		}
