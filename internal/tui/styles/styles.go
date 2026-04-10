@@ -117,3 +117,25 @@ var DimStyle = lipgloss.NewStyle().
 var KeyLegendStyle = lipgloss.NewStyle().
 	Foreground(lipgloss.Color("#888888")).
 	Bold(true)
+
+// Action prompt styles for inline input, confirmation, and result display.
+var (
+	ActionPromptStyle = lipgloss.NewStyle().
+				Foreground(ColorInfo).
+				Bold(true)
+
+	ActionInputStyle = lipgloss.NewStyle().
+				Foreground(ColorText)
+
+	ActionSuccessStyle = lipgloss.NewStyle().
+				Foreground(ColorPrimary).
+				Bold(true)
+
+	ActionErrorStyle = lipgloss.NewStyle().
+				Foreground(ColorDanger).
+				Bold(true)
+
+	ActionConfirmStyle = lipgloss.NewStyle().
+				Foreground(ColorWarning).
+				Bold(true)
+)

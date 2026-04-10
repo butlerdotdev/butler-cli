@@ -18,12 +18,15 @@ package views
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 
+	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/types"
 
 	"github.com/butlerdotdev/butler/internal/common/client"
 	"github.com/butlerdotdev/butler/internal/common/output"
@@ -44,6 +47,26 @@ const (
 
 var tabNames = []string{"Overview", "Nodes", "Addons", "Conditions", "Events"}
 
+// actionMode tracks the current interaction state for inline actions.
+type actionMode int
+
+const (
+	modeNormal  actionMode = iota
+	modeInput              // text input active (scale, upgrade, install addon)
+	modeConfirm            // y/n confirmation (delete, uninstall)
+	modeResult             // success/error message displayed
+)
+
+// pendingAction identifies which action is being executed.
+const (
+	actionNone             = ""
+	actionScale            = "scale"
+	actionUpgrade          = "upgrade"
+	actionDelete           = "delete"
+	actionInstallAddon     = "install-addon"
+	actionUninstallAddon   = "uninstall-addon"
+)
+
 // clusterDetailMsg carries fetched detail data.
 type clusterDetailMsg struct {
 	info       clusterhelpers.TenantClusterInfo
@@ -53,6 +76,12 @@ type clusterDetailMsg struct {
 	conditions []conditionInfo
 	events     []eventInfo
 	err        error
+}
+
+// clusterActionResultMsg carries the result of an async action.
+type clusterActionResultMsg struct {
+	err     error
+	deleted bool // true when the cluster was deleted
 }
 
 type machineInfo struct {
@@ -102,17 +131,29 @@ type ClusterDetailView struct {
 	conditionTable components.Table
 	eventTable     components.Table
 
+	// Action state
+	mode          actionMode
+	pendingAction string
+	input         textinput.Model
+	confirmMsg    string
+	resultMsg     string
+	resultIsError bool
+	Deleted       bool // set when the cluster was deleted; app navigates back
+
 	width  int
 	height int
 }
 
 // NewClusterDetailView creates a detail view for a named cluster.
 func NewClusterDetailView(c *client.Client, name, namespace string) ClusterDetailView {
+	ti := textinput.New()
+	ti.CharLimit = 64
 	return ClusterDetailView{
 		client:         c,
 		name:           name,
 		namespace:      namespace,
 		loading:        true,
+		input:          ti,
 		nodeTable:      components.NewTable([]string{"NAME", "PHASE", "ADDRESS", "ROLE"}),
 		addonTable:     components.NewTable([]string{"NAME", "PHASE", "VERSION"}),
 		conditionTable: components.NewTable([]string{"TYPE", "STATUS", "REASON", "MESSAGE"}),
@@ -128,6 +169,12 @@ func (v *ClusterDetailView) Name() string {
 // IsFiltering returns true if any active sub-table is in filter mode.
 func (v *ClusterDetailView) IsFiltering() bool {
 	return v.activeTableFiltering()
+}
+
+// IsInActionMode returns true when an action prompt is active and should
+// consume all key input (preventing global navigation).
+func (v *ClusterDetailView) IsInActionMode() bool {
+	return v.mode != modeNormal
 }
 
 // Init starts fetching cluster detail.
@@ -151,6 +198,22 @@ func (v ClusterDetailView) Update(msg tea.Msg) (ClusterDetailView, tea.Cmd) {
 		}
 		return v, nil
 
+	case clusterActionResultMsg:
+		v.loading = false
+		if msg.err != nil {
+			v.mode = modeResult
+			v.resultMsg = msg.err.Error()
+			v.resultIsError = true
+		} else if msg.deleted {
+			v.Deleted = true
+			return v, nil
+		} else {
+			v.mode = modeResult
+			v.resultMsg = v.actionSuccessMessage()
+			v.resultIsError = false
+		}
+		return v, nil
+
 	case tea.WindowSizeMsg:
 		v.width = msg.Width
 		v.height = msg.Height
@@ -162,26 +225,302 @@ func (v ClusterDetailView) Update(msg tea.Msg) (ClusterDetailView, tea.Cmd) {
 		return v, nil
 
 	case tea.KeyMsg:
-		// Forward to active table if filtering
-		if v.activeTableFiltering() {
-			return v.updateActiveTable(msg)
-		}
-
-		switch msg.String() {
-		case "tab":
-			v.activeTab = (v.activeTab + 1) % tabCount
-			return v, nil
-		case "shift+tab":
-			v.activeTab = (v.activeTab - 1 + tabCount) % tabCount
-			return v, nil
-		case "r":
-			v.loading = true
-			return v, v.fetchDetail()
+		// Route based on current action mode
+		switch v.mode {
+		case modeInput:
+			return v.updateInputMode(msg)
+		case modeConfirm:
+			return v.updateConfirmMode(msg)
+		case modeResult:
+			return v.updateResultMode(msg)
 		default:
-			return v.updateActiveTable(msg)
+			return v.updateNormalMode(msg)
 		}
 	}
 	return v, nil
+}
+
+// updateNormalMode handles keys when no action is active.
+func (v ClusterDetailView) updateNormalMode(msg tea.KeyMsg) (ClusterDetailView, tea.Cmd) {
+	// Forward to active table if filtering
+	if v.activeTableFiltering() {
+		return v.updateActiveTable(msg)
+	}
+
+	switch msg.String() {
+	case "tab":
+		v.activeTab = (v.activeTab + 1) % tabCount
+		return v, nil
+	case "shift+tab":
+		v.activeTab = (v.activeTab - 1 + tabCount) % tabCount
+		return v, nil
+	case "r":
+		v.loading = true
+		return v, v.fetchDetail()
+	case "s":
+		v.startInputAction(actionScale, "New worker count: ")
+		return v, nil
+	case "u":
+		v.startInputAction(actionUpgrade, "New Kubernetes version: ")
+		return v, nil
+	case "d":
+		v.mode = modeConfirm
+		v.pendingAction = actionDelete
+		v.confirmMsg = fmt.Sprintf("Delete cluster %s? (y/n)", v.name)
+		return v, nil
+	case "a":
+		if v.activeTab == tabAddons {
+			v.startInputAction(actionInstallAddon, "Addon name to install: ")
+			return v, nil
+		}
+	case "x":
+		if v.activeTab == tabAddons {
+			row := v.addonTable.SelectedRow()
+			if row != nil && len(row) > 0 {
+				v.mode = modeConfirm
+				v.pendingAction = actionUninstallAddon
+				v.confirmMsg = fmt.Sprintf("Uninstall addon %s? (y/n)", row[0])
+				return v, nil
+			}
+		}
+	}
+
+	return v.updateActiveTable(msg)
+}
+
+// startInputAction sets up the text input for an action.
+func (v *ClusterDetailView) startInputAction(action, placeholder string) {
+	v.mode = modeInput
+	v.pendingAction = action
+	v.input.Reset()
+	v.input.Placeholder = placeholder
+	v.input.Focus()
+}
+
+// updateInputMode handles keys when a text input is active.
+func (v ClusterDetailView) updateInputMode(msg tea.KeyMsg) (ClusterDetailView, tea.Cmd) {
+	switch msg.String() {
+	case "esc":
+		v.mode = modeNormal
+		v.pendingAction = actionNone
+		v.input.Blur()
+		return v, nil
+	case "enter":
+		value := strings.TrimSpace(v.input.Value())
+		if value == "" {
+			// Empty input, cancel
+			v.mode = modeNormal
+			v.pendingAction = actionNone
+			v.input.Blur()
+			return v, nil
+		}
+		v.input.Blur()
+		v.loading = true
+		cmd := v.executeAction(value)
+		return v, cmd
+	default:
+		var cmd tea.Cmd
+		v.input, cmd = v.input.Update(msg)
+		return v, cmd
+	}
+}
+
+// updateConfirmMode handles keys when a y/n prompt is active.
+func (v ClusterDetailView) updateConfirmMode(msg tea.KeyMsg) (ClusterDetailView, tea.Cmd) {
+	switch msg.String() {
+	case "y", "Y":
+		v.loading = true
+		cmd := v.executeAction("")
+		return v, cmd
+	case "n", "N", "esc":
+		v.mode = modeNormal
+		v.pendingAction = actionNone
+		return v, nil
+	}
+	return v, nil
+}
+
+// updateResultMode handles keys when showing a result message.
+func (v ClusterDetailView) updateResultMode(msg tea.KeyMsg) (ClusterDetailView, tea.Cmd) {
+	// Any key clears the result and refreshes the view
+	v.mode = modeNormal
+	v.pendingAction = actionNone
+	v.resultMsg = ""
+	v.loading = true
+	return v, v.fetchDetail()
+}
+
+// executeAction runs the pending action asynchronously.
+func (v *ClusterDetailView) executeAction(inputValue string) tea.Cmd {
+	c := v.client
+	name := v.name
+	ns := v.namespace
+	action := v.pendingAction
+
+	switch action {
+	case actionScale:
+		return func() tea.Msg {
+			return v.doScale(c, ns, name, inputValue)
+		}
+	case actionUpgrade:
+		return func() tea.Msg {
+			return v.doUpgrade(c, ns, name, inputValue)
+		}
+	case actionDelete:
+		return func() tea.Msg {
+			return v.doDelete(c, ns, name)
+		}
+	case actionInstallAddon:
+		return func() tea.Msg {
+			return v.doInstallAddon(c, ns, name, inputValue)
+		}
+	case actionUninstallAddon:
+		addonName := ""
+		row := v.addonTable.SelectedRow()
+		if row != nil && len(row) > 0 {
+			addonName = row[0]
+		}
+		return func() tea.Msg {
+			return v.doUninstallAddon(c, ns, addonName)
+		}
+	}
+
+	return nil
+}
+
+// doScale patches spec.workers.replicas.
+func (v *ClusterDetailView) doScale(c *client.Client, ns, name, countStr string) clusterActionResultMsg {
+	ctx := context.Background()
+
+	var count int
+	if _, err := fmt.Sscanf(countStr, "%d", &count); err != nil || count < 1 {
+		return clusterActionResultMsg{err: fmt.Errorf("invalid worker count: %s (must be a positive integer)", countStr)}
+	}
+
+	patch := map[string]interface{}{
+		"spec": map[string]interface{}{
+			"workers": map[string]interface{}{
+				"replicas": int64(count),
+			},
+		},
+	}
+	patchBytes, err := json.Marshal(patch)
+	if err != nil {
+		return clusterActionResultMsg{err: fmt.Errorf("marshaling patch: %w", err)}
+	}
+
+	_, err = c.Dynamic.Resource(client.TenantClusterGVR).Namespace(ns).Patch(
+		ctx, name, types.MergePatchType, patchBytes, metav1.PatchOptions{},
+	)
+	if err != nil {
+		return clusterActionResultMsg{err: fmt.Errorf("scaling cluster: %w", err)}
+	}
+
+	return clusterActionResultMsg{}
+}
+
+// doUpgrade patches spec.kubernetesVersion.
+func (v *ClusterDetailView) doUpgrade(c *client.Client, ns, name, version string) clusterActionResultMsg {
+	ctx := context.Background()
+
+	patch := map[string]interface{}{
+		"spec": map[string]interface{}{
+			"kubernetesVersion": version,
+		},
+	}
+	patchBytes, err := json.Marshal(patch)
+	if err != nil {
+		return clusterActionResultMsg{err: fmt.Errorf("marshaling patch: %w", err)}
+	}
+
+	_, err = c.Dynamic.Resource(client.TenantClusterGVR).Namespace(ns).Patch(
+		ctx, name, types.MergePatchType, patchBytes, metav1.PatchOptions{},
+	)
+	if err != nil {
+		return clusterActionResultMsg{err: fmt.Errorf("upgrading cluster: %w", err)}
+	}
+
+	return clusterActionResultMsg{}
+}
+
+// doDelete deletes the TenantCluster.
+func (v *ClusterDetailView) doDelete(c *client.Client, ns, name string) clusterActionResultMsg {
+	ctx := context.Background()
+
+	err := c.Dynamic.Resource(client.TenantClusterGVR).Namespace(ns).Delete(
+		ctx, name, metav1.DeleteOptions{},
+	)
+	if err != nil {
+		return clusterActionResultMsg{err: fmt.Errorf("deleting cluster: %w", err)}
+	}
+
+	return clusterActionResultMsg{deleted: true}
+}
+
+// doInstallAddon creates a TenantAddon resource.
+func (v *ClusterDetailView) doInstallAddon(c *client.Client, ns, clusterName, addonName string) clusterActionResultMsg {
+	ctx := context.Background()
+
+	// Resolve version from AddonDefinition catalog
+	version := ""
+	ad, err := c.Dynamic.Resource(client.AddonDefinitionGVR).Get(ctx, addonName, metav1.GetOptions{})
+	if err == nil {
+		version = client.GetNestedString(ad.Object, "spec", "chart", "defaultVersion")
+	}
+
+	ta := &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"apiVersion": "butler.butlerlabs.dev/v1alpha1",
+			"kind":       "TenantAddon",
+			"metadata": map[string]interface{}{
+				"name":      addonName,
+				"namespace": ns,
+			},
+			"spec": map[string]interface{}{
+				"clusterRef": map[string]interface{}{
+					"name": clusterName,
+				},
+				"addon":   addonName,
+				"version": version,
+			},
+		},
+	}
+
+	_, err = c.Dynamic.Resource(client.TenantAddonGVR).Namespace(ns).Create(ctx, ta, metav1.CreateOptions{})
+	if err != nil {
+		return clusterActionResultMsg{err: fmt.Errorf("installing addon %s: %w", addonName, err)}
+	}
+
+	return clusterActionResultMsg{}
+}
+
+// doUninstallAddon deletes a TenantAddon resource.
+func (v *ClusterDetailView) doUninstallAddon(c *client.Client, ns, addonName string) clusterActionResultMsg {
+	ctx := context.Background()
+
+	err := c.Dynamic.Resource(client.TenantAddonGVR).Namespace(ns).Delete(ctx, addonName, metav1.DeleteOptions{})
+	if err != nil {
+		return clusterActionResultMsg{err: fmt.Errorf("uninstalling addon %s: %w", addonName, err)}
+	}
+
+	return clusterActionResultMsg{}
+}
+
+// actionSuccessMessage returns a human-readable success message for the current action.
+func (v *ClusterDetailView) actionSuccessMessage() string {
+	switch v.pendingAction {
+	case actionScale:
+		return fmt.Sprintf("Scale initiated for %s. Press any key to refresh.", v.name)
+	case actionUpgrade:
+		return fmt.Sprintf("Upgrade initiated for %s. Press any key to refresh.", v.name)
+	case actionDelete:
+		return fmt.Sprintf("Cluster %s deletion initiated.", v.name)
+	case actionInstallAddon:
+		return fmt.Sprintf("Addon install initiated. Press any key to refresh.")
+	case actionUninstallAddon:
+		return fmt.Sprintf("Addon uninstall initiated. Press any key to refresh.")
+	}
+	return "Action completed. Press any key to continue."
 }
 
 func (v *ClusterDetailView) activeTableFiltering() bool {
@@ -211,6 +550,33 @@ func (v ClusterDetailView) updateActiveTable(msg tea.KeyMsg) (ClusterDetailView,
 		cmd = v.eventTable.Update(msg)
 	}
 	return v, cmd
+}
+
+// KeyLegend returns action keys available in the current state, for the app
+// to include in the bottom key legend bar.
+func (v *ClusterDetailView) KeyLegend() string {
+	dimStyle := styles.DimStyle
+	keyStyle := styles.KeyLegendStyle
+
+	base := dimStyle.Render("  ") +
+		keyStyle.Render("tab") + dimStyle.Render(":switch tab  ") +
+		keyStyle.Render("esc") + dimStyle.Render(":back  ") +
+		keyStyle.Render("r") + dimStyle.Render(":refresh  ")
+
+	actions := keyStyle.Render("s") + dimStyle.Render(":scale  ") +
+		keyStyle.Render("u") + dimStyle.Render(":upgrade  ") +
+		keyStyle.Render("d") + dimStyle.Render(":delete  ")
+
+	if v.activeTab == tabAddons {
+		actions += keyStyle.Render("a") + dimStyle.Render(":install addon  ") +
+			keyStyle.Render("x") + dimStyle.Render(":uninstall  ")
+	}
+
+	tail := keyStyle.Render("/") + dimStyle.Render(":filter  ") +
+		keyStyle.Render("?") + dimStyle.Render(":help  ") +
+		keyStyle.Render("q") + dimStyle.Render(":quit")
+
+	return base + actions + tail
 }
 
 // View renders the detail view with tabs.
@@ -248,7 +614,29 @@ func (v ClusterDetailView) View() string {
 		b.WriteString(v.eventTable.View())
 	}
 
+	// Action prompt/result overlay at the bottom of content
+	if prompt := v.renderActionPrompt(); prompt != "" {
+		b.WriteString("\n")
+		b.WriteString(prompt)
+	}
+
 	return b.String()
+}
+
+// renderActionPrompt renders the inline prompt for the current action mode.
+func (v ClusterDetailView) renderActionPrompt() string {
+	switch v.mode {
+	case modeInput:
+		return styles.ActionPromptStyle.Render(v.input.Placeholder) + v.input.View()
+	case modeConfirm:
+		return styles.ActionConfirmStyle.Render(v.confirmMsg)
+	case modeResult:
+		if v.resultIsError {
+			return styles.ActionErrorStyle.Render("Error: " + v.resultMsg)
+		}
+		return styles.ActionSuccessStyle.Render(v.resultMsg)
+	}
+	return ""
 }
 
 func (v *ClusterDetailView) viewOverview() string {

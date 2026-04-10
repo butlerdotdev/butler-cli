@@ -126,8 +126,9 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, a.forwardToAll(msg)
 
 	case tea.KeyMsg:
-		// If the active view is filtering, let it handle everything
-		if a.isActiveFiltering() {
+		// If the active view is filtering or in an action mode, let it
+		// handle everything — do not intercept for global navigation.
+		if a.isActiveFiltering() || a.isActiveInActionMode() {
 			return a.forwardToActive(msg)
 		}
 
@@ -252,22 +253,20 @@ func (a App) renderKeyLegend() string {
 	dimStyle := styles.DimStyle
 	keyStyle := styles.KeyLegendStyle
 
-	if a.view == ViewClusterDetail {
+	switch a.view {
+	case ViewClusterDetail:
+		return a.clusterDetail.KeyLegend()
+	case ViewTeams:
+		return a.teamList.KeyLegend()
+	default:
 		return dimStyle.Render("  ") +
-			keyStyle.Render("tab") + dimStyle.Render(":switch tab  ") +
-			keyStyle.Render("esc") + dimStyle.Render(":back  ") +
-			keyStyle.Render("r") + dimStyle.Render(":refresh  ") +
+			keyStyle.Render("j/k") + dimStyle.Render(":navigate  ") +
+			keyStyle.Render("enter") + dimStyle.Render(":select  ") +
 			keyStyle.Render("/") + dimStyle.Render(":filter  ") +
+			keyStyle.Render("r") + dimStyle.Render(":refresh  ") +
 			keyStyle.Render("?") + dimStyle.Render(":help  ") +
 			keyStyle.Render("q") + dimStyle.Render(":quit")
 	}
-	return dimStyle.Render("  ") +
-		keyStyle.Render("j/k") + dimStyle.Render(":navigate  ") +
-		keyStyle.Render("enter") + dimStyle.Render(":select  ") +
-		keyStyle.Render("/") + dimStyle.Render(":filter  ") +
-		keyStyle.Render("r") + dimStyle.Render(":refresh  ") +
-		keyStyle.Render("?") + dimStyle.Render(":help  ") +
-		keyStyle.Render("q") + dimStyle.Render(":quit")
 }
 
 func (a App) renderTabs() string {
@@ -388,6 +387,16 @@ func (a *App) isActiveFiltering() bool {
 	return false
 }
 
+func (a *App) isActiveInActionMode() bool {
+	switch a.view {
+	case ViewClusterDetail:
+		return a.clusterDetail.IsInActionMode()
+	case ViewTeams:
+		return a.teamList.IsInActionMode()
+	}
+	return false
+}
+
 func (a *App) forwardToActive(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 	switch a.view {
@@ -395,6 +404,17 @@ func (a *App) forwardToActive(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.clusterList, cmd = a.clusterList.Update(msg)
 	case ViewClusterDetail:
 		a.clusterDetail, cmd = a.clusterDetail.Update(msg)
+		// Navigate back to cluster list if the cluster was deleted
+		if a.clusterDetail.Deleted {
+			a.view = ViewClusters
+			a.clusterList = views.NewClusterListView(a.client)
+			a.initialized[ViewClusters] = true
+			initCmd := a.clusterList.Init()
+			sizeCmd := func() tea.Msg {
+				return tea.WindowSizeMsg{Width: a.width, Height: a.height}
+			}
+			return a, tea.Batch(initCmd, sizeCmd)
+		}
 	case ViewAddons:
 		a.addonCatalog, cmd = a.addonCatalog.Update(msg)
 	case ViewTeams:

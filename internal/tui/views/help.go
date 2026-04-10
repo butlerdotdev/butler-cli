@@ -60,12 +60,45 @@ func (v HelpView) View() string {
 	}
 
 	b.WriteString("\n")
-	b.WriteString(styles.SectionStyle.Render("Detail View"))
+	b.WriteString(styles.SectionStyle.Render("Cluster Detail"))
 	b.WriteString("\n")
 	for _, bind := range []struct{ key, desc string }{
 		{"Tab", "Next tab"},
 		{"Shift+Tab", "Previous tab"},
 		{"Esc / Backspace", "Back to list"},
+		{"s", "Scale workers"},
+		{"u", "Upgrade Kubernetes version"},
+		{"d", "Delete cluster"},
+	} {
+		b.WriteString(renderBinding(bind.key, bind.desc))
+	}
+
+	b.WriteString("\n")
+	b.WriteString(styles.SectionStyle.Render("Addons Tab (in Cluster Detail)"))
+	b.WriteString("\n")
+	for _, bind := range []struct{ key, desc string }{
+		{"a", "Install addon"},
+		{"x", "Uninstall selected addon"},
+	} {
+		b.WriteString(renderBinding(bind.key, bind.desc))
+	}
+
+	b.WriteString("\n")
+	b.WriteString(styles.SectionStyle.Render("Teams"))
+	b.WriteString("\n")
+	for _, bind := range []struct{ key, desc string }{
+		{"a", "Add team member"},
+	} {
+		b.WriteString(renderBinding(bind.key, bind.desc))
+	}
+
+	b.WriteString("\n")
+	b.WriteString(styles.SectionStyle.Render("Action Prompts"))
+	b.WriteString("\n")
+	for _, bind := range []struct{ key, desc string }{
+		{"Enter", "Confirm input"},
+		{"Esc", "Cancel action"},
+		{"y / n", "Confirm or deny (delete/uninstall)"},
 	} {
 		b.WriteString(renderBinding(bind.key, bind.desc))
 	}
