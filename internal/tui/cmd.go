@@ -22,6 +22,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/spf13/cobra"
 
+	"github.com/butlerdotdev/butler/internal/common/auth"
 	"github.com/butlerdotdev/butler/internal/common/client"
 )
 
@@ -68,7 +69,17 @@ Examples:
 				contextName = inferContextName(kubeconfig)
 			}
 
-			app := NewApp(c, contextName, admin)
+			// Determine admin status from Butler credentials if available,
+			// otherwise fall back to binary mode (butleradm = admin)
+			isAdmin := admin
+			creds, err := auth.LoadCredentials()
+			if err == nil {
+				if sc := creds.ActiveCredential(); sc != nil {
+					isAdmin = sc.User.IsPlatformAdmin
+				}
+			}
+
+			app := NewApp(c, contextName, isAdmin)
 
 			p := tea.NewProgram(app, tea.WithAltScreen())
 			_, err = p.Run()

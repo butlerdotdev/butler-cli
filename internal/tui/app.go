@@ -104,6 +104,7 @@ func NewApp(c *client.Client, contextName string, admin bool) *App {
 		isAdmin:         admin,
 		unauthenticated: unauth,
 		clusterList:     views.NewClusterListView(c),
+		helpView:        views.HelpView{Admin: admin},
 		initialized:     map[ViewType]bool{},
 	}
 }
@@ -258,6 +259,12 @@ func (a App) renderKeyLegend() string {
 		return a.clusterDetail.KeyLegend()
 	case ViewTeams:
 		return a.teamList.KeyLegend()
+	case ViewUsers:
+		return a.userList.KeyLegend()
+	case ViewProviders:
+		return a.providerList.KeyLegend()
+	case ViewNetworks:
+		return a.networkList.KeyLegend()
 	default:
 		return dimStyle.Render("  ") +
 			keyStyle.Render("j/k") + dimStyle.Render(":navigate  ") +
@@ -344,16 +351,16 @@ func (a *App) initView(v ViewType) tea.Cmd {
 		a.addonCatalog = views.NewAddonCatalogView(a.client)
 		return a.addonCatalog.Init()
 	case ViewTeams:
-		a.teamList = views.NewTeamListView(a.client)
+		a.teamList = views.NewTeamListView(a.client, a.isAdmin)
 		return a.teamList.Init()
 	case ViewProviders:
-		a.providerList = views.NewProviderListView(a.client)
+		a.providerList = views.NewProviderListView(a.client, a.isAdmin)
 		return a.providerList.Init()
 	case ViewNetworks:
-		a.networkList = views.NewNetworkListView(a.client)
+		a.networkList = views.NewNetworkListView(a.client, a.isAdmin)
 		return a.networkList.Init()
 	case ViewUsers:
-		a.userList = views.NewUserListView(a.client)
+		a.userList = views.NewUserListView(a.client, a.isAdmin)
 		return a.userList.Init()
 	case ViewHealth:
 		a.healthView = views.NewHealthView(a.client)
@@ -383,6 +390,16 @@ func (a *App) isActiveFiltering() bool {
 		return a.clusterList.IsFiltering()
 	case ViewClusterDetail:
 		return a.clusterDetail.IsFiltering()
+	case ViewTeams:
+		return a.teamList.IsFiltering()
+	case ViewProviders:
+		return a.providerList.IsFiltering()
+	case ViewNetworks:
+		return a.networkList.IsFiltering()
+	case ViewUsers:
+		return a.userList.IsFiltering()
+	case ViewAddons:
+		return a.addonCatalog.IsFiltering()
 	}
 	return false
 }
@@ -393,6 +410,12 @@ func (a *App) isActiveInActionMode() bool {
 		return a.clusterDetail.IsInActionMode()
 	case ViewTeams:
 		return a.teamList.IsInActionMode()
+	case ViewUsers:
+		return a.userList.IsInActionMode()
+	case ViewProviders:
+		return a.providerList.IsInActionMode()
+	case ViewNetworks:
+		return a.networkList.IsInActionMode()
 	}
 	return false
 }

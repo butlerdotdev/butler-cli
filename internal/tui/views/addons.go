@@ -51,6 +51,11 @@ func NewAddonCatalogView(c *client.Client) AddonCatalogView {
 	}
 }
 
+// IsFiltering returns true if the table is in filter mode.
+func (v *AddonCatalogView) IsFiltering() bool {
+	return v.table.Filtering()
+}
+
 // Init fetches addon definitions.
 func (v AddonCatalogView) Init() tea.Cmd {
 	return v.fetch()

@@ -27,6 +27,7 @@ import (
 type HelpView struct {
 	Width  int
 	Height int
+	Admin  bool
 }
 
 // View renders the help overlay.
@@ -86,10 +87,48 @@ func (v HelpView) View() string {
 	b.WriteString("\n")
 	b.WriteString(styles.SectionStyle.Render("Teams"))
 	b.WriteString("\n")
-	for _, bind := range []struct{ key, desc string }{
+	bindings := []struct{ key, desc string }{
 		{"a", "Add team member"},
-	} {
+	}
+	if v.Admin {
+		bindings = append(bindings,
+			struct{ key, desc string }{"c", "Create team (admin)"},
+			struct{ key, desc string }{"d", "Delete team (admin)"},
+		)
+	}
+	for _, bind := range bindings {
 		b.WriteString(renderBinding(bind.key, bind.desc))
+	}
+
+	if v.Admin {
+		b.WriteString("\n")
+		b.WriteString(styles.SectionStyle.Render("Users (admin)"))
+		b.WriteString("\n")
+		for _, bind := range []struct{ key, desc string }{
+			{"c", "Create user"},
+			{"d", "Delete user"},
+			{"x", "Disable / enable user"},
+		} {
+			b.WriteString(renderBinding(bind.key, bind.desc))
+		}
+
+		b.WriteString("\n")
+		b.WriteString(styles.SectionStyle.Render("Providers (admin)"))
+		b.WriteString("\n")
+		for _, bind := range []struct{ key, desc string }{
+			{"d", "Delete provider"},
+		} {
+			b.WriteString(renderBinding(bind.key, bind.desc))
+		}
+
+		b.WriteString("\n")
+		b.WriteString(styles.SectionStyle.Render("Networks (admin)"))
+		b.WriteString("\n")
+		for _, bind := range []struct{ key, desc string }{
+			{"d", "Delete network pool"},
+		} {
+			b.WriteString(renderBinding(bind.key, bind.desc))
+		}
 	}
 
 	b.WriteString("\n")

@@ -40,6 +40,7 @@ type teamActionMode int
 const (
 	teamModeNormal  teamActionMode = iota
 	teamModeInput                  // text input active
+	teamModeConfirm                // y/n confirmation
 	teamModeResult                 // success/error message displayed
 )
 
@@ -49,6 +50,20 @@ const (
 	teamStepRole  = 1
 )
 
+// createTeam action steps: first collect name, then display name.
+const (
+	teamCreateStepName        = 0
+	teamCreateStepDisplayName = 1
+)
+
+// pendingTeamAction identifies which action is being executed.
+const (
+	teamActionNone      = ""
+	teamActionAddMember = "add-member"
+	teamActionCreate    = "create"
+	teamActionDelete    = "delete"
+)
+
 type teamListMsg struct {
 	rows [][]string
 	err  error
@@ -56,12 +71,15 @@ type teamListMsg struct {
 
 // teamActionResultMsg carries the result of an async team action.
 type teamActionResultMsg struct {
-	err error
+	err     error
+	action  string
+	deleted bool
 }
 
 // TeamListView displays Team resources.
 type TeamListView struct {
 	client  *client.Client
+	Admin   bool
 	table   components.Table
 	loading bool
 	err     error
@@ -70,25 +88,37 @@ type TeamListView struct {
 
 	// Action state
 	mode          teamActionMode
+	pendingAction string
 	input         textinput.Model
+	confirmMsg    string
 	resultMsg     string
 	resultIsError bool
 
 	// Add member multi-step state
 	addMemberStep  int    // 0=email, 1=role
 	addMemberEmail string // captured from step 0
+
+	// Create team multi-step state
+	createStep     int    // 0=name, 1=displayName
+	createTeamName string // captured from step 0
 }
 
 // NewTeamListView creates the team list view.
-func NewTeamListView(c *client.Client) TeamListView {
+func NewTeamListView(c *client.Client, admin bool) TeamListView {
 	ti := textinput.New()
 	ti.CharLimit = 128
 	return TeamListView{
 		client:  c,
+		Admin:   admin,
 		table:   components.NewTable([]string{"NAME", "DISPLAY NAME", "PHASE", "CLUSTERS", "MEMBERS", "NAMESPACE", "AGE"}),
 		loading: true,
 		input:   ti,
 	}
+}
+
+// IsFiltering returns true if the table is in filter mode.
+func (v *TeamListView) IsFiltering() bool {
+	return v.table.Filtering()
 }
 
 // IsInActionMode returns true when a team action prompt is active.
@@ -120,7 +150,7 @@ func (v TeamListView) Update(msg tea.Msg) (TeamListView, tea.Cmd) {
 			v.resultIsError = true
 		} else {
 			v.mode = teamModeResult
-			v.resultMsg = "Member added. Press any key to refresh."
+			v.resultMsg = v.teamActionSuccessMessage()
 			v.resultIsError = false
 		}
 		return v, nil
@@ -135,6 +165,8 @@ func (v TeamListView) Update(msg tea.Msg) (TeamListView, tea.Cmd) {
 		switch v.mode {
 		case teamModeInput:
 			return v.updateInputMode(msg)
+		case teamModeConfirm:
+			return v.updateConfirmMode(msg)
 		case teamModeResult:
 			return v.updateResultMode(msg)
 		default:
@@ -158,11 +190,35 @@ func (v TeamListView) updateNormalMode(msg tea.KeyMsg) (TeamListView, tea.Cmd) {
 		row := v.table.SelectedRow()
 		if row != nil && len(row) > 0 {
 			v.mode = teamModeInput
+			v.pendingAction = teamActionAddMember
 			v.addMemberStep = teamStepEmail
 			v.addMemberEmail = ""
 			v.input.Reset()
 			v.input.Placeholder = "Email address: "
 			v.input.Focus()
+			return v, nil
+		}
+	case "c":
+		if !v.Admin {
+			return v, nil
+		}
+		v.mode = teamModeInput
+		v.pendingAction = teamActionCreate
+		v.createStep = teamCreateStepName
+		v.createTeamName = ""
+		v.input.Reset()
+		v.input.Placeholder = "Team name: "
+		v.input.Focus()
+		return v, nil
+	case "d":
+		if !v.Admin {
+			return v, nil
+		}
+		row := v.table.SelectedRow()
+		if row != nil && len(row) > 0 {
+			v.mode = teamModeConfirm
+			v.pendingAction = teamActionDelete
+			v.confirmMsg = fmt.Sprintf("Delete team %s? (y/n)", row[0])
 			return v, nil
 		}
 	default:
@@ -177,49 +233,26 @@ func (v TeamListView) updateInputMode(msg tea.KeyMsg) (TeamListView, tea.Cmd) {
 	switch msg.String() {
 	case "esc":
 		v.mode = teamModeNormal
+		v.pendingAction = teamActionNone
 		v.input.Blur()
 		return v, nil
 	case "enter":
 		value := strings.TrimSpace(v.input.Value())
 		if value == "" {
 			v.mode = teamModeNormal
+			v.pendingAction = teamActionNone
 			v.input.Blur()
 			return v, nil
 		}
 
-		if v.addMemberStep == teamStepEmail {
-			// Capture email, advance to role step
-			v.addMemberEmail = value
-			v.addMemberStep = teamStepRole
-			v.input.Reset()
-			v.input.Placeholder = "Role (admin/operator/viewer): "
-			v.input.Focus()
-			return v, nil
+		switch v.pendingAction {
+		case teamActionAddMember:
+			return v.handleAddMemberInput(value)
+		case teamActionCreate:
+			return v.handleCreateInput(value)
 		}
 
-		// Step 1: role collected, execute the action
-		role := strings.ToLower(value)
-		if role != "admin" && role != "operator" && role != "viewer" {
-			v.mode = teamModeResult
-			v.resultMsg = fmt.Sprintf("Invalid role %q: must be admin, operator, or viewer", value)
-			v.resultIsError = true
-			v.input.Blur()
-			return v, nil
-		}
-
-		v.input.Blur()
-		v.loading = true
-
-		row := v.table.SelectedRow()
-		teamName := ""
-		if row != nil && len(row) > 0 {
-			teamName = row[0]
-		}
-		email := v.addMemberEmail
-
-		return v, func() tea.Msg {
-			return v.doAddMember(teamName, email, role)
-		}
+		return v, nil
 	default:
 		var cmd tea.Cmd
 		v.input, cmd = v.input.Update(msg)
@@ -227,9 +260,90 @@ func (v TeamListView) updateInputMode(msg tea.KeyMsg) (TeamListView, tea.Cmd) {
 	}
 }
 
+// handleAddMemberInput processes input for the add-member multi-step flow.
+func (v TeamListView) handleAddMemberInput(value string) (TeamListView, tea.Cmd) {
+	if v.addMemberStep == teamStepEmail {
+		v.addMemberEmail = value
+		v.addMemberStep = teamStepRole
+		v.input.Reset()
+		v.input.Placeholder = "Role (admin/operator/viewer): "
+		v.input.Focus()
+		return v, nil
+	}
+
+	// Step 1: role collected, execute the action
+	role := strings.ToLower(value)
+	if role != "admin" && role != "operator" && role != "viewer" {
+		v.mode = teamModeResult
+		v.resultMsg = fmt.Sprintf("Invalid role %q: must be admin, operator, or viewer", value)
+		v.resultIsError = true
+		v.input.Blur()
+		return v, nil
+	}
+
+	v.input.Blur()
+	v.loading = true
+
+	row := v.table.SelectedRow()
+	teamName := ""
+	if row != nil && len(row) > 0 {
+		teamName = row[0]
+	}
+	email := v.addMemberEmail
+
+	return v, func() tea.Msg {
+		return v.doAddMember(teamName, email, role)
+	}
+}
+
+// handleCreateInput processes input for the create-team multi-step flow.
+func (v TeamListView) handleCreateInput(value string) (TeamListView, tea.Cmd) {
+	if v.createStep == teamCreateStepName {
+		v.createTeamName = value
+		v.createStep = teamCreateStepDisplayName
+		v.input.Reset()
+		v.input.Placeholder = "Display name: "
+		v.input.Focus()
+		return v, nil
+	}
+
+	// Step 1: display name collected, execute
+	v.input.Blur()
+	v.loading = true
+
+	teamName := v.createTeamName
+	displayName := value
+
+	return v, func() tea.Msg {
+		return v.doCreateTeam(teamName, displayName)
+	}
+}
+
+// updateConfirmMode handles keys when a y/n prompt is active.
+func (v TeamListView) updateConfirmMode(msg tea.KeyMsg) (TeamListView, tea.Cmd) {
+	switch msg.String() {
+	case "y", "Y":
+		v.loading = true
+		row := v.table.SelectedRow()
+		teamName := ""
+		if row != nil && len(row) > 0 {
+			teamName = row[0]
+		}
+		return v, func() tea.Msg {
+			return v.doDeleteTeam(teamName)
+		}
+	case "n", "N", "esc":
+		v.mode = teamModeNormal
+		v.pendingAction = teamActionNone
+		return v, nil
+	}
+	return v, nil
+}
+
 // updateResultMode handles keys when showing a result message.
 func (v TeamListView) updateResultMode(msg tea.KeyMsg) (TeamListView, tea.Cmd) {
 	v.mode = teamModeNormal
+	v.pendingAction = teamActionNone
 	v.resultMsg = ""
 	v.loading = true
 	return v, v.fetch()
@@ -242,7 +356,7 @@ func (v *TeamListView) doAddMember(teamName, email, role string) teamActionResul
 	// Get the current Team resource
 	team, err := v.client.Dynamic.Resource(client.TeamGVR).Get(ctx, teamName, metav1.GetOptions{})
 	if err != nil {
-		return teamActionResultMsg{err: fmt.Errorf("getting team %s: %w", teamName, err)}
+		return teamActionResultMsg{err: fmt.Errorf("getting team %s: %w", teamName, err), action: teamActionAddMember}
 	}
 
 	// Extract existing users
@@ -255,7 +369,7 @@ func (v *TeamListView) doAddMember(teamName, email, role string) teamActionResul
 			continue
 		}
 		if client.GetNestedString(userMap, "email") == email {
-			return teamActionResultMsg{err: fmt.Errorf("user %s already exists in team %s", email, teamName)}
+			return teamActionResultMsg{err: fmt.Errorf("user %s already exists in team %s", email, teamName), action: teamActionAddMember}
 		}
 	}
 
@@ -276,17 +390,67 @@ func (v *TeamListView) doAddMember(teamName, email, role string) teamActionResul
 	}
 	patchBytes, err := json.Marshal(patch)
 	if err != nil {
-		return teamActionResultMsg{err: fmt.Errorf("marshaling patch: %w", err)}
+		return teamActionResultMsg{err: fmt.Errorf("marshaling patch: %w", err), action: teamActionAddMember}
 	}
 
 	_, err = v.client.Dynamic.Resource(client.TeamGVR).Patch(
 		ctx, teamName, types.MergePatchType, patchBytes, metav1.PatchOptions{},
 	)
 	if err != nil {
-		return teamActionResultMsg{err: fmt.Errorf("adding member to team: %w", err)}
+		return teamActionResultMsg{err: fmt.Errorf("adding member to team: %w", err), action: teamActionAddMember}
 	}
 
-	return teamActionResultMsg{}
+	return teamActionResultMsg{action: teamActionAddMember}
+}
+
+// doCreateTeam creates a new Team CRD.
+func (v *TeamListView) doCreateTeam(name, displayName string) teamActionResultMsg {
+	ctx := context.Background()
+
+	team := &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"apiVersion": "butler.butlerlabs.dev/v1alpha1",
+			"kind":       "Team",
+			"metadata": map[string]interface{}{
+				"name": name,
+			},
+			"spec": map[string]interface{}{
+				"displayName": displayName,
+			},
+		},
+	}
+
+	_, err := v.client.Dynamic.Resource(client.TeamGVR).Create(ctx, team, metav1.CreateOptions{})
+	if err != nil {
+		return teamActionResultMsg{err: fmt.Errorf("creating team: %w", err), action: teamActionCreate}
+	}
+
+	return teamActionResultMsg{action: teamActionCreate}
+}
+
+// doDeleteTeam deletes a Team CRD.
+func (v *TeamListView) doDeleteTeam(name string) teamActionResultMsg {
+	ctx := context.Background()
+
+	err := v.client.Dynamic.Resource(client.TeamGVR).Delete(ctx, name, metav1.DeleteOptions{})
+	if err != nil {
+		return teamActionResultMsg{err: fmt.Errorf("deleting team: %w", err), action: teamActionDelete}
+	}
+
+	return teamActionResultMsg{action: teamActionDelete, deleted: true}
+}
+
+// teamActionSuccessMessage returns a human-readable success message for the current action.
+func (v *TeamListView) teamActionSuccessMessage() string {
+	switch v.pendingAction {
+	case teamActionAddMember:
+		return "Member added. Press any key to refresh."
+	case teamActionCreate:
+		return "Team created. Press any key to refresh."
+	case teamActionDelete:
+		return "Team deleted. Press any key to refresh."
+	}
+	return "Action completed. Press any key to continue."
 }
 
 // KeyLegend returns the action keys available for the team view.
@@ -294,13 +458,21 @@ func (v *TeamListView) KeyLegend() string {
 	dimStyle := styles.DimStyle
 	keyStyle := styles.KeyLegendStyle
 
-	return dimStyle.Render("  ") +
+	legend := dimStyle.Render("  ") +
 		keyStyle.Render("j/k") + dimStyle.Render(":navigate  ") +
-		keyStyle.Render("a") + dimStyle.Render(":add member  ") +
-		keyStyle.Render("/") + dimStyle.Render(":filter  ") +
+		keyStyle.Render("a") + dimStyle.Render(":add member  ")
+
+	if v.Admin {
+		legend += keyStyle.Render("c") + dimStyle.Render(":create  ") +
+			keyStyle.Render("d") + dimStyle.Render(":delete  ")
+	}
+
+	legend += keyStyle.Render("/") + dimStyle.Render(":filter  ") +
 		keyStyle.Render("r") + dimStyle.Render(":refresh  ") +
 		keyStyle.Render("?") + dimStyle.Render(":help  ") +
 		keyStyle.Render("q") + dimStyle.Render(":quit")
+
+	return legend
 }
 
 // View renders the team list.
@@ -329,6 +501,8 @@ func (v TeamListView) renderActionPrompt() string {
 	switch v.mode {
 	case teamModeInput:
 		return styles.ActionPromptStyle.Render(v.input.Placeholder) + v.input.View()
+	case teamModeConfirm:
+		return styles.ActionConfirmStyle.Render(v.confirmMsg)
 	case teamModeResult:
 		if v.resultIsError {
 			return styles.ActionErrorStyle.Render("Error: " + v.resultMsg)
