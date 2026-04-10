@@ -18,7 +18,6 @@ package bootstrap
 
 import (
 	"fmt"
-	"os/exec"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -26,16 +25,10 @@ import (
 	"github.com/butlerdotdev/butler/internal/adm/bootstrap/orchestrator"
 )
 
-type prereqCheck struct {
-	name   string
-	passed bool
-	detail string
-}
-
 // preBootstrapModel shows config summary, prereq checks, and a confirmation prompt.
 type preBootstrapModel struct {
 	cfg     *orchestrator.Config
-	checks  []prereqCheck
+	checks  []Check
 	width   int
 	height  int
 	checked bool
@@ -54,53 +47,36 @@ func (m preBootstrapModel) Init() tea.Cmd {
 
 // runPrereqChecks runs prerequisite validation and returns results as a message.
 func (m preBootstrapModel) runPrereqChecks() tea.Msg {
-	checks := []prereqCheck{
-		m.checkDocker(),
-		m.checkConfig(),
-	}
+	checks := CheckAll(false)
+	checks = append(checks, m.checkConfig())
 	return prereqChecksMsg(checks)
 }
 
-type prereqChecksMsg []prereqCheck
+type prereqChecksMsg []Check
 
-func (m preBootstrapModel) checkDocker() prereqCheck {
-	check := prereqCheck{name: "Docker running"}
-	if err := exec.Command("docker", "info").Run(); err != nil {
-		check.passed = false
-		check.detail = "Docker is not running or not installed"
-	} else {
-		check.passed = true
-		check.detail = "Docker is available"
-	}
-	return check
-}
-
-func (m preBootstrapModel) checkConfig() prereqCheck {
-	check := prereqCheck{name: "Config valid"}
+func (m preBootstrapModel) checkConfig() Check {
+	check := Check{Name: "Config valid"}
 	if m.cfg == nil {
-		check.passed = false
-		check.detail = "No config loaded"
+		check.Detail = "No config loaded"
 		return check
 	}
 	if m.cfg.Cluster.Name == "" {
-		check.passed = false
-		check.detail = "Cluster name is required"
+		check.Detail = "Cluster name is required"
 		return check
 	}
 	if m.cfg.Provider == "" {
-		check.passed = false
-		check.detail = "Provider is required"
+		check.Detail = "Provider is required"
 		return check
 	}
-	check.passed = true
-	check.detail = "Configuration is valid"
+	check.Passed = true
+	check.Detail = "Configuration is valid"
 	return check
 }
 
 func (m preBootstrapModel) Update(msg tea.Msg) (preBootstrapModel, tea.Cmd) {
 	switch msg := msg.(type) {
 	case prereqChecksMsg:
-		m.checks = []prereqCheck(msg)
+		m.checks = []Check(msg)
 		m.checked = true
 	}
 	return m, nil
@@ -111,12 +87,7 @@ func (m preBootstrapModel) AllPassed() bool {
 	if !m.checked {
 		return false
 	}
-	for _, c := range m.checks {
-		if !c.passed {
-			return false
-		}
-	}
-	return true
+	return AllPassed(m.checks)
 }
 
 // SetSize sets the available render dimensions.
@@ -145,14 +116,14 @@ func (m preBootstrapModel) View() string {
 		b.WriteString(phasePending.Render("  Checking prerequisites...\n"))
 	} else {
 		for _, c := range m.checks {
-			if c.passed {
+			if c.Passed {
 				icon := phaseCompleted.Render(iconCompleted)
-				name := phaseCompleted.Render(c.name)
+				name := phaseCompleted.Render(c.Name)
 				b.WriteString(fmt.Sprintf("  %s %s\n", icon, name))
 			} else {
 				icon := phaseFailed.Render(iconFailed)
-				name := phaseFailed.Render(c.name)
-				detail := phaseFailed.Render(" - " + c.detail)
+				name := phaseFailed.Render(c.Name)
+				detail := phaseFailed.Render(" - " + c.Detail)
 				b.WriteString(fmt.Sprintf("  %s %s%s\n", icon, name, detail))
 			}
 		}

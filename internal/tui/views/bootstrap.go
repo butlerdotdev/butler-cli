@@ -23,6 +23,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/butlerdotdev/butler/internal/common/client"
+	"github.com/butlerdotdev/butler/internal/tui/bootstrap"
 	"github.com/butlerdotdev/butler/internal/tui/components"
 	"github.com/butlerdotdev/butler/internal/tui/styles"
 )
@@ -39,11 +40,21 @@ type BootstrapView struct {
 	width       int
 	height      int
 
+	// Prerequisite check state. Checks run asynchronously in Init and
+	// arrive as a prereqResultMsg. Enter is gated on required checks
+	// passing. 'r' re-runs the checks.
+	checks        []bootstrap.Check
+	checksLoaded  bool
+	checksRunning bool
+
 	// Requested is set to true when the user presses Enter on this view.
 	// The app's Update method checks this and returns tea.Quit so cmd.go
 	// can take over the bootstrap flow outside the Bubbletea program.
 	Requested bool
 }
+
+// prereqResultMsg carries the outcome of a prerequisite check run.
+type prereqResultMsg []bootstrap.Check
 
 // NewBootstrapView constructs the tab 0 launcher view. client may be nil
 // when the dashboard starts without a valid kubeconfig — the view renders
@@ -55,23 +66,45 @@ func NewBootstrapView(c *client.Client, contextName string) BootstrapView {
 	}
 }
 
-// Init is a no-op — the bootstrap view has no async data to fetch.
+// Init kicks off the prerequisite checks asynchronously.
 func (v BootstrapView) Init() tea.Cmd {
-	return nil
+	return runPrereqChecks
 }
 
-// Update handles Enter to request the bootstrap flow. Other keys are ignored
-// so global dashboard navigation (1-7, q, ?) can still flow through.
+// runPrereqChecks is a tea.Cmd that runs the bootstrap prerequisite checks
+// and returns the result as a prereqResultMsg. Runs docker+kubectl as
+// required and kind as optional (warning-only) since kind is only needed
+// for --local dev mode image loading.
+func runPrereqChecks() tea.Msg {
+	return prereqResultMsg(bootstrap.CheckAll(false))
+}
+
+// Update handles key events and prereq results.
 func (v BootstrapView) Update(msg tea.Msg) (BootstrapView, tea.Cmd) {
-	if keyMsg, ok := msg.(tea.KeyMsg); ok {
-		if keyMsg.String() == "enter" {
+	switch msg := msg.(type) {
+	case prereqResultMsg:
+		v.checks = []bootstrap.Check(msg)
+		v.checksLoaded = true
+		v.checksRunning = false
+		return v, nil
+	case tea.WindowSizeMsg:
+		v.width = msg.Width
+		v.height = msg.Height
+		return v, nil
+	case tea.KeyMsg:
+		switch msg.String() {
+		case "enter":
+			// Gate wizard launch on required prereqs passing.
+			if !v.checksLoaded || !bootstrap.AllPassed(v.checks) {
+				return v, nil
+			}
 			v.Requested = true
 			return v, tea.Quit
+		case "r":
+			v.checksRunning = true
+			v.checksLoaded = false
+			return v, runPrereqChecks
 		}
-	}
-	if sizeMsg, ok := msg.(tea.WindowSizeMsg); ok {
-		v.width = sizeMsg.Width
-		v.height = sizeMsg.Height
 	}
 	return v, nil
 }
@@ -109,6 +142,12 @@ func (v BootstrapView) View() string {
 	b.WriteString(statusPane.View())
 	b.WriteString("\n\n")
 
+	// Prerequisites panel.
+	b.WriteString(styles.SectionStyle.Render("Prerequisites"))
+	b.WriteString("\n\n")
+	b.WriteString(v.renderPrereqs())
+	b.WriteString("\n")
+
 	// Launcher panel.
 	launcherTitle := styles.SectionStyle.Render("Bootstrap a New Management Cluster")
 	b.WriteString(launcherTitle)
@@ -116,32 +155,62 @@ func (v BootstrapView) View() string {
 
 	dim := lipgloss.NewStyle().Foreground(styles.ColorMuted)
 	accent := lipgloss.NewStyle().Foreground(styles.ColorPrimary).Bold(true)
+	warn := lipgloss.NewStyle().Foreground(styles.ColorDanger).Bold(true)
 
-	b.WriteString(dim.Render("The bootstrap wizard walks you through creating a Butler"))
+	b.WriteString(dim.Render("The wizard will collect credentials, discover provider"))
 	b.WriteString("\n")
-	b.WriteString(dim.Render("management cluster on Harvester or Nutanix. It will:"))
-	b.WriteString("\n\n")
-	b.WriteString(dim.Render("  1. Collect provider credentials"))
+	b.WriteString(dim.Render("resources, ask for cluster sizing, and launch a live"))
 	b.WriteString("\n")
-	b.WriteString(dim.Render("  2. Discover available namespaces/networks/images"))
-	b.WriteString("\n")
-	b.WriteString(dim.Render("  3. Ask for cluster sizing and networking"))
-	b.WriteString("\n")
-	b.WriteString(dim.Render("  4. Sync the Talos image if needed"))
-	b.WriteString("\n")
-	b.WriteString(dim.Render("  5. Launch the bootstrap with a live progress view"))
+	b.WriteString(dim.Render("bootstrap progress view."))
 	b.WriteString("\n\n")
 
-	if v.client == nil {
-		b.WriteString(accent.Render("  No management cluster connected."))
-		b.WriteString("\n\n")
+	switch {
+	case !v.checksLoaded:
+		b.WriteString(dim.Render("  Checking prerequisites..."))
+	case !bootstrap.AllPassed(v.checks):
+		b.WriteString(warn.Render("  Prerequisites failed. Fix the issues above, then press r to recheck."))
+	default:
+		b.WriteString(accent.Render("  Press enter to launch the bootstrap wizard."))
+		b.WriteString("\n")
+		b.WriteString(dim.Render("  In the wizard: j/k navigate  enter next  esc back  ctrl+c cancel"))
+	}
+	b.WriteString("\n")
+
+	return b.String()
+}
+
+// renderPrereqs renders the list of prerequisite checks with colored icons.
+func (v BootstrapView) renderPrereqs() string {
+	if !v.checksLoaded {
+		return styles.DimStyle.Render("  running...")
 	}
 
-	b.WriteString(accent.Render("  Press enter to launch the bootstrap wizard."))
-	b.WriteString("\n")
-	b.WriteString(dim.Render("  In the wizard: j/k navigate  enter next  esc back  ctrl+c cancel"))
-	b.WriteString("\n")
+	ok := lipgloss.NewStyle().Foreground(styles.ColorPrimary).Bold(true)
+	fail := lipgloss.NewStyle().Foreground(styles.ColorDanger).Bold(true)
+	warn := lipgloss.NewStyle().Foreground(styles.ColorWarning).Bold(true)
+	dim := styles.DimStyle
 
+	var b strings.Builder
+	for _, c := range v.checks {
+		var icon, name string
+		switch {
+		case c.Passed:
+			icon = ok.Render("✓")
+			name = ok.Render(c.Name)
+		case c.Optional:
+			icon = warn.Render("!")
+			name = warn.Render(c.Name + " (optional)")
+		default:
+			icon = fail.Render("✗")
+			name = fail.Render(c.Name)
+		}
+		b.WriteString("  ")
+		b.WriteString(icon)
+		b.WriteString("  ")
+		b.WriteString(name)
+		b.WriteString(dim.Render(" — " + c.Detail))
+		b.WriteString("\n")
+	}
 	return b.String()
 }
 
@@ -151,7 +220,7 @@ func (v BootstrapView) KeyLegend() string {
 	keyStyle := styles.KeyLegendStyle
 	return dim.Render("  ") +
 		keyStyle.Render("enter") + dim.Render(":launch wizard  ") +
+		keyStyle.Render("r") + dim.Render(":recheck prereqs  ") +
 		keyStyle.Render("?") + dim.Render(":help  ") +
 		keyStyle.Render("q") + dim.Render(":quit")
 }
-
