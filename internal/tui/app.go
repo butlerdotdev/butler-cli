@@ -35,7 +35,8 @@ import (
 type ViewType int
 
 const (
-	ViewClusters ViewType = iota
+	ViewBootstrap ViewType = iota // tab 0 — admin-only bootstrap launcher
+	ViewClusters
 	ViewClusterDetail
 	ViewAddons
 	ViewTeams
@@ -47,6 +48,7 @@ const (
 )
 
 var viewNames = map[ViewType]string{
+	ViewBootstrap:     "Bootstrap",
 	ViewClusters:      "Clusters",
 	ViewClusterDetail: "Cluster Detail",
 	ViewAddons:        "Addon Catalog",
@@ -60,17 +62,23 @@ var viewNames = map[ViewType]string{
 
 // App is the root Bubbletea model for the Butler dashboard.
 type App struct {
-	client    *client.Client
-	view      ViewType
-	prevView  ViewType
-	keys      KeyMap
-	width     int
-	height    int
-	context        string // kubeconfig context name for status bar
-	isAdmin        bool   // controls whether admin-only views are shown
-	unauthenticated bool  // true when using raw kubeconfig without Butler auth
+	client          *client.Client // may be nil when no kubeconfig is available
+	view            ViewType
+	prevView        ViewType
+	keys            KeyMap
+	width           int
+	height          int
+	context         string // kubeconfig context name for status bar
+	isAdmin         bool   // controls whether admin-only views are shown
+	unauthenticated bool   // true when using raw kubeconfig without Butler auth
+
+	// BootstrapRequested is set when the user selects the bootstrap launcher
+	// on tab 0 and presses Enter. The cmd.go entry point inspects this after
+	// p.Run() returns to decide whether to run the wizard → bootstrap flow.
+	BootstrapRequested bool
 
 	// Views
+	bootstrapView views.BootstrapView
 	clusterList   views.ClusterListView
 	clusterDetail views.ClusterDetailView
 	addonCatalog  views.AddonCatalogView
@@ -85,7 +93,9 @@ type App struct {
 	initialized map[ViewType]bool
 }
 
-// NewApp creates a new dashboard application.
+// NewApp creates a new dashboard application. client may be nil when no
+// kubeconfig is available; in that case the dashboard starts on tab 0
+// (bootstrap) and all other views are gated behind "not connected" stubs.
 func NewApp(c *client.Client, contextName string, admin bool) *App {
 	// Check if Butler credentials are active
 	unauth := false
@@ -96,23 +106,47 @@ func NewApp(c *client.Client, contextName string, admin bool) *App {
 		}
 	}
 
-	return &App{
+	// Default landing view: admin + no cluster → bootstrap tab 0.
+	// Admin + connected → clusters tab 1.
+	// Non-admin → clusters tab 1 (tab 0 is admin-only).
+	defaultView := ViewClusters
+	if admin && c == nil {
+		defaultView = ViewBootstrap
+	}
+
+	app := &App{
 		client:          c,
-		view:            ViewClusters,
+		view:            defaultView,
 		keys:            DefaultKeyMap(),
 		context:         contextName,
 		isAdmin:         admin,
 		unauthenticated: unauth,
-		clusterList:     views.NewClusterListView(c),
+		bootstrapView:   views.NewBootstrapView(c, contextName),
 		helpView:        views.HelpView{Admin: admin},
 		initialized:     map[ViewType]bool{},
 	}
+
+	// Only construct the cluster list if we have a client. Without a
+	// client the list view would fail on its first fetch — skipping
+	// avoids putting a broken view in the initial state.
+	if c != nil {
+		app.clusterList = views.NewClusterListView(c)
+	}
+
+	return app
 }
 
 // Init initializes the first view.
 func (a *App) Init() tea.Cmd {
-	a.initialized[ViewClusters] = true
-	return a.clusterList.Init()
+	if a.view == ViewBootstrap {
+		a.initialized[ViewBootstrap] = true
+		return a.bootstrapView.Init()
+	}
+	if a.client != nil {
+		a.initialized[ViewClusters] = true
+		return a.clusterList.Init()
+	}
+	return nil
 }
 
 // Update handles incoming messages and dispatches to the active view.
@@ -161,7 +195,22 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if a.view == ViewClusters {
 				return a.drillIntoCluster()
 			}
+			if a.view == ViewBootstrap {
+				// Delegate to the bootstrap view — it sets Requested and
+				// returns tea.Quit. We mirror the flag onto the app so
+				// cmd.go can inspect it after Run() returns.
+				var cmd tea.Cmd
+				a.bootstrapView, cmd = a.bootstrapView.Update(msg)
+				if a.bootstrapView.Requested {
+					a.BootstrapRequested = true
+				}
+				return a, cmd
+			}
 
+		case key.Matches(msg, a.keys.ViewZero):
+			if a.isAdmin {
+				return a.switchView(ViewBootstrap)
+			}
 		case key.Matches(msg, a.keys.ViewOne):
 			return a.switchView(ViewClusters)
 		case key.Matches(msg, a.keys.ViewTwo):
@@ -255,6 +304,8 @@ func (a *App) renderKeyLegend() string {
 	keyStyle := styles.KeyLegendStyle
 
 	switch a.view {
+	case ViewBootstrap:
+		return a.bootstrapView.KeyLegend()
 	case ViewClusterDetail:
 		return a.clusterDetail.KeyLegend()
 	case ViewTeams:
@@ -291,6 +342,15 @@ func (a *App) renderTabs() string {
 		{"7", "Health", ViewHealth},
 	}
 
+	// Admin mode prepends the bootstrap tab at position 0.
+	if a.isAdmin {
+		tabs = append([]struct {
+			key  string
+			name string
+			view ViewType
+		}{{"0", "Bootstrap", ViewBootstrap}}, tabs...)
+	}
+
 	parts := make([]string, len(tabs))
 	for i, t := range tabs {
 		label := fmt.Sprintf("%s:%s", t.key, t.name)
@@ -304,7 +364,20 @@ func (a *App) renderTabs() string {
 }
 
 func (a *App) renderActiveView() string {
+	// Views other than Bootstrap require a connected client. Show a
+	// clear "not connected" hint instead of a broken empty panel.
+	if a.view != ViewBootstrap && a.view != ViewHelp && a.client == nil {
+		dim := styles.DimStyle
+		hint := styles.SectionStyle.Render("No management cluster connected") + "\n\n" +
+			dim.Render("  Press 0 to switch to the Bootstrap tab and create one,") + "\n" +
+			dim.Render("  or restart the TUI with --kubeconfig pointing at an") + "\n" +
+			dim.Render("  existing management cluster.")
+		return hint
+	}
+
 	switch a.view {
+	case ViewBootstrap:
+		return a.bootstrapView.View()
 	case ViewClusters:
 		return a.clusterList.View()
 	case ViewClusterDetail:
@@ -343,6 +416,16 @@ func (a *App) switchView(v ViewType) (tea.Model, tea.Cmd) {
 }
 
 func (a *App) initView(v ViewType) tea.Cmd {
+	// Bootstrap view is always available — it's the entry point when no
+	// client is present.
+	if v == ViewBootstrap {
+		return a.bootstrapView.Init()
+	}
+	// Other views require a connected client. Without one, do nothing;
+	// renderActiveView will show the "not connected" hint.
+	if a.client == nil {
+		return nil
+	}
 	switch v {
 	case ViewClusters:
 		a.clusterList = views.NewClusterListView(a.client)
@@ -423,6 +506,12 @@ func (a *App) isActiveInActionMode() bool {
 func (a *App) forwardToActive(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 	switch a.view {
+	case ViewBootstrap:
+		a.bootstrapView, cmd = a.bootstrapView.Update(msg)
+		if a.bootstrapView.Requested {
+			a.BootstrapRequested = true
+		}
+		return a, cmd
 	case ViewClusters:
 		a.clusterList, cmd = a.clusterList.Update(msg)
 	case ViewClusterDetail:
@@ -458,6 +547,10 @@ func (a *App) forwardToAll(msg tea.Msg) tea.Cmd {
 	var cmds []tea.Cmd
 	var cmd tea.Cmd
 
+	if a.initialized[ViewBootstrap] {
+		a.bootstrapView, cmd = a.bootstrapView.Update(msg)
+		cmds = append(cmds, cmd)
+	}
 	if a.initialized[ViewClusters] {
 		a.clusterList, cmd = a.clusterList.Update(msg)
 		cmds = append(cmds, cmd)
