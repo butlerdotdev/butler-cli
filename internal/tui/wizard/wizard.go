@@ -25,48 +25,21 @@ import (
 	"strconv"
 	"strings"
 
-	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/huh"
-	"github.com/charmbracelet/lipgloss"
 
 	"github.com/butlerdotdev/butler/internal/adm/bootstrap/orchestrator"
 	"github.com/butlerdotdev/butler/internal/tui/wizard/discovery"
 )
 
-const butlerLogo = `
- ██████╗  ██╗
- ██╔══██╗ ██║
- ██████╔╝ ██║
- ██╔══██╗ ██║
- ██████╔╝ ███████╗
- ╚═════╝  ╚══════╝`
-
-// printBanner displays the Butler logo and keyboard hints.
-func printBanner() {
-	green := lipgloss.NewStyle().Foreground(brandGreen).Bold(true)
-	dim := lipgloss.NewStyle().Foreground(brandGray)
-	blue := lipgloss.NewStyle().Foreground(brandBlue)
-
-	fmt.Println(green.Render(butlerLogo))
-	fmt.Println()
-	fmt.Println(green.Render("  B U T L E R"))
-	fmt.Println(blue.Render("  Bootstrap Wizard"))
-	fmt.Println()
-	fmt.Println(dim.Render("  ↑/↓ navigate  |  Enter next  |  Shift+Tab prev field  |  Esc back"))
-	fmt.Println()
-}
-
 // Run launches the interactive bootstrap wizard and returns a fully-populated
 // orchestrator.Config ready to hand to the bootstrap TUI or orchestrator.
 //
-// Flow: provider + credentials → async discovery → resource selection +
-// cluster sizing + networking → review → optional image factory sync.
+// Flow: provider + credentials, async discovery, resource selection plus
+// cluster sizing plus networking, review, optional image factory sync.
 //
 // Harvester and Nutanix are the only supported providers today. Cloud
 // providers (AWS/Azure/GCP) require building with -tags cloud_discovery.
 func Run() (*orchestrator.Config, error) {
-	printBanner()
-
 	s := newWizardState()
 	theme := butlerTheme()
 	km := wizardKeyMap()
@@ -76,8 +49,10 @@ func Run() (*orchestrator.Config, error) {
 	confirmed := false
 
 	for {
-		// Form 1: Provider selection and credentials. Runs fullscreen
-		// (alt-screen) to match the dashboard and bootstrap TUI feel.
+		// Form 1: Provider selection and credentials. Wrapped in a
+		// wizardShell so the fullscreen frame has the same header and
+		// key legend as the dashboard TUI. huh's built-in help is
+		// suppressed because the shell renders its own legend.
 		form1 := huh.NewForm(
 			providerSelectGroup(s),
 			harvesterCredGroup(s),
@@ -85,10 +60,13 @@ func Run() (*orchestrator.Config, error) {
 		).
 			WithTheme(theme).
 			WithKeyMap(km).
-			WithProgramOptions(tea.WithAltScreen())
+			WithShowHelp(false)
 
-		if err := form1.Run(); err != nil {
+		if err := runFormShell(form1, "Butler Bootstrap Wizard  Step 1/2: Provider"); err != nil {
 			return nil, fmt.Errorf("wizard cancelled: %w", err)
+		}
+		if form1.State == huh.StateAborted {
+			return nil, fmt.Errorf("wizard cancelled by user")
 		}
 
 		// Build the discovery client from wizard state and connect to the
@@ -115,10 +93,13 @@ func Run() (*orchestrator.Config, error) {
 		).
 			WithTheme(theme).
 			WithKeyMap(km).
-			WithProgramOptions(tea.WithAltScreen())
+			WithShowHelp(false)
 
-		if err := form2.Run(); err != nil {
-			// Ctrl+C on form2 → loop back to form1 so the user can
+		if err := runFormShell(form2, "Butler Bootstrap Wizard  Step 2/2: Configuration"); err != nil {
+			return nil, fmt.Errorf("wizard cancelled: %w", err)
+		}
+		if form2.State == huh.StateAborted {
+			// Ctrl+C on form2 — loop back to form1 so the user can
 			// re-enter credentials or switch provider.
 			continue
 		}
