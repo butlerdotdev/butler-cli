@@ -49,6 +49,19 @@ func butlerTheme() *huh.Theme {
 	t.Blurred.Title = t.Blurred.Title.Foreground(brandGray)
 	t.Blurred.TextInput.Prompt = t.Blurred.TextInput.Prompt.Foreground(brandGray)
 
+	// Help legend — match the dashboard's bottom key bar: bold keys over
+	// dim separators and descriptions. Keeps the visual identity consistent
+	// when operators move between the dashboard TUI and the wizard.
+	keyColor := lipgloss.Color("#888888")
+	dimColor := lipgloss.Color("#555555")
+	t.Help.ShortKey = t.Help.ShortKey.Foreground(keyColor).Bold(true)
+	t.Help.ShortDesc = t.Help.ShortDesc.Foreground(dimColor)
+	t.Help.ShortSeparator = t.Help.ShortSeparator.Foreground(dimColor)
+	t.Help.FullKey = t.Help.FullKey.Foreground(keyColor).Bold(true)
+	t.Help.FullDesc = t.Help.FullDesc.Foreground(dimColor)
+	t.Help.FullSeparator = t.Help.FullSeparator.Foreground(dimColor)
+	t.Help.Ellipsis = t.Help.Ellipsis.Foreground(dimColor)
+
 	return t
 }
 

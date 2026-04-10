@@ -133,13 +133,13 @@ func (v BootstrapView) View() string {
 	b.WriteString("\n\n")
 
 	if v.client == nil {
-		b.WriteString(accent.Render("⚠  No management cluster connected."))
+		b.WriteString(accent.Render("  No management cluster connected."))
 		b.WriteString("\n\n")
 	}
 
-	b.WriteString(accent.Render("  Press "))
-	b.WriteString(accent.Render("enter"))
-	b.WriteString(accent.Render(" to launch the bootstrap wizard."))
+	b.WriteString(accent.Render("  Press enter to launch the bootstrap wizard."))
+	b.WriteString("\n")
+	b.WriteString(dim.Render("  In the wizard: j/k navigate  enter next  esc back  ctrl+c cancel"))
 	b.WriteString("\n")
 
 	return b.String()
