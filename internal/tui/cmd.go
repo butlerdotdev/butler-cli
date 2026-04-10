@@ -22,7 +22,6 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/spf13/cobra"
 
-	"github.com/butlerdotdev/butler/internal/common/auth"
 	"github.com/butlerdotdev/butler/internal/common/client"
 )
 
@@ -56,10 +55,6 @@ Examples:
   butlerctl tui --context butler-beta`,
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if admin {
-				auth.WarnIfUnauthenticated()
-			}
-
 			kubeContext, _ := cmd.Flags().GetString("context")
 
 			c, err := client.New(kubeconfig, kubeContext)

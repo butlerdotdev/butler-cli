@@ -102,3 +102,18 @@ func ColorizePhase(phase string) string {
 		return BadgePending.Render(phase)
 	}
 }
+
+// WarningBannerStyle renders a warning banner.
+var WarningBannerStyle = lipgloss.NewStyle().
+	Foreground(ColorWarning).
+	Background(lipgloss.Color("#3a2a00")).
+	Bold(true)
+
+// DimStyle renders dimmed help text.
+var DimStyle = lipgloss.NewStyle().
+	Foreground(lipgloss.Color("#555555"))
+
+// KeyLegendStyle renders key names in the legend bar.
+var KeyLegendStyle = lipgloss.NewStyle().
+	Foreground(lipgloss.Color("#888888")).
+	Bold(true)

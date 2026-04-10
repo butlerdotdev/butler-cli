@@ -24,6 +24,7 @@ import (
 	"github.com/charmbracelet/bubbles/key"
 	tea "github.com/charmbracelet/bubbletea"
 
+	"github.com/butlerdotdev/butler/internal/common/auth"
 	"github.com/butlerdotdev/butler/internal/common/client"
 	"github.com/butlerdotdev/butler/internal/tui/components"
 	"github.com/butlerdotdev/butler/internal/tui/styles"
@@ -65,8 +66,9 @@ type App struct {
 	keys      KeyMap
 	width     int
 	height    int
-	context   string // kubeconfig context name for status bar
-	isAdmin   bool   // controls whether admin-only views are shown
+	context        string // kubeconfig context name for status bar
+	isAdmin        bool   // controls whether admin-only views are shown
+	unauthenticated bool  // true when using raw kubeconfig without Butler auth
 
 	// Views
 	clusterList   views.ClusterListView
@@ -85,14 +87,24 @@ type App struct {
 
 // NewApp creates a new dashboard application.
 func NewApp(c *client.Client, contextName string, admin bool) *App {
+	// Check if Butler credentials are active
+	unauth := false
+	if admin {
+		creds, err := auth.LoadCredentials()
+		if err != nil || creds.ActiveCredential() == nil {
+			unauth = true
+		}
+	}
+
 	return &App{
-		client:      c,
-		view:        ViewClusters,
-		keys:        DefaultKeyMap(),
-		context:     contextName,
-		isAdmin:     admin,
-		clusterList: views.NewClusterListView(c),
-		initialized: map[ViewType]bool{},
+		client:          c,
+		view:            ViewClusters,
+		keys:            DefaultKeyMap(),
+		context:         contextName,
+		isAdmin:         admin,
+		unauthenticated: unauth,
+		clusterList:     views.NewClusterListView(c),
+		initialized:     map[ViewType]bool{},
 	}
 }
 
@@ -198,7 +210,11 @@ func (a App) View() string {
 	b.WriteString("\n")
 
 	// Main content
-	contentHeight := a.height - 4 // header + breadcrumb + status bar + padding
+	extraLines := 2 // key legend + status bar
+	if a.unauthenticated {
+		extraLines++ // auth warning banner
+	}
+	contentHeight := a.height - 3 - extraLines // header + breadcrumb + newline + bottom
 	content := a.renderActiveView()
 	b.WriteString(content)
 
@@ -209,6 +225,19 @@ func (a App) View() string {
 	}
 
 	// Status bar
+	// Auth warning banner
+	if a.unauthenticated {
+		warn := styles.WarningBannerStyle.Render(" Warning: unauthenticated. Run 'butleradm login' for scoped access. ")
+		b.WriteString(warn)
+		b.WriteString("\n")
+	}
+
+	// Key legend
+	legend := a.renderKeyLegend()
+	b.WriteString(legend)
+	b.WriteString("\n")
+
+	// Status bar
 	sb := components.StatusBar{
 		ViewName: viewNames[a.view],
 		Context:  a.context,
@@ -217,6 +246,28 @@ func (a App) View() string {
 	b.WriteString(sb.View())
 
 	return b.String()
+}
+
+func (a App) renderKeyLegend() string {
+	dimStyle := styles.DimStyle
+	keyStyle := styles.KeyLegendStyle
+
+	if a.view == ViewClusterDetail {
+		return dimStyle.Render("  ") +
+			keyStyle.Render("tab") + dimStyle.Render(":switch tab  ") +
+			keyStyle.Render("esc") + dimStyle.Render(":back  ") +
+			keyStyle.Render("r") + dimStyle.Render(":refresh  ") +
+			keyStyle.Render("/") + dimStyle.Render(":filter  ") +
+			keyStyle.Render("?") + dimStyle.Render(":help  ") +
+			keyStyle.Render("q") + dimStyle.Render(":quit")
+	}
+	return dimStyle.Render("  ") +
+		keyStyle.Render("j/k") + dimStyle.Render(":navigate  ") +
+		keyStyle.Render("enter") + dimStyle.Render(":select  ") +
+		keyStyle.Render("/") + dimStyle.Render(":filter  ") +
+		keyStyle.Render("r") + dimStyle.Render(":refresh  ") +
+		keyStyle.Render("?") + dimStyle.Render(":help  ") +
+		keyStyle.Render("q") + dimStyle.Render(":quit")
 }
 
 func (a App) renderTabs() string {
