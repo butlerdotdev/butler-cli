@@ -31,17 +31,19 @@ const (
 	EventBootstrapStatus                  // Full CRD status snapshot from watchBootstrap
 	EventComplete                         // Bootstrap finished successfully
 	EventFailed                           // Bootstrap failed
+	EventKINDReady                        // KIND cluster is up, kubeconfig available
 )
 
 // Event is a single bootstrap lifecycle event emitted by the orchestrator.
 type Event struct {
-	Type      EventType
-	Timestamp time.Time
-	Message   string
-	Phase     string              // Current orchestrator phase name
-	Status    *BootstrapSnapshot  // Non-nil for EventBootstrapStatus
-	Creds     *ClusterCredentials // Non-nil for EventComplete
-	Error     error               // Non-nil for EventFailed
+	Type           EventType
+	Timestamp      time.Time
+	Message        string
+	Phase          string              // Current orchestrator phase name
+	Status         *BootstrapSnapshot  // Non-nil for EventBootstrapStatus
+	Creds          *ClusterCredentials // Non-nil for EventComplete
+	Error          error               // Non-nil for EventFailed
+	KINDKubeconfig string              // Non-empty for EventKINDReady: path to KIND kubeconfig file
 }
 
 // BootstrapSnapshot captures the full ClusterBootstrap CRD status at a point in time.

@@ -19,18 +19,19 @@ package bootstrap
 import "github.com/charmbracelet/bubbles/key"
 
 type keyMap struct {
-	Quit       key.Binding
-	ForceQuit  key.Binding
-	TabNext    key.Binding
-	TabPrev    key.Binding
-	ToggleLogs key.Binding
-	ScrollUp   key.Binding
-	ScrollDown key.Binding
-	Filter     key.Binding
-	Confirm    key.Binding
-	Cancel     key.Binding
-	Yes        key.Binding
-	No         key.Binding
+	Quit        key.Binding
+	ForceQuit   key.Binding
+	TabNext     key.Binding
+	TabPrev     key.Binding
+	ToggleLogs  key.Binding
+	ToggleDebug key.Binding
+	ScrollUp    key.Binding
+	ScrollDown  key.Binding
+	Filter      key.Binding
+	Confirm     key.Binding
+	Cancel      key.Binding
+	Yes         key.Binding
+	No          key.Binding
 }
 
 var keys = keyMap{
@@ -53,6 +54,10 @@ var keys = keyMap{
 	ToggleLogs: key.NewBinding(
 		key.WithKeys("l"),
 		key.WithHelp("l", "toggle logs"),
+	),
+	ToggleDebug: key.NewBinding(
+		key.WithKeys("d"),
+		key.WithHelp("d", "toggle debug panel"),
 	),
 	ScrollUp: key.NewBinding(
 		key.WithKeys("k", "up"),

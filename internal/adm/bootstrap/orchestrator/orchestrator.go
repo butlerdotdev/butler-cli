@@ -149,6 +149,15 @@ func (o *Orchestrator) Run(ctx context.Context, cfg *Config) error {
 	if err != nil {
 		return fmt.Errorf("creating KIND cluster: %w", err)
 	}
+	// Tell the TUI where the KIND kubeconfig lives so it can start streaming
+	// butler-bootstrap-controller and butler-provider-* pod logs into the
+	// debug panel.
+	o.emit(Event{
+		Type:           EventKINDReady,
+		Phase:          "KINDReady",
+		Message:        "KIND cluster ready",
+		KINDKubeconfig: kubeconfigPath,
+	})
 	defer func() {
 		if !o.options.SkipCleanup {
 			o.logger.Phase("Cleaning up KIND cluster")

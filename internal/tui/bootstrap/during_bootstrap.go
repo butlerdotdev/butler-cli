@@ -44,6 +44,7 @@ type duringBootstrapModel struct {
 	machines machineTableModel
 	addons   addonChecklistModel
 	logs     logViewportModel
+	debug    debugPanelModel
 
 	activePanel    panel
 	provider       string
@@ -60,6 +61,7 @@ func newDuringBootstrapModel(provider, clusterName string, logBuf *LogBuffer) du
 		machines:    newMachineTableModel(),
 		addons:      newAddonChecklistModel(),
 		logs:        newLogViewportModel(logBuf),
+		debug:       newDebugPanelModel(),
 		provider:    provider,
 		clusterName: clusterName,
 		startTime:   time.Now(),
@@ -108,10 +110,31 @@ func (m duringBootstrapModel) Update(msg tea.Msg) (duringBootstrapModel, tea.Cmd
 		case key.Matches(msg, keys.Quit), key.Matches(msg, keys.ForceQuit):
 			m.confirmingQuit = true
 			return m, nil
+		case key.Matches(msg, keys.ToggleDebug):
+			m.debug.Toggle()
+			return m, nil
 		case key.Matches(msg, keys.TabNext):
-			m.cyclePanel(1)
+			if m.debug.IsActive() {
+				m.debug.CycleTab(1)
+			} else {
+				m.cyclePanel(1)
+			}
 		case key.Matches(msg, keys.TabPrev):
-			m.cyclePanel(-1)
+			if m.debug.IsActive() {
+				m.debug.CycleTab(-1)
+			} else {
+				m.cyclePanel(-1)
+			}
+		case key.Matches(msg, keys.ScrollUp):
+			if m.debug.IsActive() {
+				m.debug.ScrollBy(-1)
+				return m, nil
+			}
+		case key.Matches(msg, keys.ScrollDown):
+			if m.debug.IsActive() {
+				m.debug.ScrollBy(1)
+				return m, nil
+			}
 		case key.Matches(msg, keys.ToggleLogs):
 			m.logs.ToggleVisible()
 		case key.Matches(msg, keys.Filter):
@@ -149,11 +172,16 @@ func (m *duringBootstrapModel) handleEvent(e orchestrator.Event) {
 		if e.Status != nil {
 			m.machines.SetMachines(e.Status.Machines)
 			m.addons.SetAddons(e.Status.AddonsInstalled)
+			m.debug.SetStatus(e.Status)
 		}
+	case orchestrator.EventKINDReady:
+		m.debug.Start(e.KINDKubeconfig)
 	case orchestrator.EventFailed:
 		m.phases.SetFailed()
+		m.debug.Stop()
 	case orchestrator.EventComplete:
 		m.phases.SetCompleted()
+		m.debug.Stop()
 	}
 }
 
@@ -192,6 +220,7 @@ func (m *duringBootstrapModel) SetSize(w, h int) {
 		logH = 3
 	}
 	m.logs.SetSize(contentWidth-4, logH)
+	m.debug.SetSize(contentWidth, h)
 }
 
 func (m duringBootstrapModel) View() string {
@@ -202,6 +231,9 @@ func (m duringBootstrapModel) View() string {
 	// Title bar with elapsed time
 	elapsed := time.Since(m.startTime).Round(time.Second)
 	titleText := fmt.Sprintf("Butler Bootstrap -- %s", m.provider)
+	if m.debug.IsActive() {
+		titleText += "  [DEBUG]"
+	}
 	elapsedText := dimStyle.Render(fmt.Sprintf("%s", elapsed))
 	padding := contentWidth - lipgloss.Width(titleText) - lipgloss.Width(elapsedText) - 2
 	if padding < 1 {
@@ -216,6 +248,15 @@ func (m duringBootstrapModel) View() string {
 		b.WriteString("\n")
 		b.WriteString(failureStyle.Render("  Abort bootstrap? This will clean up the KIND cluster.") + "\n")
 		b.WriteString(dimStyle.Render("  Press y to confirm, n to cancel") + "\n\n")
+	}
+
+	// Debug panel replaces the entire content area when active.
+	if m.debug.IsActive() {
+		b.WriteString(normalBorder.Width(contentWidth).Render(m.debug.View()))
+		b.WriteString("\n")
+		help := helpBarStyle.Render("q quit  d back to progress  Tab switch tab  j/k scroll")
+		b.WriteString(help)
+		return b.String()
 	}
 
 	// Phases panel
@@ -253,7 +294,7 @@ func (m duringBootstrapModel) View() string {
 	}
 
 	// Help bar
-	help := helpBarStyle.Render("q quit  Tab panels  l logs  / filter  j/k scroll")
+	help := helpBarStyle.Render("q quit  Tab panels  l logs  d debug  / filter  j/k scroll")
 	b.WriteString(help)
 
 	return b.String()
