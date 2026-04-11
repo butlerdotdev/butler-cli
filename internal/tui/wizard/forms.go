@@ -360,6 +360,155 @@ func networkingStep(s *wizardState) *huh.Group {
 	)
 }
 
+// ipamStep toggles whether the bootstrap creates a NetworkPool CR for
+// tenant IPAM. The explanatory Note makes it clear that disabling IPAM
+// means operators have to stand up the NetworkPool + ProviderConfig
+// network section manually after bootstrap, which is the historical
+// path and a common source of "tenant creation hangs on IP allocation"
+// failures.
+func ipamStep(s *wizardState) *huh.Group {
+	return huh.NewGroup(
+		huh.NewNote().
+			Title("Tenant IP Allocation (IPAM)").
+			Description(
+				"Butler uses a NetworkPool CR to allocate IPs to tenant clusters\n" +
+					"on on-prem providers (Harvester, Nutanix, Proxmox). Without one,\n" +
+					"tenant creation fails at IP allocation and you have to build the\n" +
+					"NetworkPool and ProviderConfig.spec.network by hand later.\n\n" +
+					"Enabling IPAM here makes the bootstrap emit the NetworkPool and\n" +
+					"wire the ProviderConfig to use it — the management cluster is\n" +
+					"tenant-ready the moment bootstrap completes.\n\n" +
+					"Cloud providers (AWS, Azure, GCP) use native networking and\n" +
+					"should leave this disabled."),
+
+		huh.NewConfirm().
+			Title("Enable IPAM for tenant clusters?").
+			Affirmative("Enable").
+			Negative("Skip").
+			Value(&s.IPAMEnabled),
+	)
+}
+
+// networkPoolStep collects the NetworkPool CIDR, tenant allocation
+// sub-range, and per-tenant defaults. Hidden when IPAM is disabled.
+func networkPoolStep(s *wizardState) *huh.Group {
+	return huh.NewGroup(
+		huh.NewNote().
+			Title("NetworkPool").
+			Description(
+				"Pool CIDR is the full network range the pool manages. The\n" +
+					"Tenant Allocation sub-range is what the pool will hand out to\n" +
+					"tenant clusters — leave room outside it for the management\n" +
+					"cluster's own nodes, VIP, and LoadBalancer pool.\n\n" +
+					"Example: pool CIDR 10.40.0.0/22, management cluster lives in\n" +
+					"10.40.0.0/24 and 10.40.1.0/24, tenant allocation runs from\n" +
+					"10.40.2.0 to 10.40.3.254."),
+
+		huh.NewInput().
+			Title("Pool CIDR").
+			Description("Full network range the NetworkPool manages.").
+			Placeholder("10.40.0.0/22").
+			Value(&s.PoolCIDR),
+
+		huh.NewInput().
+			Title("Tenant Allocation Start").
+			Description("First IP allocatable to tenant clusters.").
+			Placeholder("10.40.2.0").
+			Value(&s.TenantAllocStart),
+
+		huh.NewInput().
+			Title("Tenant Allocation End").
+			Description("Last IP allocatable to tenant clusters.").
+			Placeholder("10.40.3.254").
+			Value(&s.TenantAllocEnd),
+
+		huh.NewInput().
+			Title("Default LB IPs per Tenant").
+			Description("How many LoadBalancer IPs each tenant gets by default.").
+			Value(&s.TenantLBPoolPerTenant).
+			Validate(validateIntRange(1, 64)),
+
+		huh.NewInput().
+			Title("Default Nodes per Tenant").
+			Description("How many node IPs each tenant gets by default.").
+			Value(&s.TenantNodesPerTenant).
+			Validate(validateIntRange(1, 64)),
+	).WithHideFunc(func() bool {
+		return !s.IPAMEnabled
+	})
+}
+
+// providerNetworkStep collects the ProviderConfig.spec.network settings
+// that bind the provider to the NetworkPool. Gateway and DNS servers are
+// required for tenant VMs to get a working network. LB allocation and
+// per-tenant quotas are less common to tune and ship with butler-beta's
+// defaults. Hidden when IPAM is disabled.
+func providerNetworkStep(s *wizardState) *huh.Group {
+	return huh.NewGroup(
+		huh.NewNote().
+			Title("Provider Network").
+			Description(
+				"These settings go into ProviderConfig.spec.network and tell the\n" +
+					"provider how to wire tenant VMs into the network: gateway, DNS,\n" +
+					"and how aggressively to allocate LB IPs per tenant.\n\n" +
+					"Defaults match butler-beta's production values — safe starting\n" +
+					"point that you can tune later via kubectl edit providerconfig."),
+
+		huh.NewInput().
+			Title("Gateway IP").
+			Description("Network gateway tenant VMs route through.").
+			Placeholder("10.40.0.1").
+			Value(&s.ProviderGateway),
+
+		huh.NewInput().
+			Title("DNS Servers").
+			Description("Comma-separated DNS IPs injected into tenant VMs.").
+			Placeholder("10.40.0.1, 1.1.1.1").
+			Value(&s.ProviderDNSServers),
+
+		huh.NewSelect[string]().
+			Title("LB Allocation Mode").
+			Description("static: fixed block per tenant. elastic: starts small, grows with demand.").
+			Options(
+				huh.NewOption("Static (fixed pool)", "static"),
+				huh.NewOption("Elastic (auto-scale)", "elastic"),
+			).
+			Value(&s.LBAllocationMode),
+
+		huh.NewInput().
+			Title("Initial LB Pool Size").
+			Description("Starting LB IPs per tenant.").
+			Value(&s.LBInitialPoolSize).
+			Validate(validateIntRange(1, 64)),
+
+		huh.NewInput().
+			Title("Default LB Pool Size").
+			Description("Target LB IPs per tenant in static mode.").
+			Value(&s.LBDefaultPoolSize).
+			Validate(validateIntRange(1, 64)),
+
+		huh.NewInput().
+			Title("Growth Increment").
+			Description("Elastic mode: IPs added per expansion step.").
+			Value(&s.LBGrowthIncrement).
+			Validate(validateIntRange(1, 64)),
+
+		huh.NewInput().
+			Title("Max LB IPs per Tenant").
+			Description("Hard cap on LB IP consumption per tenant.").
+			Value(&s.QuotaMaxLoadBalancerIPs).
+			Validate(validateIntRange(1, 256)),
+
+		huh.NewInput().
+			Title("Max Node IPs per Tenant").
+			Description("Hard cap on node IP consumption per tenant.").
+			Value(&s.QuotaMaxNodeIPs).
+			Validate(validateIntRange(1, 256)),
+	).WithHideFunc(func() bool {
+		return !s.IPAMEnabled
+	})
+}
+
 // exposureModeStep asks how tenant-cluster API servers will be exposed.
 // The Note spells out the trade-offs so operators can make an informed
 // choice instead of defaulting blindly.
@@ -603,6 +752,19 @@ func validateConfig(s *wizardState) error {
 		}
 	}
 
+	// IPAM conditional fields.
+	if s.IPAMEnabled {
+		if s.PoolCIDR == "" {
+			return fmt.Errorf("IPAM requires a Pool CIDR (go back to the NetworkPool step)")
+		}
+		if s.TenantAllocStart == "" || s.TenantAllocEnd == "" {
+			return fmt.Errorf("IPAM requires Tenant Allocation Start and End")
+		}
+		if s.ProviderGateway == "" {
+			return fmt.Errorf("IPAM requires a Gateway IP (go back to the Provider Network step)")
+		}
+	}
+
 	return nil
 }
 
@@ -634,6 +796,19 @@ func buildSummary(s *wizardState) string {
 		fmt.Fprintf(&b, "VIP:            %s\n", s.VIP)
 	}
 	fmt.Fprintf(&b, "LB Pool:        %s - %s\n", s.LBStart, s.LBEnd)
+
+	// IPAM / NetworkPool
+	if s.IPAMEnabled {
+		fmt.Fprintf(&b, "IPAM:           enabled\n")
+		fmt.Fprintf(&b, "Pool CIDR:      %s\n", s.PoolCIDR)
+		fmt.Fprintf(&b, "Tenant Range:   %s - %s\n", s.TenantAllocStart, s.TenantAllocEnd)
+		fmt.Fprintf(&b, "Gateway:        %s\n", s.ProviderGateway)
+		if s.ProviderDNSServers != "" {
+			fmt.Fprintf(&b, "DNS:            %s\n", s.ProviderDNSServers)
+		}
+	} else {
+		fmt.Fprintf(&b, "IPAM:           disabled (set up NetworkPool manually post-bootstrap)\n")
+	}
 
 	// Control plane exposure
 	fmt.Fprintf(&b, "Exposure:       %s", s.ExposureMode)

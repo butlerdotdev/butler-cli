@@ -70,6 +70,11 @@ var (
 		Version:  butlerAPIVersion,
 		Resource: "providerconfigs",
 	}
+	networkPoolGVR = schema.GroupVersionResource{
+		Group:    butlerAPIGroup,
+		Version:  butlerAPIVersion,
+		Resource: "networkpools",
+	}
 )
 
 // Options configures the orchestrator
@@ -212,6 +217,17 @@ func (o *Orchestrator) Run(ctx context.Context, cfg *Config) error {
 	o.emit(Event{Type: EventPhaseChange, Phase: "DeployingControllers", Message: "Deploying Butler controllers"})
 	if err := o.deployControllers(ctx, clientset, dynamicClient, cfg); err != nil {
 		return fmt.Errorf("deploying controllers: %w", err)
+	}
+
+	// Create NetworkPool CR for tenant IPAM (optional — only if config
+	// requested it). Runs before ProviderConfig so the ProviderConfig's
+	// poolRefs resolve immediately.
+	if cfg.NetworkPool != nil {
+		o.logger.Phase("Creating NetworkPool for tenant IPAM")
+		o.emit(Event{Type: EventPhaseChange, Phase: "CreatingNetworkPool", Message: "Creating NetworkPool"})
+		if err := o.createNetworkPool(ctx, dynamicClient, cfg); err != nil {
+			return fmt.Errorf("creating NetworkPool: %w", err)
+		}
 	}
 
 	// Create ProviderConfig CR
@@ -891,6 +907,139 @@ func (o *Orchestrator) createProviderConfig(ctx context.Context, client dynamic.
 	return nil
 }
 
+// createNetworkPool creates the NetworkPool CR from cfg.NetworkPool so the
+// platform has an IPAM pool ready for tenant cluster allocations. The pool
+// name defaults to "<cluster>-underlay" if unset so every bootstrap gets a
+// uniquely-scoped pool without clobbering existing ones on upgrade reruns.
+func (o *Orchestrator) createNetworkPool(ctx context.Context, client dynamic.Interface, cfg *Config) error {
+	np := cfg.NetworkPool
+	name := np.Name
+	if name == "" {
+		name = cfg.Cluster.Name + "-underlay"
+	}
+
+	spec := map[string]interface{}{
+		"cidr": np.CIDR,
+	}
+
+	if len(np.Reserved) > 0 {
+		reserved := make([]interface{}, 0, len(np.Reserved))
+		for _, r := range np.Reserved {
+			entry := map[string]interface{}{"cidr": r.CIDR}
+			if r.Description != "" {
+				entry["description"] = r.Description
+			}
+			reserved = append(reserved, entry)
+		}
+		spec["reserved"] = reserved
+	}
+
+	if np.TenantAllocation.Start != "" && np.TenantAllocation.End != "" {
+		ta := map[string]interface{}{
+			"start": np.TenantAllocation.Start,
+			"end":   np.TenantAllocation.End,
+		}
+		defaults := map[string]interface{}{}
+		if np.TenantAllocation.Defaults.LBPoolPerTenant > 0 {
+			defaults["lbPoolPerTenant"] = int64(np.TenantAllocation.Defaults.LBPoolPerTenant)
+		}
+		if np.TenantAllocation.Defaults.NodesPerTenant > 0 {
+			defaults["nodesPerTenant"] = int64(np.TenantAllocation.Defaults.NodesPerTenant)
+		}
+		if len(defaults) > 0 {
+			ta["defaults"] = defaults
+		}
+		spec["tenantAllocation"] = ta
+	}
+
+	pool := &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"apiVersion": butlerAPIGroup + "/" + butlerAPIVersion,
+			"kind":       "NetworkPool",
+			"metadata": map[string]interface{}{
+				"name":      name,
+				"namespace": butlerNamespace,
+			},
+			"spec": spec,
+		},
+	}
+
+	_, err := client.Resource(networkPoolGVR).Namespace(butlerNamespace).Create(
+		ctx, pool, metav1.CreateOptions{})
+	if err != nil {
+		return fmt.Errorf("creating NetworkPool: %w", err)
+	}
+
+	o.logger.Success("NetworkPool created", "name", name, "cidr", np.CIDR)
+	return nil
+}
+
+// buildProviderNetworkSection returns the map that goes into
+// ProviderConfig.spec.network, or nil if no provider network config is set.
+// Keeps the builder's switch-per-provider concise by extracting the shared
+// network block.
+func (o *Orchestrator) buildProviderNetworkSection(cfg *Config) map[string]interface{} {
+	if cfg.ProviderNetwork == nil {
+		return nil
+	}
+	pn := cfg.ProviderNetwork
+
+	network := map[string]interface{}{
+		"mode": pn.Mode,
+	}
+
+	if len(pn.PoolRefs) > 0 {
+		refs := make([]interface{}, 0, len(pn.PoolRefs))
+		for _, r := range pn.PoolRefs {
+			refs = append(refs, map[string]interface{}{
+				"name":     r.Name,
+				"priority": int64(r.Priority),
+			})
+		}
+		network["poolRefs"] = refs
+	}
+	if pn.Gateway != "" {
+		network["gateway"] = pn.Gateway
+	}
+	if len(pn.DNSServers) > 0 {
+		dns := make([]interface{}, 0, len(pn.DNSServers))
+		for _, d := range pn.DNSServers {
+			dns = append(dns, d)
+		}
+		network["dnsServers"] = dns
+	}
+	if pn.Subnet != "" {
+		network["subnet"] = pn.Subnet
+	}
+	if pn.LoadBalancer.AllocationMode != "" {
+		lb := map[string]interface{}{
+			"allocationMode": pn.LoadBalancer.AllocationMode,
+		}
+		if pn.LoadBalancer.InitialPoolSize > 0 {
+			lb["initialPoolSize"] = int64(pn.LoadBalancer.InitialPoolSize)
+		}
+		if pn.LoadBalancer.DefaultPoolSize > 0 {
+			lb["defaultPoolSize"] = int64(pn.LoadBalancer.DefaultPoolSize)
+		}
+		if pn.LoadBalancer.GrowthIncrement > 0 {
+			lb["growthIncrement"] = int64(pn.LoadBalancer.GrowthIncrement)
+		}
+		network["loadBalancer"] = lb
+	}
+	if pn.QuotaPerTenant.MaxLoadBalancerIPs > 0 || pn.QuotaPerTenant.MaxNodeIPs > 0 {
+		quota := map[string]interface{}{}
+		if pn.QuotaPerTenant.MaxLoadBalancerIPs > 0 {
+			quota["maxLoadBalancerIPs"] = int64(pn.QuotaPerTenant.MaxLoadBalancerIPs)
+		}
+		if pn.QuotaPerTenant.MaxNodeIPs > 0 {
+			quota["maxNodeIPs"] = int64(pn.QuotaPerTenant.MaxNodeIPs)
+		}
+		network["quotaPerTenant"] = quota
+	}
+
+	return network
+}
+
 // buildProviderConfigUnstructured builds a ProviderConfig as unstructured
 func (o *Orchestrator) buildProviderConfigUnstructured(cfg *Config) *unstructured.Unstructured {
 	spec := map[string]interface{}{
@@ -1000,6 +1149,11 @@ func (o *Orchestrator) buildProviderConfigUnstructured(cfg *Config) *unstructure
 			azureSpec["imageURN"] = cfg.ProviderConfig.Azure.ImageURN
 		}
 		spec["azure"] = azureSpec
+	}
+
+	// Bind the provider to the IPAM network pool (if one was configured).
+	if network := o.buildProviderNetworkSection(cfg); network != nil {
+		spec["network"] = network
 	}
 
 	pc := &unstructured.Unstructured{

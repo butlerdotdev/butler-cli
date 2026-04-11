@@ -45,8 +45,100 @@ type Config struct {
 	// If omitted, defaults to LoadBalancer mode.
 	ControlPlaneExposure *ControlPlaneExposureConfig `mapstructure:"controlPlaneExposure,omitempty"`
 
+	// NetworkPool defines the platform-level IPAM pool created during bootstrap.
+	// If nil, no NetworkPool is created and tenant IP allocation must be
+	// configured manually post-bootstrap.
+	NetworkPool *NetworkPoolConfig `mapstructure:"networkPool,omitempty"`
+
+	// ProviderNetwork configures the ProviderConfig CR's spec.network section,
+	// binding the provider to the NetworkPool for tenant IPAM. If nil, the
+	// provider's ProviderConfig is created without a network section (no IPAM).
+	ProviderNetwork *ProviderNetworkConfig `mapstructure:"providerNetwork,omitempty"`
+
 	// ProviderConfig contains provider-specific settings
 	ProviderConfig ProviderConfig `mapstructure:"providerConfig"`
+}
+
+// NetworkPoolConfig defines a platform-level IP pool for tenant IPAM.
+// When set, the orchestrator creates a NetworkPool CR in butler-system
+// during bootstrap, ready for tenant cluster allocations.
+type NetworkPoolConfig struct {
+	// Name is the NetworkPool resource name (defaults to "<cluster>-underlay").
+	Name string `mapstructure:"name"`
+
+	// CIDR is the network range the pool manages, e.g., "10.40.0.0/22".
+	CIDR string `mapstructure:"cidr"`
+
+	// Reserved ranges are excluded from allocation. Use this to carve out
+	// the management cluster's own IPs from the tenant-allocatable space.
+	Reserved []ReservedRangeConfig `mapstructure:"reserved,omitempty"`
+
+	// TenantAllocation defines the allocatable sub-range for tenants.
+	TenantAllocation TenantAllocationConfig `mapstructure:"tenantAllocation"`
+}
+
+// ReservedRangeConfig is a CIDR range excluded from tenant allocation.
+type ReservedRangeConfig struct {
+	CIDR        string `mapstructure:"cidr"`
+	Description string `mapstructure:"description,omitempty"`
+}
+
+// TenantAllocationConfig configures the allocatable sub-range and defaults.
+type TenantAllocationConfig struct {
+	Start    string                         `mapstructure:"start"`
+	End      string                         `mapstructure:"end"`
+	Defaults TenantAllocationDefaultsConfig `mapstructure:"defaults"`
+}
+
+// TenantAllocationDefaultsConfig defines default allocation sizes per tenant.
+type TenantAllocationDefaultsConfig struct {
+	LBPoolPerTenant int32 `mapstructure:"lbPoolPerTenant"`
+	NodesPerTenant  int32 `mapstructure:"nodesPerTenant"`
+}
+
+// ProviderNetworkConfig configures the ProviderConfig.spec.network section
+// that binds a provider to a NetworkPool for IPAM-based allocation.
+type ProviderNetworkConfig struct {
+	// Mode is "ipam" (pool-based) or "cloud" (provider-native networking).
+	Mode string `mapstructure:"mode"`
+
+	// PoolRefs references the NetworkPools to allocate from, priority-ordered.
+	PoolRefs []PoolReferenceConfig `mapstructure:"poolRefs,omitempty"`
+
+	// Gateway is the network gateway address used by tenant VMs.
+	Gateway string `mapstructure:"gateway,omitempty"`
+
+	// DNSServers are the DNS server addresses injected into tenant VMs.
+	DNSServers []string `mapstructure:"dnsServers,omitempty"`
+
+	// Subnet is the CIDR the provider advertises to the IPAM layer.
+	Subnet string `mapstructure:"subnet,omitempty"`
+
+	// LoadBalancer configures per-tenant LB IP allocation behaviour.
+	LoadBalancer LBAllocConfig `mapstructure:"loadBalancer,omitempty"`
+
+	// QuotaPerTenant caps per-tenant IP usage.
+	QuotaPerTenant QuotaPerTenantConfig `mapstructure:"quotaPerTenant,omitempty"`
+}
+
+// PoolReferenceConfig is a priority-ordered reference to a NetworkPool.
+type PoolReferenceConfig struct {
+	Name     string `mapstructure:"name"`
+	Priority int32  `mapstructure:"priority"`
+}
+
+// LBAllocConfig controls how LoadBalancer IPs are allocated per tenant.
+type LBAllocConfig struct {
+	AllocationMode  string `mapstructure:"allocationMode"` // static | elastic
+	InitialPoolSize int32  `mapstructure:"initialPoolSize"`
+	DefaultPoolSize int32  `mapstructure:"defaultPoolSize"`
+	GrowthIncrement int32  `mapstructure:"growthIncrement"`
+}
+
+// QuotaPerTenantConfig caps per-tenant IP usage.
+type QuotaPerTenantConfig struct {
+	MaxLoadBalancerIPs int32 `mapstructure:"maxLoadBalancerIPs"`
+	MaxNodeIPs         int32 `mapstructure:"maxNodeIPs"`
 }
 
 // ControlPlaneExposureConfig configures how tenant control planes are exposed.

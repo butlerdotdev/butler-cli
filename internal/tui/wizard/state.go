@@ -82,6 +82,26 @@ type wizardState struct {
 	ConsoleTLS            bool
 	ConsoleAdminPassword  string
 
+	// IPAM / NetworkPool. When IPAMEnabled is true the bootstrap creates
+	// a NetworkPool CR in butler-system and wires the ProviderConfig's
+	// spec.network section to use it. This is the difference between a
+	// management cluster that can immediately provision tenants and one
+	// that needs manual IPAM setup post-bootstrap.
+	IPAMEnabled             bool
+	PoolCIDR                string // e.g., 10.40.0.0/22 — the full network the pool manages
+	TenantAllocStart        string // first IP allocatable to tenants
+	TenantAllocEnd          string // last IP allocatable to tenants
+	TenantLBPoolPerTenant   string // default LB IPs per tenant (int as string for huh input)
+	TenantNodesPerTenant    string // default node IPs per tenant
+	ProviderGateway         string // gateway injected into tenant VMs
+	ProviderDNSServers      string // comma-separated DNS IPs
+	LBAllocationMode        string // static | elastic
+	LBInitialPoolSize       string
+	LBDefaultPoolSize       string
+	LBGrowthIncrement       string
+	QuotaMaxLoadBalancerIPs string
+	QuotaMaxNodeIPs         string
+
 	// Harvester provider inputs
 	HarvKubeconfig string
 	HarvNamespace  string
@@ -118,13 +138,22 @@ func newWizardState() *wizardState {
 		TalosVersion:           "v1.12.2",
 		TalosSchematic:         discovery.DefaultTalosSchematic,
 		NutPort:                "9440",
-		ExposureMode:           "LoadBalancer",
-		ExposureIngressClass:   "traefik",
-		ExposureControllerType: "traefik",
-		ConsoleIngressEnabled:  false,
-		ConsoleClass:           "traefik",
-		ConsoleTLS:             false,
-		ConsoleAdminPassword:   "admin",
+		ExposureMode:            "LoadBalancer",
+		ExposureIngressClass:    "traefik",
+		ExposureControllerType:  "traefik",
+		ConsoleIngressEnabled:   false,
+		ConsoleClass:            "traefik",
+		ConsoleTLS:              false,
+		ConsoleAdminPassword:    "admin",
+		IPAMEnabled:             true,
+		TenantLBPoolPerTenant:   "2",
+		TenantNodesPerTenant:    "5",
+		LBAllocationMode:        "static",
+		LBInitialPoolSize:       "2",
+		LBDefaultPoolSize:       "4",
+		LBGrowthIncrement:       "2",
+		QuotaMaxLoadBalancerIPs: "8",
+		QuotaMaxNodeIPs:         "10",
 	}
 }
 

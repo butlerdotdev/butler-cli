@@ -83,7 +83,7 @@ func Run() (*orchestrator.Config, error) {
 			return nil, err
 		}
 
-		// Form 2: Resource selection, cluster sizing, networking,
+		// Form 2: Resource selection, cluster sizing, networking, IPAM,
 		// exposure, console, review.
 		form2 := huh.NewForm(
 			resourceSelectGroup(s, disc, resources),
@@ -91,6 +91,9 @@ func Run() (*orchestrator.Config, error) {
 			cpReplicasStep(s),
 			workersStep(s),
 			networkingStep(s),
+			ipamStep(s),
+			networkPoolStep(s),
+			providerNetworkStep(s),
 			exposureModeStep(s),
 			exposureIngressStep(s),
 			exposureGatewayStep(s),
@@ -220,6 +223,63 @@ func buildConfig(s *wizardState) (*orchestrator.Config, error) {
 			ControllerType:   s.ExposureControllerType,
 			GatewayRef:       s.ExposureGatewayRef,
 		},
+	}
+
+	// IPAM: emit a NetworkPool and wire the ProviderConfig's spec.network
+	// section so the management cluster is ready to provision tenants the
+	// moment bootstrap completes. When disabled the bootstrap skips both
+	// and operators have to stand them up manually.
+	if s.IPAMEnabled {
+		lbPoolDefault, _ := parseInt32(s.TenantLBPoolPerTenant)
+		nodesDefault, _ := parseInt32(s.TenantNodesPerTenant)
+		initialPool, _ := parseInt32(s.LBInitialPoolSize)
+		defaultPool, _ := parseInt32(s.LBDefaultPoolSize)
+		growthInc, _ := parseInt32(s.LBGrowthIncrement)
+		maxLB, _ := parseInt32(s.QuotaMaxLoadBalancerIPs)
+		maxNodes, _ := parseInt32(s.QuotaMaxNodeIPs)
+
+		poolName := s.ClusterName + "-underlay"
+
+		cfg.NetworkPool = &orchestrator.NetworkPoolConfig{
+			Name: poolName,
+			CIDR: s.PoolCIDR,
+			TenantAllocation: orchestrator.TenantAllocationConfig{
+				Start: s.TenantAllocStart,
+				End:   s.TenantAllocEnd,
+				Defaults: orchestrator.TenantAllocationDefaultsConfig{
+					LBPoolPerTenant: lbPoolDefault,
+					NodesPerTenant:  nodesDefault,
+				},
+			},
+		}
+
+		// Parse DNS servers: comma-separated, trim whitespace.
+		var dnsServers []string
+		for _, d := range strings.Split(s.ProviderDNSServers, ",") {
+			if trimmed := strings.TrimSpace(d); trimmed != "" {
+				dnsServers = append(dnsServers, trimmed)
+			}
+		}
+
+		cfg.ProviderNetwork = &orchestrator.ProviderNetworkConfig{
+			Mode: "ipam",
+			PoolRefs: []orchestrator.PoolReferenceConfig{
+				{Name: poolName, Priority: 1},
+			},
+			Gateway:    s.ProviderGateway,
+			DNSServers: dnsServers,
+			Subnet:     s.PoolCIDR,
+			LoadBalancer: orchestrator.LBAllocConfig{
+				AllocationMode:  s.LBAllocationMode,
+				InitialPoolSize: initialPool,
+				DefaultPoolSize: defaultPool,
+				GrowthIncrement: growthInc,
+			},
+			QuotaPerTenant: orchestrator.QuotaPerTenantConfig{
+				MaxLoadBalancerIPs: maxLB,
+				MaxNodeIPs:         maxNodes,
+			},
+		}
 	}
 
 	// Single-node forces 1 replica, no workers.
