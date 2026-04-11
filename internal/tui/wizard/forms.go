@@ -286,8 +286,9 @@ func workersStep(s *wizardState) *huh.Group {
 
 		huh.NewInput().
 			Title("Worker Replicas").
+			Description("HA topology requires at least 3 workers so Longhorn can place its default 3 replicas. Fewer workers will fail during addon install (Steward etcd, butler-console, etc.)").
 			Value(&s.WorkerReplicas).
-			Validate(validateIntRange(1, 100)),
+			Validate(validateWorkerReplicas(s)),
 
 		huh.NewInput().
 			Title("Worker vCPUs").

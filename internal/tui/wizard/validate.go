@@ -109,3 +109,24 @@ func validateOptional(fn func(string) error) func(string) error {
 		return fn(s)
 	}
 }
+
+// validateWorkerReplicas combines the standard 1-100 range check with a
+// topology-aware floor: HA topology requires at least 3 workers because
+// Longhorn's default numberOfReplicas=3 needs 3 schedulable nodes, and
+// chart-backed addons like Steward (3-replica etcd) can't finish
+// installing with fewer worker nodes available for volume placement.
+func validateWorkerReplicas(state *wizardState) func(string) error {
+	return func(s string) error {
+		v, err := strconv.Atoi(s)
+		if err != nil {
+			return fmt.Errorf("must be a number")
+		}
+		if v < 1 || v > 100 {
+			return fmt.Errorf("must be between 1 and 100")
+		}
+		if state.Topology == "ha" && v < 3 {
+			return fmt.Errorf("HA topology requires at least 3 workers (Longhorn needs 3 schedulable nodes for default replica placement)")
+		}
+		return nil
+	}
+}
