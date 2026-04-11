@@ -103,10 +103,14 @@ func (m *machineTableModel) SetMachines(machines []orchestrator.MachineStatus) {
 		}
 	}
 	m.table.SetRows(rows)
-	// Adjust height to fit content (min 1, max 8)
+	// Adjust height to fit content. Bubbles table renders the header
+	// above the viewport and the rows inside the viewport; if the
+	// viewport height is 1 the single row ends up clipped by the header
+	// border and the panel looks empty. Floor at 3 so at least one row
+	// is visible even for single-node clusters.
 	h := len(rows)
-	if h < 1 {
-		h = 1
+	if h < 3 {
+		h = 3
 	}
 	if h > 8 {
 		h = 8

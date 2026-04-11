@@ -120,6 +120,8 @@ func (m *debugPanelModel) Start(kubeconfigPath string) {
 	ctx, cancel := context.WithCancel(context.Background())
 	m.cancel = cancel
 
+	m.controllerLogs.Write(fmt.Sprintf("[debug] connecting to KIND: %s", kubeconfigPath))
+
 	cfg, err := clientcmd.BuildConfigFromFlags("", kubeconfigPath)
 	if err != nil {
 		m.controllerLogs.Write(fmt.Sprintf("[debug] failed to load kubeconfig: %v", err))
@@ -130,6 +132,8 @@ func (m *debugPanelModel) Start(kubeconfigPath string) {
 		m.controllerLogs.Write(fmt.Sprintf("[debug] failed to build client: %v", err))
 		return
 	}
+
+	m.controllerLogs.Write("[debug] waiting for butler-bootstrap-controller pod...")
 
 	go streamPodLogs(ctx, client, "butler-system", "app.kubernetes.io/name=butler-bootstrap-controller", m.controllerLogs)
 }
@@ -144,8 +148,11 @@ func (m *debugPanelModel) Stop() {
 
 // streamPodLogs polls for a pod matching selector in namespace and streams
 // its logs into buf. Reconnects on pod restart or stream error until ctx
-// is cancelled.
+// is cancelled. Every state transition writes a diagnostic line into buf
+// so the operator can see what the streaming goroutine is doing without
+// having to re-run and add println statements.
 func streamPodLogs(ctx context.Context, client kubernetes.Interface, namespace, selector string, buf *LogBuffer) {
+	var announcedWaiting, announcedStreaming bool
 	for {
 		if ctx.Err() != nil {
 			return
@@ -154,23 +161,42 @@ func streamPodLogs(ctx context.Context, client kubernetes.Interface, namespace, 
 		pods, err := client.CoreV1().Pods(namespace).List(ctx, metav1.ListOptions{
 			LabelSelector: selector,
 		})
-		if err != nil || len(pods.Items) == 0 {
+		if err != nil {
+			buf.Write(fmt.Sprintf("[debug] list pods error: %v", err))
 			select {
 			case <-ctx.Done():
 				return
-			case <-time.After(2 * time.Second):
+			case <-time.After(3 * time.Second):
+				continue
+			}
+		}
+		if len(pods.Items) == 0 {
+			if !announcedWaiting {
+				buf.Write(fmt.Sprintf("[debug] no pods matching %q in %s yet", selector, namespace))
+				announcedWaiting = true
+			}
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(3 * time.Second):
 				continue
 			}
 		}
 
 		pod := pods.Items[0]
 		if pod.Status.Phase != corev1.PodRunning {
+			buf.Write(fmt.Sprintf("[debug] pod %s in phase %s, waiting...", pod.Name, pod.Status.Phase))
 			select {
 			case <-ctx.Done():
 				return
-			case <-time.After(2 * time.Second):
+			case <-time.After(3 * time.Second):
 				continue
 			}
+		}
+
+		if !announcedStreaming {
+			buf.Write(fmt.Sprintf("[debug] streaming logs from %s", pod.Name))
+			announcedStreaming = true
 		}
 
 		// Stream logs — Follow + SinceSeconds to catch anything we missed
@@ -194,15 +220,17 @@ func streamPodLogs(ctx context.Context, client kubernetes.Interface, namespace, 
 
 		scanner := bufio.NewScanner(stream)
 		scanner.Buffer(make([]byte, 64*1024), 1024*1024)
+		lineCount := 0
 		for scanner.Scan() {
 			line := scanner.Text()
-			// Trim klog/slog noise a bit — keep the message readable.
-			if strings.Contains(line, `"`) {
-				// JSON-ish line, leave as-is for fidelity.
-			}
+			_ = strings.TrimSpace(line)
 			buf.Write(line)
+			lineCount++
 		}
 		_ = stream.Close()
+
+		buf.Write(fmt.Sprintf("[debug] stream ended after %d lines, reconnecting...", lineCount))
+		announcedStreaming = false
 
 		// Stream ended — loop to reconnect.
 		select {
