@@ -438,33 +438,22 @@ func networkPoolStep(s *wizardState) *huh.Group {
 	})
 }
 
-// providerNetworkStep collects the ProviderConfig.spec.network settings
-// that bind the provider to the NetworkPool. Gateway and DNS servers are
-// required for tenant VMs to get a working network. LB allocation and
-// per-tenant quotas are less common to tune and ship with butler-beta's
-// defaults. Hidden when IPAM is disabled.
+// providerNetworkStep collects the LB allocation policy and per-tenant
+// quotas that go into ProviderConfig.spec.network. Gateway and DNS are
+// deliberately omitted: Harvester and Nutanix workload networks run DHCP,
+// so tenant VMs get both automatically. Operators who need static values
+// can add them post-bootstrap with kubectl edit providerconfig. Hidden
+// when IPAM is disabled.
 func providerNetworkStep(s *wizardState) *huh.Group {
 	return huh.NewGroup(
 		huh.NewNote().
-			Title("Provider Network").
+			Title("Tenant LB Allocation").
 			Description(
-				"These settings go into ProviderConfig.spec.network and tell the\n" +
-					"provider how to wire tenant VMs into the network: gateway, DNS,\n" +
-					"and how aggressively to allocate LB IPs per tenant.\n\n" +
+				"These settings go into ProviderConfig.spec.network and control\n" +
+					"how aggressively the platform allocates LoadBalancer IPs to each\n" +
+					"tenant cluster, plus the hard caps on per-tenant IP usage.\n\n" +
 					"Defaults match butler-beta's production values — safe starting\n" +
 					"point that you can tune later via kubectl edit providerconfig."),
-
-		huh.NewInput().
-			Title("Gateway IP").
-			Description("Network gateway tenant VMs route through.").
-			Placeholder("10.40.0.1").
-			Value(&s.ProviderGateway),
-
-		huh.NewInput().
-			Title("DNS Servers").
-			Description("Comma-separated DNS IPs injected into tenant VMs.").
-			Placeholder("10.40.0.1, 1.1.1.1").
-			Value(&s.ProviderDNSServers),
 
 		huh.NewSelect[string]().
 			Title("LB Allocation Mode").
@@ -760,9 +749,6 @@ func validateConfig(s *wizardState) error {
 		if s.TenantAllocStart == "" || s.TenantAllocEnd == "" {
 			return fmt.Errorf("IPAM requires Tenant Allocation Start and End")
 		}
-		if s.ProviderGateway == "" {
-			return fmt.Errorf("IPAM requires a Gateway IP (go back to the Provider Network step)")
-		}
 	}
 
 	return nil
@@ -802,10 +788,10 @@ func buildSummary(s *wizardState) string {
 		fmt.Fprintf(&b, "IPAM:           enabled\n")
 		fmt.Fprintf(&b, "Pool CIDR:      %s\n", s.PoolCIDR)
 		fmt.Fprintf(&b, "Tenant Range:   %s - %s\n", s.TenantAllocStart, s.TenantAllocEnd)
-		fmt.Fprintf(&b, "Gateway:        %s\n", s.ProviderGateway)
-		if s.ProviderDNSServers != "" {
-			fmt.Fprintf(&b, "DNS:            %s\n", s.ProviderDNSServers)
-		}
+		fmt.Fprintf(&b, "LB Alloc:       %s (initial=%s, default=%s, growth=%s)\n",
+			s.LBAllocationMode, s.LBInitialPoolSize, s.LBDefaultPoolSize, s.LBGrowthIncrement)
+		fmt.Fprintf(&b, "Quotas:         maxLB=%s, maxNodes=%s (per tenant)\n",
+			s.QuotaMaxLoadBalancerIPs, s.QuotaMaxNodeIPs)
 	} else {
 		fmt.Fprintf(&b, "IPAM:           disabled (set up NetworkPool manually post-bootstrap)\n")
 	}

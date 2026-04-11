@@ -253,22 +253,16 @@ func buildConfig(s *wizardState) (*orchestrator.Config, error) {
 			},
 		}
 
-		// Parse DNS servers: comma-separated, trim whitespace.
-		var dnsServers []string
-		for _, d := range strings.Split(s.ProviderDNSServers, ",") {
-			if trimmed := strings.TrimSpace(d); trimmed != "" {
-				dnsServers = append(dnsServers, trimmed)
-			}
-		}
-
+		// Gateway and DNS are deliberately omitted: Harvester/Nutanix
+		// workload networks run DHCP, so tenant VMs pick both up
+		// automatically. The ProviderConfig fields stay empty and the
+		// orchestrator's builder skips them when serializing.
 		cfg.ProviderNetwork = &orchestrator.ProviderNetworkConfig{
 			Mode: "ipam",
 			PoolRefs: []orchestrator.PoolReferenceConfig{
 				{Name: poolName, Priority: 1},
 			},
-			Gateway:    s.ProviderGateway,
-			DNSServers: dnsServers,
-			Subnet:     s.PoolCIDR,
+			Subnet: s.PoolCIDR,
 			LoadBalancer: orchestrator.LBAllocConfig{
 				AllocationMode:  s.LBAllocationMode,
 				InitialPoolSize: initialPool,

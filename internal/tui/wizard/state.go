@@ -87,14 +87,17 @@ type wizardState struct {
 	// spec.network section to use it. This is the difference between a
 	// management cluster that can immediately provision tenants and one
 	// that needs manual IPAM setup post-bootstrap.
+	//
+	// Gateway and DNS are intentionally not collected here: on Harvester
+	// and Nutanix the workload network runs DHCP so tenant VMs pick up
+	// both automatically. Operators who need static gateway/DNS can add
+	// them post-bootstrap with kubectl edit providerconfig.
 	IPAMEnabled             bool
 	PoolCIDR                string // e.g., 10.40.0.0/22 — the full network the pool manages
 	TenantAllocStart        string // first IP allocatable to tenants
 	TenantAllocEnd          string // last IP allocatable to tenants
 	TenantLBPoolPerTenant   string // default LB IPs per tenant (int as string for huh input)
 	TenantNodesPerTenant    string // default node IPs per tenant
-	ProviderGateway         string // gateway injected into tenant VMs
-	ProviderDNSServers      string // comma-separated DNS IPs
 	LBAllocationMode        string // static | elastic
 	LBInitialPoolSize       string
 	LBDefaultPoolSize       string
