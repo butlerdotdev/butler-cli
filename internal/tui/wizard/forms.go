@@ -393,21 +393,26 @@ func exposureModeStep(s *wizardState) *huh.Group {
 
 // exposureIngressStep collects the extra fields required when mode is
 // Ingress. Hidden for LoadBalancer/Gateway.
+//
+// Fields intentionally have no hard validators: huh's form.go blocks
+// prevGroup navigation whenever the current group has any validation
+// error, so a failed Next on an empty required field would trap the
+// operator inside the group with no way to go back and pick a different
+// exposure mode. Empty values are caught later by the orchestrator when
+// buildConfig hands the Config off for bootstrap.
 func exposureIngressStep(s *wizardState) *huh.Group {
 	return huh.NewGroup(
 		huh.NewInput().
 			Title("Wildcard Hostname").
 			Description("Wildcard domain for tenant API servers. A wildcard DNS record\nmust point this domain at the ingress load balancer IP.").
 			Placeholder("*.k8s.example.com").
-			Value(&s.ExposureHostname).
-			Validate(validateNotEmpty),
+			Value(&s.ExposureHostname),
 
 		huh.NewInput().
 			Title("Ingress Class Name").
 			Description("Which ingress controller class handles TLS passthrough").
 			Placeholder("traefik").
-			Value(&s.ExposureIngressClass).
-			Validate(validateNotEmpty),
+			Value(&s.ExposureIngressClass),
 
 		huh.NewSelect[string]().
 			Title("Ingress Controller Type").
@@ -425,22 +430,20 @@ func exposureIngressStep(s *wizardState) *huh.Group {
 }
 
 // exposureGatewayStep collects Gateway-specific fields. Hidden for
-// LoadBalancer/Ingress.
+// LoadBalancer/Ingress. No hard validators — see exposureIngressStep.
 func exposureGatewayStep(s *wizardState) *huh.Group {
 	return huh.NewGroup(
 		huh.NewInput().
 			Title("Wildcard Hostname").
 			Description("Wildcard domain for tenant API servers, pointed at the Gateway IP.").
 			Placeholder("*.k8s.example.com").
-			Value(&s.ExposureHostname).
-			Validate(validateNotEmpty),
+			Value(&s.ExposureHostname),
 
 		huh.NewInput().
 			Title("Gateway Reference").
 			Description("namespace/name of an existing Gateway resource that will\nterminate TLS passthrough for tenant API traffic.").
 			Placeholder("steward-system/steward-gateway").
-			Value(&s.ExposureGatewayRef).
-			Validate(validateNotEmpty),
+			Value(&s.ExposureGatewayRef),
 	).WithHideFunc(func() bool {
 		return s.ExposureMode != "Gateway"
 	})
@@ -474,21 +477,20 @@ func consoleStep(s *wizardState) *huh.Group {
 }
 
 // consoleIngressStep collects ingress details when the operator has opted
-// to expose the console. Hidden if ingress is disabled.
+// to expose the console. Hidden if ingress is disabled. No hard validators
+// — see exposureIngressStep for rationale.
 func consoleIngressStep(s *wizardState) *huh.Group {
 	return huh.NewGroup(
 		huh.NewInput().
 			Title("Console Hostname").
 			Description("DNS name pointing at the ingress IP.").
 			Placeholder("butler.example.com").
-			Value(&s.ConsoleHost).
-			Validate(validateNotEmpty),
+			Value(&s.ConsoleHost),
 
 		huh.NewInput().
 			Title("Ingress Class Name").
 			Placeholder("traefik").
-			Value(&s.ConsoleClass).
-			Validate(validateNotEmpty),
+			Value(&s.ConsoleClass),
 
 		huh.NewConfirm().
 			Title("Enable TLS termination?").
