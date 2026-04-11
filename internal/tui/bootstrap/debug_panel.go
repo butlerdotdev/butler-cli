@@ -37,26 +37,30 @@ type debugTab int
 
 const (
 	debugTabController debugTab = iota
+	debugTabProvider
 	debugTabCRStatus
 	debugTabCount
 )
 
-var debugTabNames = []string{"Controller Logs", "CR Status"}
+var debugTabNames = []string{"Controller Logs", "Provider Logs", "CR Status"}
 
 // debugPanelModel is a togglable sub-view of the during-bootstrap screen
 // that surfaces data the operator would otherwise have to chase via
 // `kind export kubeconfig` + `kubectl logs` + `kubectl describe`. It
-// streams butler-bootstrap-controller pod logs via client-go and renders
-// the last ClusterBootstrap CR snapshot received over the EventSink.
+// streams butler-bootstrap-controller and butler-provider-* pod logs via
+// client-go and renders the last ClusterBootstrap CR snapshot received
+// over the EventSink.
 type debugPanelModel struct {
 	active     bool
 	tab        debugTab
 	width      int
 	height     int
 	kubeconfig string
+	provider   string // harvester, nutanix, etc. — drives provider-log label selector
 
 	// Buffers fed by background log streaming goroutines.
 	controllerLogs *LogBuffer
+	providerLogs   *LogBuffer
 
 	// Last CR status snapshot (piggybacks on EventBootstrapStatus).
 	lastStatus *orchestrator.BootstrapSnapshot
@@ -65,12 +69,15 @@ type debugPanelModel struct {
 	cancel context.CancelFunc
 
 	// Scroll offset for the log viewport (number of lines to skip from top).
+	// Tracked per-tab so switching tabs resets scroll cleanly.
 	scrollOffset int
 }
 
-func newDebugPanelModel() debugPanelModel {
+func newDebugPanelModel(provider string) debugPanelModel {
 	return debugPanelModel{
+		provider:       provider,
 		controllerLogs: NewLogBuffer(2000),
+		providerLogs:   NewLogBuffer(2000),
 	}
 }
 
@@ -134,8 +141,15 @@ func (m *debugPanelModel) Start(kubeconfigPath string) {
 	}
 
 	m.controllerLogs.Write("[debug] waiting for butler-bootstrap-controller pod...")
-
 	go streamPodLogs(ctx, client, "butler-system", "app.kubernetes.io/name=butler-bootstrap-controller", m.controllerLogs)
+
+	if m.provider != "" {
+		providerLabel := fmt.Sprintf("app.kubernetes.io/name=butler-provider-%s", m.provider)
+		m.providerLogs.Write(fmt.Sprintf("[debug] waiting for butler-provider-%s pod...", m.provider))
+		go streamPodLogs(ctx, client, "butler-system", providerLabel, m.providerLogs)
+	} else {
+		m.providerLogs.Write("[debug] no provider configured — provider logs disabled")
+	}
 }
 
 // Stop cancels any running log streams. Safe to call before Start.
@@ -255,6 +269,8 @@ func (m debugPanelModel) View() string {
 	switch m.tab {
 	case debugTabController:
 		b.WriteString(m.renderLogs(m.controllerLogs))
+	case debugTabProvider:
+		b.WriteString(m.renderLogs(m.providerLogs))
 	case debugTabCRStatus:
 		b.WriteString(m.renderCRStatus())
 	}

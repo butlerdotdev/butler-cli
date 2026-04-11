@@ -130,3 +130,27 @@ func validateWorkerReplicas(state *wizardState) func(string) error {
 		return nil
 	}
 }
+
+// validateWorkerDiskGB combines the standard 20-4096 range check with a
+// topology-aware floor: HA topology requires at least 50GB worker disks
+// because Longhorn reserves ~30%% of each disk for overhead, and the full
+// Butler management cluster footprint (Steward 3x8GB etcd + Butler Console
+// DB + monitoring PVCs, all with default 3-replica placement) needs
+// enough headroom to schedule across the 3 workers. 25GB disks leave only
+// ~16GB usable per node after the reservation, which is too tight for
+// multi-volume Longhorn scheduling.
+func validateWorkerDiskGB(state *wizardState) func(string) error {
+	return func(s string) error {
+		v, err := strconv.Atoi(s)
+		if err != nil {
+			return fmt.Errorf("must be a number")
+		}
+		if v < 20 || v > 4096 {
+			return fmt.Errorf("must be between 20 and 4096")
+		}
+		if state.Topology == "ha" && v < 50 {
+			return fmt.Errorf("HA topology requires at least 50 GB worker disks (Longhorn reserves ~30%% overhead, leaving too little for Steward etcd + Console DB replicas on smaller disks)")
+		}
+		return nil
+	}
+}

@@ -312,8 +312,9 @@ func workersStep(s *wizardState) *huh.Group {
 
 		huh.NewInput().
 			Title("Worker Disk (GB)").
+			Description("HA topology requires at least 50 GB. Longhorn reserves ~30%% for overhead, and Steward etcd + Butler Console DB replicas need headroom.").
 			Value(&s.WorkerDiskGB).
-			Validate(validateIntRange(20, 4096)),
+			Validate(validateWorkerDiskGB(s)),
 	).WithHideFunc(func() bool {
 		return s.Topology == "single-node"
 	})
@@ -506,6 +507,12 @@ func consoleIngressStep(s *wizardState) *huh.Group {
 // re-evaluates it whenever any wizardState field changes — a static
 // Description would be captured at form construction time, before the
 // user has filled in namespace, cluster name, sizing, etc.
+//
+// The Launch confirm runs a soft validation pass via Confirm.Validate
+// that checks for missing required fields based on the selected
+// exposure and console modes. If something is missing, the confirm
+// blocks with an inline error and the operator can press Esc/Shift+Tab
+// to go back and fill it in.
 func reviewStep(s *wizardState, confirmed *bool) *huh.Group {
 	return huh.NewGroup(
 		huh.NewNote().
@@ -518,8 +525,85 @@ func reviewStep(s *wizardState, confirmed *bool) *huh.Group {
 			Title("Launch bootstrap with this configuration?").
 			Affirmative("Launch").
 			Negative("Cancel").
-			Value(confirmed),
+			Value(confirmed).
+			Validate(func(v bool) error {
+				if !v {
+					// Cancelling is always allowed; the wizard Run
+					// loop will exit with a cancelled error.
+					return nil
+				}
+				return validateConfig(s)
+			}),
 	)
+}
+
+// validateConfig performs a final sanity check over the wizardState
+// just before the bootstrap is launched. It catches conditional
+// required fields that the per-field validators can't block (see
+// exposureIngressStep for the reason the per-field validators were
+// removed) and returns the first problem as a single-line error so
+// the Confirm can display it inline.
+func validateConfig(s *wizardState) error {
+	if s.ClusterName == "" {
+		return fmt.Errorf("cluster name is required")
+	}
+	if s.Provider == "" {
+		return fmt.Errorf("provider is required")
+	}
+
+	// Provider-specific resource selection.
+	switch s.Provider {
+	case "harvester":
+		if s.HarvNamespace == "" {
+			return fmt.Errorf("Harvester namespace must be selected")
+		}
+		if s.HarvNetwork == "" {
+			return fmt.Errorf("Harvester network must be selected")
+		}
+		if s.ImageSource != "factory" && s.HarvImage == "" {
+			return fmt.Errorf("Harvester image must be selected (or choose 'Sync from Factory')")
+		}
+	case "nutanix":
+		if s.NutClusterUUID == "" {
+			return fmt.Errorf("Nutanix cluster must be selected")
+		}
+		if s.NutSubnetUUID == "" {
+			return fmt.Errorf("Nutanix subnet must be selected")
+		}
+		if s.ImageSource != "factory" && s.NutImageUUID == "" {
+			return fmt.Errorf("Nutanix image must be selected (or choose 'Sync from Factory')")
+		}
+	}
+
+	// Exposure mode conditional fields.
+	switch s.ExposureMode {
+	case "Ingress":
+		if s.ExposureHostname == "" {
+			return fmt.Errorf("Ingress exposure mode requires a Wildcard Hostname (go back to the Exposure step)")
+		}
+		if s.ExposureIngressClass == "" {
+			return fmt.Errorf("Ingress exposure mode requires an Ingress Class Name")
+		}
+	case "Gateway":
+		if s.ExposureHostname == "" {
+			return fmt.Errorf("Gateway exposure mode requires a Wildcard Hostname")
+		}
+		if s.ExposureGatewayRef == "" {
+			return fmt.Errorf("Gateway exposure mode requires a Gateway Reference (namespace/name)")
+		}
+	}
+
+	// Console ingress conditional fields.
+	if s.ConsoleIngressEnabled {
+		if s.ConsoleHost == "" {
+			return fmt.Errorf("Console ingress requires a Console Hostname (go back to the Console step)")
+		}
+		if s.ConsoleClass == "" {
+			return fmt.Errorf("Console ingress requires an Ingress Class Name")
+		}
+	}
+
+	return nil
 }
 
 // buildSummary renders a human-readable summary of the collected wizard state

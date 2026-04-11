@@ -61,7 +61,7 @@ func newDuringBootstrapModel(provider, clusterName string, logBuf *LogBuffer) du
 		machines:    newMachineTableModel(),
 		addons:      newAddonChecklistModel(),
 		logs:        newLogViewportModel(logBuf),
-		debug:       newDebugPanelModel(),
+		debug:       newDebugPanelModel(provider),
 		provider:    provider,
 		clusterName: clusterName,
 		startTime:   time.Now(),
