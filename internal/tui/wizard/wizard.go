@@ -83,13 +83,19 @@ func Run() (*orchestrator.Config, error) {
 			return nil, err
 		}
 
-		// Form 2: Resource selection, cluster sizing, networking, review.
+		// Form 2: Resource selection, cluster sizing, networking,
+		// exposure, console, review.
 		form2 := huh.NewForm(
 			resourceSelectGroup(s, disc, resources),
 			clusterAndSizingStep(s),
 			cpReplicasStep(s),
 			workersStep(s),
 			networkingStep(s),
+			exposureModeStep(s),
+			exposureIngressStep(s),
+			exposureGatewayStep(s),
+			consoleStep(s),
+			consoleIngressStep(s),
 			reviewStep(s, &confirmed),
 		).
 			WithTheme(theme).
@@ -194,7 +200,25 @@ func buildConfig(s *wizardState) (*orchestrator.Config, error) {
 			GitOps:           orchestrator.GitOpsConfig{Type: "flux"},
 			CAPI:             orchestrator.CAPIConfig{Enabled: true},
 			ButlerController: orchestrator.ButlerControllerConfig{Enabled: true},
-			Console:          orchestrator.ConsoleConfig{Enabled: true},
+			Console: orchestrator.ConsoleConfig{
+				Enabled: true,
+				Ingress: orchestrator.ConsoleIngressConfig{
+					Enabled:   s.ConsoleIngressEnabled,
+					Host:      s.ConsoleHost,
+					ClassName: s.ConsoleClass,
+					TLS:       s.ConsoleTLS,
+				},
+				Auth: orchestrator.ConsoleAuthConfig{
+					AdminPassword: s.ConsoleAdminPassword,
+				},
+			},
+		},
+		ControlPlaneExposure: &orchestrator.ControlPlaneExposureConfig{
+			Mode:             s.ExposureMode,
+			Hostname:         s.ExposureHostname,
+			IngressClassName: s.ExposureIngressClass,
+			ControllerType:   s.ExposureControllerType,
+			GatewayRef:       s.ExposureGatewayRef,
 		},
 	}
 

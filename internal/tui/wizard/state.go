@@ -64,6 +64,24 @@ type wizardState struct {
 	TalosVersion   string
 	TalosSchematic string
 
+	// Control plane exposure mode for tenant clusters. Determines how
+	// tenant-cluster Kubernetes API servers are reached from outside.
+	//   LoadBalancer (default): 1 LoadBalancer IP per tenant
+	//   Ingress:                shared IP via ingress + TLS passthrough
+	//   Gateway:                shared IP via Gateway API TLSRoute
+	ExposureMode           string // "LoadBalancer" | "Ingress" | "Gateway"
+	ExposureHostname       string // "*.k8s.example.com" — required for Ingress/Gateway
+	ExposureIngressClass   string // "traefik", "nginx", "haproxy", ...
+	ExposureControllerType string // "traefik" | "nginx" | "haproxy" | "generic"
+	ExposureGatewayRef     string // "namespace/name"
+
+	// Butler Console
+	ConsoleIngressEnabled bool
+	ConsoleHost           string
+	ConsoleClass          string
+	ConsoleTLS            bool
+	ConsoleAdminPassword  string
+
 	// Harvester provider inputs
 	HarvKubeconfig string
 	HarvNamespace  string
@@ -85,21 +103,28 @@ type wizardState struct {
 // wizard fields are pre-populated with reasonable starting values.
 func newWizardState() *wizardState {
 	return &wizardState{
-		Topology:       "ha",
-		CPReplicas:     "3",
-		CPCPU:          "4",
-		CPMemoryMB:     "8192",
-		CPDiskGB:       "50",
-		WorkerReplicas: "3",
-		WorkerCPU:      "4",
-		WorkerMemoryMB: "16384",
-		WorkerDiskGB:   "100",
-		PodCIDR:        "10.244.0.0/16",
-		ServiceCIDR:    "10.96.0.0/12",
-		ImageSource:    "factory",
-		TalosVersion:   "v1.12.2",
-		TalosSchematic: discovery.DefaultTalosSchematic,
-		NutPort:        "9440",
+		Topology:               "ha",
+		CPReplicas:             "3",
+		CPCPU:                  "4",
+		CPMemoryMB:             "8192",
+		CPDiskGB:               "50",
+		WorkerReplicas:         "3",
+		WorkerCPU:              "4",
+		WorkerMemoryMB:         "16384",
+		WorkerDiskGB:           "100",
+		PodCIDR:                "10.244.0.0/16",
+		ServiceCIDR:            "10.96.0.0/12",
+		ImageSource:            "factory",
+		TalosVersion:           "v1.12.2",
+		TalosSchematic:         discovery.DefaultTalosSchematic,
+		NutPort:                "9440",
+		ExposureMode:           "LoadBalancer",
+		ExposureIngressClass:   "traefik",
+		ExposureControllerType: "traefik",
+		ConsoleIngressEnabled:  false,
+		ConsoleClass:           "traefik",
+		ConsoleTLS:             false,
+		ConsoleAdminPassword:   "admin",
 	}
 }
 

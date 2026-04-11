@@ -359,6 +359,146 @@ func networkingStep(s *wizardState) *huh.Group {
 	)
 }
 
+// exposureModeStep asks how tenant-cluster API servers will be exposed.
+// The Note spells out the trade-offs so operators can make an informed
+// choice instead of defaulting blindly.
+func exposureModeStep(s *wizardState) *huh.Group {
+	return huh.NewGroup(
+		huh.NewNote().
+			Title("Control Plane Exposure").
+			Description(
+				"How should tenant-cluster Kubernetes API servers be reached?\n\n" +
+					"LoadBalancer (recommended for starters):\n" +
+					"  1 LoadBalancer IP per tenant cluster. Simplest setup.\n" +
+					"  Burns 1 IP from the MetalLB pool per tenant.\n\n" +
+					"Ingress:\n" +
+					"  Shared IP via an ingress controller with TLS passthrough.\n" +
+					"  IP-efficient. Requires steward-tcp-proxy and a wildcard DNS\n" +
+					"  record pointing at the ingress.\n\n" +
+					"Gateway:\n" +
+					"  Shared IP via Gateway API TLSRoute. Modern alternative to\n" +
+					"  Ingress. Requires a configured Gateway resource.\n\n" +
+					"This setting is changeable later by editing the ButlerConfig CR."),
+
+		huh.NewSelect[string]().
+			Title("Exposure Mode").
+			Options(
+				huh.NewOption("LoadBalancer (1 IP per tenant)", "LoadBalancer"),
+				huh.NewOption("Ingress (shared IP via SNI)", "Ingress"),
+				huh.NewOption("Gateway (shared IP via Gateway API)", "Gateway"),
+			).
+			Value(&s.ExposureMode),
+	)
+}
+
+// exposureIngressStep collects the extra fields required when mode is
+// Ingress. Hidden for LoadBalancer/Gateway.
+func exposureIngressStep(s *wizardState) *huh.Group {
+	return huh.NewGroup(
+		huh.NewInput().
+			Title("Wildcard Hostname").
+			Description("Wildcard domain for tenant API servers. A wildcard DNS record\nmust point this domain at the ingress load balancer IP.").
+			Placeholder("*.k8s.example.com").
+			Value(&s.ExposureHostname).
+			Validate(validateNotEmpty),
+
+		huh.NewInput().
+			Title("Ingress Class Name").
+			Description("Which ingress controller class handles TLS passthrough").
+			Placeholder("traefik").
+			Value(&s.ExposureIngressClass).
+			Validate(validateNotEmpty),
+
+		huh.NewSelect[string]().
+			Title("Ingress Controller Type").
+			Description("Controls the TLS passthrough annotation/config style.").
+			Options(
+				huh.NewOption("Traefik", "traefik"),
+				huh.NewOption("HAProxy", "haproxy"),
+				huh.NewOption("NGINX", "nginx"),
+				huh.NewOption("Generic", "generic"),
+			).
+			Value(&s.ExposureControllerType),
+	).WithHideFunc(func() bool {
+		return s.ExposureMode != "Ingress"
+	})
+}
+
+// exposureGatewayStep collects Gateway-specific fields. Hidden for
+// LoadBalancer/Ingress.
+func exposureGatewayStep(s *wizardState) *huh.Group {
+	return huh.NewGroup(
+		huh.NewInput().
+			Title("Wildcard Hostname").
+			Description("Wildcard domain for tenant API servers, pointed at the Gateway IP.").
+			Placeholder("*.k8s.example.com").
+			Value(&s.ExposureHostname).
+			Validate(validateNotEmpty),
+
+		huh.NewInput().
+			Title("Gateway Reference").
+			Description("namespace/name of an existing Gateway resource that will\nterminate TLS passthrough for tenant API traffic.").
+			Placeholder("steward-system/steward-gateway").
+			Value(&s.ExposureGatewayRef).
+			Validate(validateNotEmpty),
+	).WithHideFunc(func() bool {
+		return s.ExposureMode != "Gateway"
+	})
+}
+
+// consoleStep collects Butler Console configuration: admin password
+// and whether to expose via ingress.
+func consoleStep(s *wizardState) *huh.Group {
+	return huh.NewGroup(
+		huh.NewNote().
+			Title("Butler Console").
+			Description(
+				"Butler Console is the web UI for managing tenant clusters, teams,\n" +
+					"and platform settings. It's installed automatically.\n\n" +
+					"By default the console is reachable only via port-forward:\n" +
+					"  kubectl port-forward -n butler-system svc/butler-console-frontend 3000:80\n\n" +
+					"Enable ingress to expose it at a hostname instead. You'll need\n" +
+					"a DNS record pointing at the ingress IP."),
+
+		huh.NewInput().
+			Title("Admin Password").
+			Description("Initial admin password for the console. Change it after first login.").
+			EchoMode(huh.EchoModePassword).
+			Value(&s.ConsoleAdminPassword),
+
+		huh.NewConfirm().
+			Title("Expose Butler Console via ingress?").
+			Description("Leave disabled to use kubectl port-forward.").
+			Value(&s.ConsoleIngressEnabled),
+	)
+}
+
+// consoleIngressStep collects ingress details when the operator has opted
+// to expose the console. Hidden if ingress is disabled.
+func consoleIngressStep(s *wizardState) *huh.Group {
+	return huh.NewGroup(
+		huh.NewInput().
+			Title("Console Hostname").
+			Description("DNS name pointing at the ingress IP.").
+			Placeholder("butler.example.com").
+			Value(&s.ConsoleHost).
+			Validate(validateNotEmpty),
+
+		huh.NewInput().
+			Title("Ingress Class Name").
+			Placeholder("traefik").
+			Value(&s.ConsoleClass).
+			Validate(validateNotEmpty),
+
+		huh.NewConfirm().
+			Title("Enable TLS termination?").
+			Description("Terminate TLS at the ingress. Requires cert-manager or a manually-created TLS secret.").
+			Value(&s.ConsoleTLS),
+	).WithHideFunc(func() bool {
+		return !s.ConsoleIngressEnabled
+	})
+}
+
 // reviewStep shows a summary of the collected config and asks for
 // confirmation. The summary is rendered via DescriptionFunc so huh
 // re-evaluates it whenever any wizardState field changes — a static
@@ -409,6 +549,27 @@ func buildSummary(s *wizardState) string {
 	}
 	fmt.Fprintf(&b, "LB Pool:        %s - %s\n", s.LBStart, s.LBEnd)
 
+	// Control plane exposure
+	fmt.Fprintf(&b, "Exposure:       %s", s.ExposureMode)
+	switch s.ExposureMode {
+	case "Ingress":
+		fmt.Fprintf(&b, " (%s via %s/%s)", s.ExposureHostname, s.ExposureIngressClass, s.ExposureControllerType)
+	case "Gateway":
+		fmt.Fprintf(&b, " (%s via %s)", s.ExposureHostname, s.ExposureGatewayRef)
+	}
+	b.WriteString("\n")
+
+	// Butler Console
+	if s.ConsoleIngressEnabled {
+		tlsHint := ""
+		if s.ConsoleTLS {
+			tlsHint = " + TLS"
+		}
+		fmt.Fprintf(&b, "Console:        ingress %s via %s%s\n", s.ConsoleHost, s.ConsoleClass, tlsHint)
+	} else {
+		fmt.Fprintf(&b, "Console:        port-forward only\n")
+	}
+
 	switch s.Provider {
 	case "harvester":
 		fmt.Fprintf(&b, "Namespace:      %s\n", s.HarvNamespace)
@@ -427,5 +588,15 @@ func buildSummary(s *wizardState) string {
 			fmt.Fprintf(&b, "Image:          %s\n", s.NutImageUUID)
 		}
 	}
+
+	// Disclosure: what gets installed with defaults the wizard does not
+	// currently prompt for. Operators can override these by editing the
+	// bootstrap YAML directly or via butleradm config after bootstrap.
+	b.WriteString("\n")
+	b.WriteString("Defaults that will be installed (edit bootstrap YAML to override):\n")
+	b.WriteString("  CNI:      cilium         Storage:        longhorn\n")
+	b.WriteString("  LB:       metallb        GitOps:         flux\n")
+	b.WriteString("  CAPI:     enabled        Butler Console: enabled\n")
+
 	return b.String()
 }
