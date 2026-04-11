@@ -567,6 +567,13 @@ func LoadConfig() (*Config, error) {
 
 // expandPath expands ~ to home directory
 func expandPath(path string) string {
+	return ExpandPath(path)
+}
+
+// ExpandPath expands a leading ~ in a path to the user's home directory.
+// Callers outside LoadConfig (e.g., the wizard) use this to normalize
+// user-entered paths before they reach os.ReadFile.
+func ExpandPath(path string) string {
 	if len(path) > 0 && path[0] == '~' {
 		home, err := os.UserHomeDir()
 		if err != nil {

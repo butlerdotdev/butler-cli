@@ -229,7 +229,10 @@ func buildConfig(s *wizardState) (*orchestrator.Config, error) {
 	switch s.Provider {
 	case "harvester":
 		cfg.ProviderConfig.Harvester = &orchestrator.HarvesterProviderConfig{
-			KubeconfigPath: s.HarvKubeconfig,
+			// Expand ~ to the home directory. LoadConfig does this for
+			// YAML-driven bootstrap, but the wizard bypasses LoadConfig
+			// so the expansion has to happen here too.
+			KubeconfigPath: orchestrator.ExpandPath(s.HarvKubeconfig),
 			Namespace:      s.HarvNamespace,
 			NetworkName:    s.HarvNetwork,
 			ImageName:      s.HarvImage,
