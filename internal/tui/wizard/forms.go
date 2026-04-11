@@ -387,8 +387,17 @@ func buildSummary(s *wizardState) string {
 	fmt.Fprintf(&b, "Provider:       %s\n", s.Provider)
 	fmt.Fprintf(&b, "Cluster Name:   %s\n", s.ClusterName)
 	fmt.Fprintf(&b, "Topology:       %s\n", s.Topology)
+
+	// Single-node forces 1 CP replica regardless of what the wizard
+	// state field says — the CP Replicas input is hidden for single-node
+	// so the underlying string still holds its default of "3". Render
+	// the effective value to match what buildConfig will emit.
+	cpReplicas := s.CPReplicas
+	if s.Topology == "single-node" {
+		cpReplicas = "1"
+	}
 	fmt.Fprintf(&b, "Control Plane:  %s × (%s vCPU, %s MB, %s GB)\n",
-		s.CPReplicas, s.CPCPU, s.CPMemoryMB, s.CPDiskGB)
+		cpReplicas, s.CPCPU, s.CPMemoryMB, s.CPDiskGB)
 	if s.Topology != "single-node" {
 		fmt.Fprintf(&b, "Workers:        %s × (%s vCPU, %s MB, %s GB)\n",
 			s.WorkerReplicas, s.WorkerCPU, s.WorkerMemoryMB, s.WorkerDiskGB)
