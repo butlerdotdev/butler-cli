@@ -232,7 +232,9 @@ func nutanixResourceGroup(s *wizardState, resources map[string][]discovery.Provi
 	)
 }
 
-// clusterAndSizingStep configures cluster name, topology, and control plane sizing.
+// clusterAndSizingStep configures cluster name, topology, and control plane
+// sizing (except CP Replicas which lives in its own group so it can be
+// hidden for single-node topology).
 func clusterAndSizingStep(s *wizardState) *huh.Group {
 	return huh.NewGroup(
 		huh.NewNote().
@@ -255,12 +257,6 @@ func clusterAndSizingStep(s *wizardState) *huh.Group {
 			Value(&s.Topology),
 
 		huh.NewInput().
-			Title("CP Replicas").
-			Description("Control plane nodes (odd number for etcd quorum)").
-			Value(&s.CPReplicas).
-			Validate(validateIntRange(1, 7)),
-
-		huh.NewInput().
 			Title("CP vCPUs").
 			Value(&s.CPCPU).
 			Validate(validateIntRange(1, 64)),
@@ -275,6 +271,20 @@ func clusterAndSizingStep(s *wizardState) *huh.Group {
 			Value(&s.CPDiskGB).
 			Validate(validateIntRange(20, 2048)),
 	)
+}
+
+// cpReplicasStep asks for the number of control plane nodes. Hidden for
+// single-node topology since that's always 1 CP regardless of input.
+func cpReplicasStep(s *wizardState) *huh.Group {
+	return huh.NewGroup(
+		huh.NewInput().
+			Title("CP Replicas").
+			Description("Control plane nodes (odd number for etcd quorum)").
+			Value(&s.CPReplicas).
+			Validate(validateIntRange(1, 7)),
+	).WithHideFunc(func() bool {
+		return s.Topology == "single-node"
+	})
 }
 
 // workersStep configures worker sizing (hidden for single-node topology).

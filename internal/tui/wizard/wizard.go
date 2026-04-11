@@ -87,6 +87,7 @@ func Run() (*orchestrator.Config, error) {
 		form2 := huh.NewForm(
 			resourceSelectGroup(s, disc, resources),
 			clusterAndSizingStep(s),
+			cpReplicasStep(s),
 			workersStep(s),
 			networkingStep(s),
 			reviewStep(s, &confirmed),
