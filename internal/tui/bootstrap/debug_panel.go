@@ -20,6 +20,7 @@ import (
 	"bufio"
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -140,8 +141,11 @@ func (m *debugPanelModel) Start(kubeconfigPath string) {
 		return
 	}
 
-	m.controllerLogs.Write("[debug] waiting for butler-bootstrap-controller pod...")
-	go streamPodLogs(ctx, client, "butler-system", "app.kubernetes.io/name=butler-bootstrap-controller", m.controllerLogs)
+	// Label selector matches the bootstrap manifest — the pod's label
+	// is 'butler-bootstrap' (not 'butler-bootstrap-controller' which
+	// is the Deployment's metadata.name).
+	m.controllerLogs.Write("[debug] waiting for butler-bootstrap pod...")
+	go streamPodLogs(ctx, client, "butler-system", "app.kubernetes.io/name=butler-bootstrap", m.controllerLogs)
 
 	if m.provider != "" {
 		providerLabel := fmt.Sprintf("app.kubernetes.io/name=butler-provider-%s", m.provider)
@@ -372,9 +376,17 @@ func (m debugPanelModel) renderCRStatus() string {
 	if len(s.AddonsInstalled) == 0 {
 		b.WriteString(dimStyle.Render("  (none yet)\n"))
 	} else {
-		for name, installed := range s.AddonsInstalled {
+		// Sort addon names so the list is stable across re-renders.
+		// Ranging a map directly produces a random order every tick,
+		// which makes the panel look like it's rapidly shuffling.
+		names := make([]string, 0, len(s.AddonsInstalled))
+		for name := range s.AddonsInstalled {
+			names = append(names, name)
+		}
+		sort.Strings(names)
+		for _, name := range names {
 			mark := "✗"
-			if installed {
+			if s.AddonsInstalled[name] {
 				mark = "✓"
 			}
 			fmt.Fprintf(&b, "  %s  %s\n", mark, name)
