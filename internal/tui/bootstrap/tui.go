@@ -93,7 +93,7 @@ func Run(rc RunConfig) error {
 		return fmt.Errorf("TUI error: %w", err)
 	}
 
-	if fm, ok := finalModel.(bootstrapModel); ok && fm.activeView == viewDuringBootstrap {
+	if fm, ok := finalModel.(*bootstrapModel); ok && fm.activeView == viewDuringBootstrap {
 		// User quit while bootstrap was in progress — cancel and wait for cleanup.
 		rc.Cancel()
 		<-orchDone

@@ -65,12 +65,12 @@ type ModelConfig struct {
 }
 
 // NewModel creates the root bubbletea model.
-func NewModel(mc ModelConfig) bootstrapModel {
+func NewModel(mc ModelConfig) *bootstrapModel {
 	initialView := viewPreBootstrap
 	if mc.SkipPreBootstrap {
 		initialView = viewDuringBootstrap
 	}
-	return bootstrapModel{
+	return &bootstrapModel{
 		pre:              newPreBootstrapModel(mc.Cfg),
 		during:           newDuringBootstrapModel(mc.Cfg.Provider, mc.Cfg.Cluster.Name, mc.LogBuf),
 		post:             newPostBootstrapModel(mc.Cfg.Cluster.Name, mc.Cfg.Provider, mc.Cfg.Cluster.Topology),
@@ -85,7 +85,7 @@ func NewModel(mc ModelConfig) bootstrapModel {
 	}
 }
 
-func (m bootstrapModel) Init() tea.Cmd {
+func (m *bootstrapModel) Init() tea.Cmd {
 	if m.skipPreBootstrap {
 		m.startTime = time.Now()
 		if m.startFn != nil {
@@ -104,7 +104,7 @@ func (m bootstrapModel) Init() tea.Cmd {
 	)
 }
 
-func (m bootstrapModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+func (m *bootstrapModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmds []tea.Cmd
 
 	switch msg := msg.(type) {
@@ -223,7 +223,7 @@ func (m *bootstrapModel) transitionToPost() tea.Cmd {
 	return nil
 }
 
-func (m bootstrapModel) View() string {
+func (m *bootstrapModel) View() string {
 	if m.quitting {
 		return ""
 	}
