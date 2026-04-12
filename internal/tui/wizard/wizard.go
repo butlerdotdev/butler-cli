@@ -188,11 +188,6 @@ func buildConfig(s *wizardState) (*orchestrator.Config, error) {
 		Network: orchestrator.NetworkConfig{
 			PodCIDR:     s.PodCIDR,
 			ServiceCIDR: s.ServiceCIDR,
-			VIP:         s.VIP,
-			LoadBalancerPool: &orchestrator.LBPoolConfig{
-				Start: s.LBStart,
-				End:   s.LBEnd,
-			},
 		},
 		Talos: orchestrator.TalosConfig{
 			Version:   s.TalosVersion,
@@ -201,10 +196,6 @@ func buildConfig(s *wizardState) (*orchestrator.Config, error) {
 		Addons: orchestrator.AddonsConfig{
 			CNI:     orchestrator.CNIConfig{Type: "cilium"},
 			Storage: orchestrator.StorageConfig{Type: "longhorn"},
-			LoadBalancer: orchestrator.LoadBalancerConfig{
-				Type:        "metallb",
-				AddressPool: s.LBStart + "-" + s.LBEnd,
-			},
 			GitOps:           orchestrator.GitOpsConfig{Type: "flux"},
 			CAPI:             orchestrator.CAPIConfig{Enabled: true},
 			ButlerController: orchestrator.ButlerControllerConfig{Enabled: true},
@@ -229,6 +220,22 @@ func buildConfig(s *wizardState) (*orchestrator.Config, error) {
 			GatewayRef:       s.ExposureGatewayRef,
 		},
 		MultiTenancyMode: s.MultiTenancyMode,
+	}
+
+	// On-prem providers use kube-vip (VIP) and MetalLB for LoadBalancer
+	// services. Cloud providers skip both — they use native cloud LBs
+	// provisioned via CCM/CAPI. The bootstrap controller detects the
+	// provider type and skips MetalLB/kube-vip installation accordingly.
+	if isOnPrem(s.Provider) {
+		cfg.Network.VIP = s.VIP
+		cfg.Network.LoadBalancerPool = &orchestrator.LBPoolConfig{
+			Start: s.LBStart,
+			End:   s.LBEnd,
+		}
+		cfg.Addons.LoadBalancer = orchestrator.LoadBalancerConfig{
+			Type:        "metallb",
+			AddressPool: s.LBStart + "-" + s.LBEnd,
+		}
 	}
 
 	// IPAM: emit a NetworkPool and wire the ProviderConfig's spec.network
