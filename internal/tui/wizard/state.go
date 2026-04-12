@@ -82,6 +82,9 @@ type wizardState struct {
 	ConsoleTLS            bool
 	ConsoleAdminPassword  string
 
+	// Platform settings applied to ButlerConfig after bootstrap.
+	MultiTenancyMode string // "Optional" or "Enforced"
+
 	// IPAM / NetworkPool. When IPAMEnabled is true the bootstrap creates
 	// a NetworkPool CR in butler-system and wires the ProviderConfig's
 	// spec.network section to use it. This is the difference between a
@@ -141,6 +144,7 @@ func newWizardState() *wizardState {
 		TalosVersion:           "v1.12.2",
 		TalosSchematic:         discovery.DefaultTalosSchematic,
 		NutPort:                "9440",
+		MultiTenancyMode:        "Optional",
 		ExposureMode:            "LoadBalancer",
 		ExposureIngressClass:    "traefik",
 		ExposureControllerType:  "traefik",

@@ -45,6 +45,12 @@ type Config struct {
 	// If omitted, defaults to LoadBalancer mode.
 	ControlPlaneExposure *ControlPlaneExposureConfig `mapstructure:"controlPlaneExposure,omitempty"`
 
+	// MultiTenancyMode sets the ButlerConfig multi-tenancy mode on the
+	// management cluster after bootstrap. "Optional" (default) lets
+	// clusters exist without a team; "Enforced" requires every cluster
+	// to belong to a team with quota enforcement.
+	MultiTenancyMode string `mapstructure:"multiTenancyMode,omitempty"`
+
 	// NetworkPool defines the platform-level IPAM pool created during bootstrap.
 	// If nil, no NetworkPool is created and tenant IP allocation must be
 	// configured manually post-bootstrap.

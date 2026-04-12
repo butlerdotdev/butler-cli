@@ -77,6 +77,11 @@ var (
 		Version:  butlerAPIVersion,
 		Resource: "networkpools",
 	}
+	butlerConfigGVR = schema.GroupVersionResource{
+		Group:    butlerAPIGroup,
+		Version:  butlerAPIVersion,
+		Resource: "butlerconfigs",
+	}
 )
 
 // Options configures the orchestrator
@@ -269,25 +274,18 @@ func (o *Orchestrator) Run(ctx context.Context, cfg *Config) error {
 		return fmt.Errorf("saving cluster credentials: %w", err)
 	}
 
-	// Configure management cluster IPAM: create the NetworkPool and patch the
-	// ProviderConfig on the TENANT cluster (not KIND). The bootstrap
-	// controller already created a bare ProviderConfig on the tenant
-	// cluster from the ClusterBootstrap spec, but it has no spec.network
-	// section and no NetworkPool — both are management-cluster-only
-	// concerns that the bootstrap controller doesn't handle. Without
-	// this step operators have to stand them up manually before tenant
-	// cluster creation works.
-	if cfg.NetworkPool != nil {
-		o.logger.Phase("Configuring management cluster IPAM")
-		o.emit(Event{Type: EventPhaseChange, Phase: "ConfiguringIPAM", Message: "Configuring IPAM on management cluster"})
+	// Post-bootstrap management cluster configuration: apply settings that
+	// the bootstrap controller doesn't handle from ClusterBootstrap.spec
+	// (IPAM, multi-tenancy mode). Uses the freshly-saved kubeconfig.
+	if cfg.NetworkPool != nil || cfg.MultiTenancyMode != "" {
+		o.logger.Phase("Configuring management cluster")
+		o.emit(Event{Type: EventPhaseChange, Phase: "ConfiguringManagement", Message: "Configuring management cluster"})
 
 		home, _ := os.UserHomeDir()
-		tenantKubeconfig := filepath.Join(home, ".butler", cfg.Cluster.Name+"-kubeconfig")
-		if err := o.configureIPAM(ctx, cfg, tenantKubeconfig); err != nil {
-			// Non-fatal: the cluster is usable without IPAM. Warn and
-			// let the operator fix it post-bootstrap.
-			o.logger.Warn("Failed to configure IPAM on management cluster", "error", err)
-			o.logger.Info("You can configure IPAM manually: kubectl apply -f networkpool.yaml && kubectl edit providerconfig")
+		mgmtKubeconfig := filepath.Join(home, ".butler", cfg.Cluster.Name+"-kubeconfig")
+		if err := o.configureManagementCluster(ctx, cfg, mgmtKubeconfig); err != nil {
+			o.logger.Warn("Failed to configure management cluster", "error", err)
+			o.logger.Info("You can configure settings manually: kubectl edit butlerconfig butler / kubectl edit providerconfig")
 		}
 	}
 
@@ -998,44 +996,61 @@ func (o *Orchestrator) createNetworkPool(ctx context.Context, client dynamic.Int
 	return nil
 }
 
-// configureIPAM connects to the freshly-bootstrapped management cluster and
-// creates the NetworkPool CR + patches the ProviderConfig's spec.network
-// section so the management cluster is immediately ready for tenant
-// cluster IP allocation. This runs AFTER saveClusterCredentials because
-// it needs the tenant kubeconfig that was just written to disk.
-func (o *Orchestrator) configureIPAM(ctx context.Context, cfg *Config, tenantKubeconfig string) error {
-	_, dynamicClient, err := o.createClients(tenantKubeconfig)
+// configureManagementCluster connects to the freshly-bootstrapped management
+// cluster and applies settings the bootstrap controller doesn't handle:
+// NetworkPool for IPAM, ProviderConfig.spec.network, ButlerConfig multi-tenancy
+// mode. Runs AFTER saveClusterCredentials.
+func (o *Orchestrator) configureManagementCluster(ctx context.Context, cfg *Config, mgmtKubeconfig string) error {
+	_, dynamicClient, err := o.createClients(mgmtKubeconfig)
 	if err != nil {
 		return fmt.Errorf("connecting to management cluster: %w", err)
 	}
 
-	// 1. Create NetworkPool in butler-system.
-	if err := o.createNetworkPool(ctx, dynamicClient, cfg); err != nil {
-		return fmt.Errorf("creating NetworkPool on management cluster: %w", err)
+	// 1. Create NetworkPool in butler-system (if IPAM enabled).
+	if cfg.NetworkPool != nil {
+		if err := o.createNetworkPool(ctx, dynamicClient, cfg); err != nil {
+			return fmt.Errorf("creating NetworkPool: %w", err)
+		}
+
+		// 2. Patch ProviderConfig with spec.network.
+		if network := o.buildProviderNetworkSection(cfg); network != nil {
+			patch := map[string]interface{}{
+				"spec": map[string]interface{}{
+					"network": network,
+				},
+			}
+			patchBytes, err := json.Marshal(patch)
+			if err != nil {
+				return fmt.Errorf("marshaling network patch: %w", err)
+			}
+			_, err = dynamicClient.Resource(providerConfigGVR).Namespace(butlerNamespace).Patch(
+				ctx, cfg.Provider, types.MergePatchType, patchBytes, metav1.PatchOptions{})
+			if err != nil {
+				return fmt.Errorf("patching ProviderConfig: %w", err)
+			}
+			o.logger.Success("ProviderConfig patched with IPAM network config")
+		}
 	}
 
-	// 2. Patch the existing ProviderConfig with spec.network. The
-	//    bootstrap controller created a ProviderConfig named after the
-	//    provider type (e.g., "harvester") during InstallingAddons, but
-	//    it has no spec.network section. Merge-patch it in.
-	network := o.buildProviderNetworkSection(cfg)
-	if network != nil {
+	// 3. Patch ButlerConfig with multiTenancy.mode.
+	if cfg.MultiTenancyMode != "" {
 		patch := map[string]interface{}{
 			"spec": map[string]interface{}{
-				"network": network,
+				"multiTenancy": map[string]interface{}{
+					"mode": cfg.MultiTenancyMode,
+				},
 			},
 		}
 		patchBytes, err := json.Marshal(patch)
 		if err != nil {
-			return fmt.Errorf("marshaling network patch: %w", err)
+			return fmt.Errorf("marshaling ButlerConfig patch: %w", err)
 		}
-
-		_, err = dynamicClient.Resource(providerConfigGVR).Namespace(butlerNamespace).Patch(
-			ctx, cfg.Provider, types.MergePatchType, patchBytes, metav1.PatchOptions{})
+		_, err = dynamicClient.Resource(butlerConfigGVR).Patch(
+			ctx, "butler", types.MergePatchType, patchBytes, metav1.PatchOptions{})
 		if err != nil {
-			return fmt.Errorf("patching ProviderConfig with IPAM network: %w", err)
+			return fmt.Errorf("patching ButlerConfig: %w", err)
 		}
-		o.logger.Success("ProviderConfig patched with IPAM network config")
+		o.logger.Success("ButlerConfig updated", "multiTenancy.mode", cfg.MultiTenancyMode)
 	}
 
 	return nil

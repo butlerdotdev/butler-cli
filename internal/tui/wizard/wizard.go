@@ -84,7 +84,7 @@ func Run() (*orchestrator.Config, error) {
 		}
 
 		// Form 2: Resource selection, cluster sizing, networking, IPAM,
-		// exposure, console, review.
+		// platform settings, exposure, console, review.
 		form2 := huh.NewForm(
 			resourceSelectGroup(s, disc, resources),
 			clusterAndSizingStep(s),
@@ -94,6 +94,7 @@ func Run() (*orchestrator.Config, error) {
 			ipamStep(s),
 			networkPoolStep(s),
 			providerNetworkStep(s),
+			multiTenancyStep(s),
 			exposureModeStep(s),
 			exposureIngressStep(s),
 			exposureGatewayStep(s),
@@ -223,6 +224,7 @@ func buildConfig(s *wizardState) (*orchestrator.Config, error) {
 			ControllerType:   s.ExposureControllerType,
 			GatewayRef:       s.ExposureGatewayRef,
 		},
+		MultiTenancyMode: s.MultiTenancyMode,
 	}
 
 	// IPAM: emit a NetworkPool and wire the ProviderConfig's spec.network

@@ -498,6 +498,33 @@ func providerNetworkStep(s *wizardState) *huh.Group {
 	})
 }
 
+// multiTenancyStep asks whether multi-tenancy is optional or enforced.
+func multiTenancyStep(s *wizardState) *huh.Group {
+	return huh.NewGroup(
+		huh.NewNote().
+			Title("Multi-Tenancy").
+			Description(
+				"Butler supports two multi-tenancy modes:\n\n" +
+					"Optional (default):\n" +
+					"  Teams are available but not required. Clusters can be created\n" +
+					"  without belonging to a team. Good for small teams or dev\n" +
+					"  environments where you want flexibility.\n\n" +
+					"Enforced:\n" +
+					"  Every cluster must belong to a team. Team quotas are enforced.\n" +
+					"  Required for production multi-tenant platforms where teams\n" +
+					"  need resource boundaries and RBAC isolation.\n\n" +
+					"This setting is changeable later by editing the ButlerConfig CR."),
+
+		huh.NewSelect[string]().
+			Title("Multi-Tenancy Mode").
+			Options(
+				huh.NewOption("Optional (teams available but not required)", "Optional"),
+				huh.NewOption("Enforced (every cluster must belong to a team)", "Enforced"),
+			).
+			Value(&s.MultiTenancyMode),
+	)
+}
+
 // exposureModeStep asks how tenant-cluster API servers will be exposed.
 // The Note spells out the trade-offs so operators can make an informed
 // choice instead of defaulting blindly.
@@ -782,6 +809,9 @@ func buildSummary(s *wizardState) string {
 		fmt.Fprintf(&b, "VIP:            %s\n", s.VIP)
 	}
 	fmt.Fprintf(&b, "LB Pool:        %s - %s\n", s.LBStart, s.LBEnd)
+
+	// Platform settings
+	fmt.Fprintf(&b, "Multi-Tenancy:  %s\n", s.MultiTenancyMode)
 
 	// IPAM / NetworkPool
 	if s.IPAMEnabled {
