@@ -126,11 +126,12 @@ func Run() (*orchestrator.Config, error) {
 		return nil, fmt.Errorf("bootstrap cancelled by user")
 	}
 
-	// Sync Talos image from the Butler Image Factory if requested. The
-	// factory upload polls until the provider reports the image as ready,
-	// then we store the provider-specific reference (Harvester image name,
-	// Nutanix image UUID) back into wizard state before building Config.
-	if s.ImageSource == "factory" {
+	// Sync Talos image from the Butler Image Factory if requested. Only
+	// applies to on-prem providers (Harvester/Nutanix) where the wizard
+	// offers a "Sync from Factory" image source option. Cloud providers
+	// reference pre-existing images via provider-specific config fields
+	// (GCE image name, AMI ID, etc.) and don't support factory sync.
+	if isOnPrem(s.Provider) && s.ImageSource == "factory" {
 		factory := discovery.NewFactoryClient("")
 		artifactURL := factory.ArtifactURL(
 			s.TalosSchematic, s.TalosVersion, "talos", "amd64", "qcow2")
