@@ -17,18 +17,26 @@ limitations under the License.
 package tui
 
 import (
+	"context"
 	"fmt"
+	"os"
+	"path/filepath"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/spf13/cobra"
 
+	"github.com/butlerdotdev/butler/internal/adm/bootstrap/orchestrator"
 	"github.com/butlerdotdev/butler/internal/common/auth"
 	"github.com/butlerdotdev/butler/internal/common/client"
+	"github.com/butlerdotdev/butler/internal/common/log"
+	"github.com/butlerdotdev/butler/internal/tui/bootstrap"
+	"github.com/butlerdotdev/butler/internal/tui/wizard"
 )
 
 // NewTUICmd creates the "tui" cobra command that launches the interactive
 // terminal dashboard. The admin parameter controls whether admin-only
-// views (teams, users, health) are shown.
+// views (bootstrap, teams, users, health) are shown.
 func NewTUICmd(admin bool) *cobra.Command {
 	var kubeconfig string
 
@@ -38,9 +46,12 @@ func NewTUICmd(admin bool) *cobra.Command {
 		Long: `Launch a full-screen terminal dashboard for Butler.
 
 The dashboard provides an interactive view of clusters, addons, teams,
-providers, network pools, users, and platform health.
+providers, network pools, users, and platform health. Platform admins
+additionally get tab 0 which launches the bootstrap wizard for creating
+a new Butler management cluster.
 
 Navigation:
+  0      Bootstrap (admin only)
   1-7    Switch views
   j/k    Move cursor
   Enter  Drill into detail
@@ -53,43 +64,109 @@ Navigation:
 Examples:
   butlerctl tui
   butlerctl tui --kubeconfig ~/.butler/butler-beta-kubeconfig
-  butlerctl tui --context butler-beta`,
+  butlerctl tui --context butler-beta
+  butleradm tui    # starts on bootstrap tab if no kubeconfig is set`,
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			kubeContext, _ := cmd.Flags().GetString("context")
-
-			c, err := client.New(kubeconfig, kubeContext)
-			if err != nil {
-				return fmt.Errorf("connecting to cluster: %w", err)
-			}
-
-			// Derive context display name
-			contextName := kubeContext
-			if contextName == "" {
-				contextName = inferContextName(kubeconfig)
-			}
-
-			// Determine admin status from Butler credentials if available,
-			// otherwise fall back to binary mode (butleradm = admin)
-			isAdmin := admin
-			creds, err := auth.LoadCredentials()
-			if err == nil {
-				if sc := creds.ActiveCredential(); sc != nil {
-					isAdmin = sc.User.IsPlatformAdmin
-				}
-			}
-
-			app := NewApp(c, contextName, isAdmin)
-
-			p := tea.NewProgram(app, tea.WithAltScreen())
-			_, err = p.Run()
-			return err
+			return runDashboardLoop(kubeconfig, kubeContext, admin)
 		},
 	}
 
 	cmd.Flags().StringVar(&kubeconfig, "kubeconfig", "", "path to kubeconfig file")
 
 	return cmd
+}
+
+// runDashboardLoop is the dashboard entry point. It launches the dashboard,
+// and if the user presses Enter on the bootstrap launcher (tab 0), it quits
+// the dashboard cleanly, runs the wizard + bootstrap TUI as a standalone
+// sub-flow, then relaunches the dashboard with the freshly-bootstrapped
+// cluster's kubeconfig. This nested-TUI pattern works around Bubbletea's
+// exclusive grab on stdin — huh forms and bootstrap's own tea.Program can't
+// literally nest inside the dashboard tea.Program.
+func runDashboardLoop(kubeconfig, kubeContext string, admin bool) error {
+	for {
+		// 1. Try to build a Kubernetes client. A missing or invalid
+		//    kubeconfig is not a fatal error in admin mode — the app
+		//    will drop into the bootstrap tab and let the user create
+		//    a new cluster.
+		c, clientErr := client.New(kubeconfig, kubeContext)
+		if clientErr != nil && !admin {
+			return fmt.Errorf("connecting to cluster: %w", clientErr)
+		}
+		if clientErr != nil {
+			c = nil
+		}
+
+		contextName := kubeContext
+		if contextName == "" {
+			contextName = inferContextName(kubeconfig)
+		}
+
+		// 2. Resolve admin status from Butler credentials if available,
+		//    otherwise fall back to the binary mode (butleradm = admin).
+		isAdmin := admin
+		if creds, err := auth.LoadCredentials(); err == nil {
+			if sc := creds.ActiveCredential(); sc != nil {
+				isAdmin = sc.User.IsPlatformAdmin
+			}
+		}
+
+		// 3. Run the dashboard.
+		app := NewApp(c, contextName, isAdmin)
+		p := tea.NewProgram(app, tea.WithAltScreen())
+		if _, err := p.Run(); err != nil {
+			return err
+		}
+
+		// 4. Dashboard quit normally unless the user asked to bootstrap.
+		if !app.BootstrapRequested {
+			return nil
+		}
+
+		// 5. Bootstrap requested. Run the wizard to collect config, then
+		//    hand off to the bootstrap TUI for live progress. If the
+		//    wizard or bootstrap fails, fall back to the dashboard so the
+		//    user isn't kicked out of the app.
+		cfg, err := wizard.Run()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "\nwizard: %v\n\n", err)
+			continue
+		}
+
+		if err := runBootstrap(cfg); err != nil {
+			fmt.Fprintf(os.Stderr, "\nbootstrap: %v\n\n", err)
+			continue
+		}
+
+		// 6. Bootstrap succeeded — the orchestrator wrote the new kubeconfig
+		//    to ~/.butler/<name>-kubeconfig. Relaunch the dashboard pointing
+		//    at it.
+		home, _ := os.UserHomeDir()
+		kubeconfig = filepath.Join(home, ".butler", cfg.Cluster.Name+"-kubeconfig")
+		kubeContext = ""
+	}
+}
+
+// runBootstrap hands a wizard-assembled Config to the bootstrap TUI.
+// Signal handling and orchestrator cleanup are delegated to bootstrap.Run.
+func runBootstrap(cfg *orchestrator.Config) error {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	logger := log.New("butleradm")
+
+	return bootstrap.Run(bootstrap.RunConfig{
+		Ctx:    ctx,
+		Cancel: cancel,
+		Cfg:    cfg,
+		OrcOptions: orchestrator.Options{
+			Timeout: 30 * time.Minute,
+		},
+		LoggerName: logger.Name(),
+		LogLevel:   logger.Level(),
+	})
 }
 
 // inferContextName tries to determine a display name for the status bar

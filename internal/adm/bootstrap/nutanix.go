@@ -23,6 +23,8 @@ import (
 
 	"github.com/butlerdotdev/butler/internal/adm/bootstrap/orchestrator"
 	"github.com/butlerdotdev/butler/internal/common/log"
+	"github.com/butlerdotdev/butler/internal/common/output"
+	"github.com/butlerdotdev/butler/internal/tui/bootstrap"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
@@ -36,8 +38,9 @@ func NewNutanixCmd(logger *log.Logger) *cobra.Command {
 		localDev      bool
 		repoRoot      string
 		prismEndpoint string
-		prismUsername  string
+		prismUsername string
 		prismPassword string
+		noTUI         bool
 	)
 
 	cmd := &cobra.Command{
@@ -131,16 +134,26 @@ Local Development:
 				repoRoot = home + "/code/github.com/butlerdotdev"
 			}
 
-			// Create orchestrator
-			orch := orchestrator.New(logger, orchestrator.Options{
+			orchOptions := orchestrator.Options{
 				DryRun:      dryRun,
 				SkipCleanup: skipCleanup,
 				Timeout:     30 * time.Minute,
 				LocalDev:    localDev,
 				RepoRoot:    repoRoot,
-			})
+			}
 
-			// Run bootstrap
+			if output.IsTTY() && !noTUI && !dryRun {
+				return bootstrap.Run(bootstrap.RunConfig{
+					Ctx:        ctx,
+					Cancel:     cancel,
+					Cfg:        cfg,
+					OrcOptions: orchOptions,
+					LoggerName: logger.Name(),
+					LogLevel:   logger.Level(),
+				})
+			}
+
+			orch := orchestrator.New(logger, orchOptions)
 			if err := orch.Run(ctx, cfg); err != nil {
 				return err
 			}
@@ -157,6 +170,7 @@ Local Development:
 	cmd.Flags().StringVar(&prismEndpoint, "prism-endpoint", "", "Nutanix Prism Central endpoint (overrides config file)")
 	cmd.Flags().StringVar(&prismUsername, "prism-username", "", "Nutanix Prism Central username (overrides config file)")
 	cmd.Flags().StringVar(&prismPassword, "prism-password", "", "Nutanix Prism Central password (overrides config file)")
+	cmd.Flags().BoolVar(&noTUI, "no-tui", false, "disable interactive TUI and use line-by-line output")
 
 	cmd.MarkFlagRequired("config")
 

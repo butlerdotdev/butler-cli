@@ -20,6 +20,7 @@ package orchestrator
 import (
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -33,6 +34,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/clientcmd"
@@ -70,6 +72,16 @@ var (
 		Version:  butlerAPIVersion,
 		Resource: "providerconfigs",
 	}
+	networkPoolGVR = schema.GroupVersionResource{
+		Group:    butlerAPIGroup,
+		Version:  butlerAPIVersion,
+		Resource: "networkpools",
+	}
+	butlerConfigGVR = schema.GroupVersionResource{
+		Group:    butlerAPIGroup,
+		Version:  butlerAPIVersion,
+		Resource: "butlerconfigs",
+	}
 )
 
 // Options configures the orchestrator
@@ -92,8 +104,9 @@ type Options struct {
 
 // Orchestrator manages the bootstrap process
 type Orchestrator struct {
-	logger  *log.Logger
-	options Options
+	logger    *log.Logger
+	options   Options
+	eventSink EventSink
 }
 
 // New creates a new orchestrator
@@ -101,6 +114,20 @@ func New(logger *log.Logger, options Options) *Orchestrator {
 	return &Orchestrator{
 		logger:  logger,
 		options: options,
+	}
+}
+
+// SetEventSink sets an optional event sink for TUI integration. Events are
+// emitted at phase boundaries and during watchBootstrap status polling. The
+// sink implementation must be safe for concurrent use.
+func (o *Orchestrator) SetEventSink(sink EventSink) {
+	o.eventSink = sink
+}
+
+// emit sends an event to the configured sink, if any.
+func (o *Orchestrator) emit(e Event) {
+	if o.eventSink != nil {
+		o.eventSink.Send(e)
 	}
 }
 
@@ -119,6 +146,7 @@ func (o *Orchestrator) Run(ctx context.Context, cfg *Config) error {
 	}
 
 	o.logger.Phase("Initializing bootstrap")
+	o.emit(Event{Type: EventPhaseChange, Phase: "Initializing", Message: "Initializing bootstrap"})
 
 	// Create context with timeout
 	ctx, cancel := context.WithTimeout(ctx, o.options.Timeout)
@@ -126,15 +154,26 @@ func (o *Orchestrator) Run(ctx context.Context, cfg *Config) error {
 
 	// Phase 1: Create KIND cluster
 	o.logger.Phase("Creating temporary KIND cluster")
+	o.emit(Event{Type: EventPhaseChange, Phase: "CreatingKIND", Message: "Creating temporary KIND cluster"})
 	kindProvider := cluster.NewProvider()
 
 	kubeconfigPath, err := o.createKINDCluster(ctx, kindProvider)
 	if err != nil {
 		return fmt.Errorf("creating KIND cluster: %w", err)
 	}
+	// Tell the TUI where the KIND kubeconfig lives so it can start streaming
+	// butler-bootstrap-controller and butler-provider-* pod logs into the
+	// debug panel.
+	o.emit(Event{
+		Type:           EventKINDReady,
+		Phase:          "KINDReady",
+		Message:        "KIND cluster ready",
+		KINDKubeconfig: kubeconfigPath,
+	})
 	defer func() {
 		if !o.options.SkipCleanup {
 			o.logger.Phase("Cleaning up KIND cluster")
+			o.emit(Event{Type: EventPhaseChange, Phase: "CleaningUp", Message: "Cleaning up KIND cluster"})
 			if err := kindProvider.Delete(kindClusterName, ""); err != nil {
 				o.logger.Error("failed to delete KIND cluster", "error", err)
 			}
@@ -152,6 +191,7 @@ func (o *Orchestrator) Run(ctx context.Context, cfg *Config) error {
 	// Build and load images in local dev mode
 	if o.options.LocalDev {
 		o.logger.Phase("Building and loading controller images (local dev mode)")
+		o.emit(Event{Type: EventPhaseChange, Phase: "BuildingImages", Message: "Building and loading controller images"})
 		if err := o.buildAndLoadImages(ctx, cfg.Provider); err != nil {
 			return fmt.Errorf("building/loading images: %w", err)
 		}
@@ -159,6 +199,7 @@ func (o *Orchestrator) Run(ctx context.Context, cfg *Config) error {
 
 	// Create Kubernetes clients
 	o.logger.Phase("Connecting to KIND cluster")
+	o.emit(Event{Type: EventPhaseChange, Phase: "ConnectingKIND", Message: "Connecting to KIND cluster"})
 	clientset, dynamicClient, err := o.createClients(kubeconfigPath)
 	if err != nil {
 		return fmt.Errorf("creating clients: %w", err)
@@ -166,24 +207,39 @@ func (o *Orchestrator) Run(ctx context.Context, cfg *Config) error {
 
 	// Deploy Butler CRDs
 	o.logger.Phase("Deploying Butler CRDs")
+	o.emit(Event{Type: EventPhaseChange, Phase: "DeployingCRDs", Message: "Deploying Butler CRDs"})
 	if err := o.deployCRDs(ctx, clientset, dynamicClient); err != nil {
 		return fmt.Errorf("deploying CRDs: %w", err)
 	}
 
 	// Create namespace and provider secret
 	o.logger.Phase("Creating namespace and secrets")
+	o.emit(Event{Type: EventPhaseChange, Phase: "CreatingSecrets", Message: "Creating namespace and secrets"})
 	if err := o.createNamespaceAndSecrets(ctx, clientset, cfg); err != nil {
 		return fmt.Errorf("creating namespace/secrets: %w", err)
 	}
 
 	// Deploy controllers
 	o.logger.Phase("Deploying Butler controllers")
+	o.emit(Event{Type: EventPhaseChange, Phase: "DeployingControllers", Message: "Deploying Butler controllers"})
 	if err := o.deployControllers(ctx, clientset, dynamicClient, cfg); err != nil {
 		return fmt.Errorf("deploying controllers: %w", err)
 	}
 
+	// Create NetworkPool CR for management cluster IPAM (optional — only if config
+	// requested it). Runs before ProviderConfig so the ProviderConfig's
+	// poolRefs resolve immediately.
+	if cfg.NetworkPool != nil {
+		o.logger.Phase("Creating NetworkPool for management cluster IPAM")
+		o.emit(Event{Type: EventPhaseChange, Phase: "CreatingNetworkPool", Message: "Creating NetworkPool"})
+		if err := o.createNetworkPool(ctx, dynamicClient, cfg); err != nil {
+			return fmt.Errorf("creating NetworkPool: %w", err)
+		}
+	}
+
 	// Create ProviderConfig CR
 	o.logger.Phase("Creating ProviderConfig")
+	o.emit(Event{Type: EventPhaseChange, Phase: "CreatingProviderConfig", Message: "Creating ProviderConfig"})
 	if err := o.createProviderConfig(ctx, dynamicClient, cfg); err != nil {
 		return fmt.Errorf("creating ProviderConfig: %w", err)
 	}
@@ -198,12 +254,14 @@ func (o *Orchestrator) Run(ctx context.Context, cfg *Config) error {
 
 	// Create ClusterBootstrap CR
 	o.logger.Phase("Creating ClusterBootstrap")
+	o.emit(Event{Type: EventPhaseChange, Phase: "CreatingBootstrap", Message: "Creating ClusterBootstrap"})
 	if err := o.createClusterBootstrap(ctx, dynamicClient, cfg); err != nil {
 		return fmt.Errorf("creating ClusterBootstrap: %w", err)
 	}
 
 	// Watch for completion
 	o.logger.Phase("Waiting for cluster bootstrap")
+	o.emit(Event{Type: EventPhaseChange, Phase: "WatchingBootstrap", Message: "Waiting for cluster bootstrap"})
 	creds, err := o.watchBootstrap(ctx, dynamicClient, cfg)
 	if err != nil {
 		return fmt.Errorf("watching bootstrap: %w", err)
@@ -211,11 +269,28 @@ func (o *Orchestrator) Run(ctx context.Context, cfg *Config) error {
 
 	// Save cluster credentials
 	o.logger.Phase("Saving cluster credentials")
+	o.emit(Event{Type: EventPhaseChange, Phase: "SavingCredentials", Message: "Saving cluster credentials"})
 	if err := o.saveClusterCredentials(cfg.Cluster.Name, creds); err != nil {
 		return fmt.Errorf("saving cluster credentials: %w", err)
 	}
 
+	// Post-bootstrap management cluster configuration: apply settings that
+	// the bootstrap controller doesn't handle from ClusterBootstrap.spec
+	// (IPAM, multi-tenancy mode). Uses the freshly-saved kubeconfig.
+	if cfg.NetworkPool != nil || cfg.MultiTenancyMode != "" {
+		o.logger.Phase("Configuring management cluster")
+		o.emit(Event{Type: EventPhaseChange, Phase: "ConfiguringManagement", Message: "Configuring management cluster"})
+
+		home, _ := os.UserHomeDir()
+		mgmtKubeconfig := filepath.Join(home, ".butler", cfg.Cluster.Name+"-kubeconfig")
+		if err := o.configureManagementCluster(ctx, cfg, mgmtKubeconfig); err != nil {
+			o.logger.Warn("Failed to configure management cluster", "error", err)
+			o.logger.Info("You can configure settings manually: kubectl edit butlerconfig butler / kubectl edit providerconfig")
+		}
+	}
+
 	o.logger.Success("Bootstrap complete!")
+	o.emit(Event{Type: EventSuccess, Phase: "Complete", Message: "Bootstrap complete"})
 	o.logger.Info("")
 	o.logger.Info("Cluster credentials saved to:")
 	o.logger.Info("  Kubeconfig:   ~/.butler/" + cfg.Cluster.Name + "-kubeconfig")
@@ -854,6 +929,199 @@ func (o *Orchestrator) createProviderConfig(ctx context.Context, client dynamic.
 	return nil
 }
 
+// createNetworkPool creates the NetworkPool CR from cfg.NetworkPool so the
+// platform has an IPAM pool ready for management cluster allocations. The pool
+// name defaults to "<cluster>-underlay" if unset so every bootstrap gets a
+// uniquely-scoped pool without clobbering existing ones on upgrade reruns.
+func (o *Orchestrator) createNetworkPool(ctx context.Context, client dynamic.Interface, cfg *Config) error {
+	np := cfg.NetworkPool
+	name := np.Name
+	if name == "" {
+		name = cfg.Cluster.Name + "-underlay"
+	}
+
+	spec := map[string]interface{}{
+		"cidr": np.CIDR,
+	}
+
+	if len(np.Reserved) > 0 {
+		reserved := make([]interface{}, 0, len(np.Reserved))
+		for _, r := range np.Reserved {
+			entry := map[string]interface{}{"cidr": r.CIDR}
+			if r.Description != "" {
+				entry["description"] = r.Description
+			}
+			reserved = append(reserved, entry)
+		}
+		spec["reserved"] = reserved
+	}
+
+	if np.TenantAllocation.Start != "" && np.TenantAllocation.End != "" {
+		ta := map[string]interface{}{
+			"start": np.TenantAllocation.Start,
+			"end":   np.TenantAllocation.End,
+		}
+		defaults := map[string]interface{}{}
+		if np.TenantAllocation.Defaults.LBPoolPerTenant > 0 {
+			defaults["lbPoolPerTenant"] = int64(np.TenantAllocation.Defaults.LBPoolPerTenant)
+		}
+		if np.TenantAllocation.Defaults.NodesPerTenant > 0 {
+			defaults["nodesPerTenant"] = int64(np.TenantAllocation.Defaults.NodesPerTenant)
+		}
+		if len(defaults) > 0 {
+			ta["defaults"] = defaults
+		}
+		spec["tenantAllocation"] = ta
+	}
+
+	pool := &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"apiVersion": butlerAPIGroup + "/" + butlerAPIVersion,
+			"kind":       "NetworkPool",
+			"metadata": map[string]interface{}{
+				"name":      name,
+				"namespace": butlerNamespace,
+			},
+			"spec": spec,
+		},
+	}
+
+	_, err := client.Resource(networkPoolGVR).Namespace(butlerNamespace).Create(
+		ctx, pool, metav1.CreateOptions{})
+	if err != nil {
+		return fmt.Errorf("creating NetworkPool: %w", err)
+	}
+
+	o.logger.Success("NetworkPool created", "name", name, "cidr", np.CIDR)
+	return nil
+}
+
+// configureManagementCluster connects to the freshly-bootstrapped management
+// cluster and applies settings the bootstrap controller doesn't handle:
+// NetworkPool for IPAM, ProviderConfig.spec.network, ButlerConfig multi-tenancy
+// mode. Runs AFTER saveClusterCredentials.
+func (o *Orchestrator) configureManagementCluster(ctx context.Context, cfg *Config, mgmtKubeconfig string) error {
+	_, dynamicClient, err := o.createClients(mgmtKubeconfig)
+	if err != nil {
+		return fmt.Errorf("connecting to management cluster: %w", err)
+	}
+
+	// 1. Create NetworkPool in butler-system (if IPAM enabled).
+	if cfg.NetworkPool != nil {
+		if err := o.createNetworkPool(ctx, dynamicClient, cfg); err != nil {
+			return fmt.Errorf("creating NetworkPool: %w", err)
+		}
+
+		// 2. Patch ProviderConfig with spec.network.
+		if network := o.buildProviderNetworkSection(cfg); network != nil {
+			patch := map[string]interface{}{
+				"spec": map[string]interface{}{
+					"network": network,
+				},
+			}
+			patchBytes, err := json.Marshal(patch)
+			if err != nil {
+				return fmt.Errorf("marshaling network patch: %w", err)
+			}
+			_, err = dynamicClient.Resource(providerConfigGVR).Namespace(butlerNamespace).Patch(
+				ctx, cfg.Provider, types.MergePatchType, patchBytes, metav1.PatchOptions{})
+			if err != nil {
+				return fmt.Errorf("patching ProviderConfig: %w", err)
+			}
+			o.logger.Success("ProviderConfig patched with IPAM network config")
+		}
+	}
+
+	// 3. Patch ButlerConfig with multiTenancy.mode.
+	if cfg.MultiTenancyMode != "" {
+		patch := map[string]interface{}{
+			"spec": map[string]interface{}{
+				"multiTenancy": map[string]interface{}{
+					"mode": cfg.MultiTenancyMode,
+				},
+			},
+		}
+		patchBytes, err := json.Marshal(patch)
+		if err != nil {
+			return fmt.Errorf("marshaling ButlerConfig patch: %w", err)
+		}
+		_, err = dynamicClient.Resource(butlerConfigGVR).Patch(
+			ctx, "butler", types.MergePatchType, patchBytes, metav1.PatchOptions{})
+		if err != nil {
+			return fmt.Errorf("patching ButlerConfig: %w", err)
+		}
+		o.logger.Success("ButlerConfig updated", "multiTenancy.mode", cfg.MultiTenancyMode)
+	}
+
+	return nil
+}
+
+// buildProviderNetworkSection returns the map that goes into
+// ProviderConfig.spec.network, or nil if no provider network config is set.
+// Keeps the builder's switch-per-provider concise by extracting the shared
+// network block.
+func (o *Orchestrator) buildProviderNetworkSection(cfg *Config) map[string]interface{} {
+	if cfg.ProviderNetwork == nil {
+		return nil
+	}
+	pn := cfg.ProviderNetwork
+
+	network := map[string]interface{}{
+		"mode": pn.Mode,
+	}
+
+	if len(pn.PoolRefs) > 0 {
+		refs := make([]interface{}, 0, len(pn.PoolRefs))
+		for _, r := range pn.PoolRefs {
+			refs = append(refs, map[string]interface{}{
+				"name":     r.Name,
+				"priority": int64(r.Priority),
+			})
+		}
+		network["poolRefs"] = refs
+	}
+	if pn.Gateway != "" {
+		network["gateway"] = pn.Gateway
+	}
+	if len(pn.DNSServers) > 0 {
+		dns := make([]interface{}, 0, len(pn.DNSServers))
+		for _, d := range pn.DNSServers {
+			dns = append(dns, d)
+		}
+		network["dnsServers"] = dns
+	}
+	if pn.Subnet != "" {
+		network["subnet"] = pn.Subnet
+	}
+	if pn.LoadBalancer.AllocationMode != "" {
+		lb := map[string]interface{}{
+			"allocationMode": pn.LoadBalancer.AllocationMode,
+		}
+		if pn.LoadBalancer.InitialPoolSize > 0 {
+			lb["initialPoolSize"] = int64(pn.LoadBalancer.InitialPoolSize)
+		}
+		if pn.LoadBalancer.DefaultPoolSize > 0 {
+			lb["defaultPoolSize"] = int64(pn.LoadBalancer.DefaultPoolSize)
+		}
+		if pn.LoadBalancer.GrowthIncrement > 0 {
+			lb["growthIncrement"] = int64(pn.LoadBalancer.GrowthIncrement)
+		}
+		network["loadBalancer"] = lb
+	}
+	if pn.QuotaPerTenant.MaxLoadBalancerIPs > 0 || pn.QuotaPerTenant.MaxNodeIPs > 0 {
+		quota := map[string]interface{}{}
+		if pn.QuotaPerTenant.MaxLoadBalancerIPs > 0 {
+			quota["maxLoadBalancerIPs"] = int64(pn.QuotaPerTenant.MaxLoadBalancerIPs)
+		}
+		if pn.QuotaPerTenant.MaxNodeIPs > 0 {
+			quota["maxNodeIPs"] = int64(pn.QuotaPerTenant.MaxNodeIPs)
+		}
+		network["quotaPerTenant"] = quota
+	}
+
+	return network
+}
+
 // buildProviderConfigUnstructured builds a ProviderConfig as unstructured
 func (o *Orchestrator) buildProviderConfigUnstructured(cfg *Config) *unstructured.Unstructured {
 	spec := map[string]interface{}{
@@ -963,6 +1231,11 @@ func (o *Orchestrator) buildProviderConfigUnstructured(cfg *Config) *unstructure
 			azureSpec["imageURN"] = cfg.ProviderConfig.Azure.ImageURN
 		}
 		spec["azure"] = azureSpec
+	}
+
+	// Bind the provider to the IPAM network pool (if one was configured).
+	if network := o.buildProviderNetworkSection(cfg); network != nil {
+		spec["network"] = network
 	}
 
 	pc := &unstructured.Unstructured{
@@ -1130,26 +1403,72 @@ func (o *Orchestrator) watchBootstrap(ctx context.Context, client dynamic.Interf
 				lastPhase = phase
 			}
 
-			// Collect control plane IPs from machine status
+			// Build machine status list and collect control plane IPs
 			var controlPlaneIPs []string
+			var machineStatuses []MachineStatus
 			if machines, ok := status["machines"].([]interface{}); ok {
 				for _, m := range machines {
 					if machine, ok := m.(map[string]interface{}); ok {
+						name, _ := machine["name"].(string)
+						role, _ := machine["role"].(string)
+						mPhase, _ := machine["phase"].(string)
+						ip, _ := machine["ipAddress"].(string)
+						talosConfigured, _ := machine["talosConfigured"].(bool)
+						ready, _ := machine["ready"].(bool)
+
 						o.logger.Debug("machine status",
-							"name", machine["name"],
-							"phase", machine["phase"],
-							"ip", machine["ipAddress"],
-							"ready", machine["ready"],
+							"name", name,
+							"phase", mPhase,
+							"ip", ip,
+							"ready", ready,
 						)
-						// Collect control plane IPs for talosconfig endpoints
-						if role, _ := machine["role"].(string); role == "control-plane" {
-							if ip, _ := machine["ipAddress"].(string); ip != "" {
-								controlPlaneIPs = append(controlPlaneIPs, ip)
-							}
+
+						machineStatuses = append(machineStatuses, MachineStatus{
+							Name:            name,
+							Role:            role,
+							Phase:           mPhase,
+							IPAddress:       ip,
+							TalosConfigured: talosConfigured,
+							Ready:           ready,
+						})
+
+						if role == "control-plane" && ip != "" {
+							controlPlaneIPs = append(controlPlaneIPs, ip)
 						}
 					}
 				}
 			}
+
+			// Build addons installed map
+			addonsInstalled := make(map[string]bool)
+			if addons, ok := status["addonsInstalled"].(map[string]interface{}); ok {
+				for k, v := range addons {
+					if b, ok := v.(bool); ok {
+						addonsInstalled[k] = b
+					}
+				}
+			}
+
+			endpoint, _ := status["controlPlaneEndpoint"].(string)
+			consoleURL, _ := status["consoleURL"].(string)
+			failureReason, _ := status["failureReason"].(string)
+			failureMessage, _ := status["failureMessage"].(string)
+
+			// Emit full status snapshot for TUI
+			o.emit(Event{
+				Type:    EventBootstrapStatus,
+				Phase:   phase,
+				Message: "bootstrap status update",
+				Status: &BootstrapSnapshot{
+					Phase:           phase,
+					Machines:        machineStatuses,
+					AddonsInstalled: addonsInstalled,
+					FailureReason:   failureReason,
+					FailureMessage:  failureMessage,
+					Endpoint:        endpoint,
+					ConsoleURL:      consoleURL,
+				},
+			})
 
 			switch phase {
 			case "Ready":
@@ -1169,18 +1488,33 @@ func (o *Orchestrator) watchBootstrap(ctx context.Context, client dynamic.Interf
 					return nil, fmt.Errorf("decoding talosconfig: %w", err)
 				}
 
-				consoleURL, _ := status["consoleURL"].(string)
-
-				return &clusterCredentials{
+				creds := &clusterCredentials{
 					kubeconfig:      kubeconfigBytes,
 					talosconfig:     talosconfigBytes,
 					controlPlaneIPs: controlPlaneIPs,
 					consoleURL:      consoleURL,
-				}, nil
+				}
+				o.emit(Event{
+					Type:    EventComplete,
+					Phase:   phase,
+					Message: "Bootstrap complete",
+					Creds: &ClusterCredentials{
+						Kubeconfig:      kubeconfigBytes,
+						Talosconfig:     talosconfigBytes,
+						ControlPlaneIPs: controlPlaneIPs,
+						ConsoleURL:      consoleURL,
+					},
+				})
+				return creds, nil
 			case "Failed":
-				reason, _ := status["failureReason"].(string)
-				message, _ := status["failureMessage"].(string)
-				return nil, fmt.Errorf("bootstrap failed: %s - %s", reason, message)
+				err := fmt.Errorf("bootstrap failed: %s - %s", failureReason, failureMessage)
+				o.emit(Event{
+					Type:    EventFailed,
+					Phase:   phase,
+					Message: failureMessage,
+					Error:   err,
+				})
+				return nil, err
 			}
 		}
 	}

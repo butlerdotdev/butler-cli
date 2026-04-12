@@ -23,6 +23,8 @@ import (
 
 	"github.com/butlerdotdev/butler/internal/adm/bootstrap/orchestrator"
 	"github.com/butlerdotdev/butler/internal/common/log"
+	"github.com/butlerdotdev/butler/internal/common/output"
+	"github.com/butlerdotdev/butler/internal/tui/bootstrap"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
@@ -30,12 +32,13 @@ import (
 // NewHarvesterCmd creates the harvester bootstrap subcommand
 func NewHarvesterCmd(logger *log.Logger) *cobra.Command {
 	var (
-		configFile           string
-		dryRun               bool
-		skipCleanup          bool
-		localDev             bool
-		repoRoot             string
-		harvesterKubeconfig  string
+		configFile          string
+		dryRun              bool
+		skipCleanup         bool
+		localDev            bool
+		repoRoot            string
+		harvesterKubeconfig string
+		noTUI               bool
 	)
 
 	cmd := &cobra.Command{
@@ -100,16 +103,28 @@ Local Development:
 				repoRoot = home + "/code/github.com/butlerdotdev"
 			}
 
-			// Create orchestrator
-			orch := orchestrator.New(logger, orchestrator.Options{
+			orchOptions := orchestrator.Options{
 				DryRun:      dryRun,
 				SkipCleanup: skipCleanup,
 				Timeout:     30 * time.Minute,
 				LocalDev:    localDev,
 				RepoRoot:    repoRoot,
-			})
+			}
 
-			// Run bootstrap
+			// Interactive TUI when stdout is a TTY. --no-tui or piped output
+			// falls through to the line-by-line orchestrator below.
+			if output.IsTTY() && !noTUI && !dryRun {
+				return bootstrap.Run(bootstrap.RunConfig{
+					Ctx:        ctx,
+					Cancel:     cancel,
+					Cfg:        cfg,
+					OrcOptions: orchOptions,
+					LoggerName: logger.Name(),
+					LogLevel:   logger.Level(),
+				})
+			}
+
+			orch := orchestrator.New(logger, orchOptions)
 			if err := orch.Run(ctx, cfg); err != nil {
 				return err
 			}
@@ -124,6 +139,7 @@ Local Development:
 	cmd.Flags().BoolVar(&localDev, "local", false, "local development mode - build and load images from source")
 	cmd.Flags().StringVar(&repoRoot, "repo-root", "", "path to butlerdotdev repos (default: ~/code/github.com/butlerdotdev)")
 	cmd.Flags().StringVar(&harvesterKubeconfig, "harvester-kubeconfig", "", "path to Harvester kubeconfig (overrides config file)")
+	cmd.Flags().BoolVar(&noTUI, "no-tui", false, "disable interactive TUI and use line-by-line output")
 
 	cmd.MarkFlagRequired("config")
 
