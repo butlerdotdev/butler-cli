@@ -27,8 +27,7 @@ import (
 	"github.com/butlerdotdev/butler/internal/tui/wizard/discovery"
 )
 
-// providerSelectGroup presents the provider selection dropdown. Only
-// providers with discovery support built into this binary are offered.
+// providerSelectGroup presents the provider selection dropdown.
 func providerSelectGroup(s *wizardState) *huh.Group {
 	return huh.NewGroup(
 		huh.NewNote().
@@ -40,6 +39,9 @@ func providerSelectGroup(s *wizardState) *huh.Group {
 			Options(
 				huh.NewOption("Harvester (HCI)", "harvester"),
 				huh.NewOption("Nutanix (AHV)", "nutanix"),
+				huh.NewOption("Amazon Web Services (AWS)", "aws"),
+				huh.NewOption("Microsoft Azure", "azure"),
+				huh.NewOption("Google Cloud Platform (GCP)", "gcp"),
 			).
 			Value(&s.Provider),
 	)
@@ -100,6 +102,89 @@ func nutanixCredGroup(s *wizardState) *huh.Group {
 	})
 }
 
+// awsCredGroup collects AWS access key and secret.
+func awsCredGroup(s *wizardState) *huh.Group {
+	return huh.NewGroup(
+		huh.NewNote().
+			Title("AWS Provider").
+			Description("Connect to Amazon Web Services."),
+
+		huh.NewInput().
+			Title("Access Key ID").
+			Value(&s.AWSAccessKey).
+			Validate(validateNotEmpty),
+
+		huh.NewInput().
+			Title("Secret Access Key").
+			Value(&s.AWSSecretKey).
+			EchoMode(huh.EchoModePassword).
+			Validate(validateNotEmpty),
+
+		huh.NewInput().
+			Title("Region").
+			Placeholder("us-east-1").
+			Value(&s.AWSRegion).
+			Validate(validateNotEmpty),
+	).WithHideFunc(func() bool {
+		return s.Provider != "aws"
+	})
+}
+
+// azureCredGroup collects Azure service principal credentials.
+func azureCredGroup(s *wizardState) *huh.Group {
+	return huh.NewGroup(
+		huh.NewNote().
+			Title("Azure Provider").
+			Description("Connect to Microsoft Azure."),
+
+		huh.NewInput().
+			Title("Client ID").
+			Description("Service principal app ID").
+			Value(&s.AZClientID).
+			Validate(validateNotEmpty),
+
+		huh.NewInput().
+			Title("Client Secret").
+			Value(&s.AZClientSecret).
+			EchoMode(huh.EchoModePassword).
+			Validate(validateNotEmpty),
+
+		huh.NewInput().
+			Title("Tenant ID").
+			Value(&s.AZTenantID).
+			Validate(validateNotEmpty),
+
+		huh.NewInput().
+			Title("Subscription ID").
+			Value(&s.AZSubscriptionID).
+			Validate(validateNotEmpty),
+	).WithHideFunc(func() bool {
+		return s.Provider != "azure"
+	})
+}
+
+// gcpCredGroup collects GCP service account key path and project ID.
+func gcpCredGroup(s *wizardState) *huh.Group {
+	return huh.NewGroup(
+		huh.NewNote().
+			Title("GCP Provider").
+			Description("Connect to Google Cloud Platform."),
+
+		huh.NewInput().
+			Title("Service Account Key Path").
+			Description("Path to the GCP service account key JSON file").
+			Value(&s.GCPKeyPath).
+			Validate(validateNotEmpty),
+
+		huh.NewInput().
+			Title("Project ID").
+			Value(&s.GCPProjectID).
+			Validate(validateNotEmpty),
+	).WithHideFunc(func() bool {
+		return s.Provider != "gcp"
+	})
+}
+
 // resourcesToOptions converts discovered resources to huh select options.
 func resourcesToOptions(resources []discovery.ProviderResource) []huh.Option[string] {
 	if len(resources) == 0 {
@@ -139,9 +224,107 @@ func resourceSelectGroup(s *wizardState, disc discovery.ProviderDiscovery, resou
 		return harvesterResourceGroup(s, disc, resources)
 	case "nutanix":
 		return nutanixResourceGroup(s, resources)
+	case "aws":
+		return awsResourceGroup(s, disc, resources)
+	case "azure":
+		return azureResourceGroup(s, disc, resources)
+	case "gcp":
+		return gcpResourceGroup(s, disc, resources)
 	}
 	return huh.NewGroup(
 		huh.NewNote().Title("Resources").Description("No resources to configure."),
+	)
+}
+
+// awsResourceGroup builds AWS resource selection (region, VPC, subnet, security group).
+func awsResourceGroup(s *wizardState, disc discovery.ProviderDiscovery, resources map[string][]discovery.ProviderResource) *huh.Group {
+	regionOpts := resourcesToOptions(resources[discovery.ResourceRegions])
+	return huh.NewGroup(
+		huh.NewNote().
+			Title("Infrastructure Resources").
+			Description("Select the AWS resources for VM placement."),
+
+		huh.NewSelect[string]().
+			Title("Region").
+			Options(regionOpts...).
+			Value(&s.AWSRegion),
+
+		huh.NewSelect[string]().
+			Title("VPC").
+			OptionsFunc(fetchOptions(disc, discovery.ResourceVPCs, &s.AWSRegion), &s.AWSRegion).
+			Value(&s.AWSVPCID),
+
+		huh.NewSelect[string]().
+			Title("Subnet").
+			OptionsFunc(fetchOptions(disc, discovery.ResourceSubnets, &s.AWSVPCID), &s.AWSVPCID).
+			Value(&s.AWSSubnetID),
+
+		huh.NewSelect[string]().
+			Title("Security Group").
+			OptionsFunc(fetchOptions(disc, discovery.ResourceSecurityGroups, &s.AWSVPCID), &s.AWSVPCID).
+			Value(&s.AWSSecGroupID),
+	)
+}
+
+// azureResourceGroup builds Azure resource selection (location, RG, VNet, subnet).
+func azureResourceGroup(s *wizardState, disc discovery.ProviderDiscovery, resources map[string][]discovery.ProviderResource) *huh.Group {
+	locationOpts := resourcesToOptions(resources[discovery.ResourceLocations])
+	rgOpts := resourcesToOptions(resources[discovery.ResourceResourceGroups])
+	return huh.NewGroup(
+		huh.NewNote().
+			Title("Infrastructure Resources").
+			Description("Select the Azure resources for VM placement."),
+
+		huh.NewSelect[string]().
+			Title("Location").
+			Options(locationOpts...).
+			Value(&s.AZLocation),
+
+		huh.NewSelect[string]().
+			Title("Resource Group").
+			Options(rgOpts...).
+			Value(&s.AZResourceGroup),
+
+		huh.NewSelect[string]().
+			Title("Virtual Network").
+			OptionsFunc(fetchOptions(disc, discovery.ResourceVNets, &s.AZResourceGroup), &s.AZResourceGroup).
+			Value(&s.AZVNet),
+
+		huh.NewSelect[string]().
+			Title("Subnet").
+			OptionsFunc(fetchOptions(disc, discovery.ResourceSubnets, &s.AZVNet), &s.AZVNet).
+			Value(&s.AZSubnet),
+	)
+}
+
+// gcpResourceGroup builds GCP resource selection (region, zone, network, subnet).
+func gcpResourceGroup(s *wizardState, disc discovery.ProviderDiscovery, resources map[string][]discovery.ProviderResource) *huh.Group {
+	regionOpts := resourcesToOptions(resources[discovery.ResourceRegions])
+	networkOpts := resourcesToOptions(resources[discovery.ResourceNetworks])
+	return huh.NewGroup(
+		huh.NewNote().
+			Title("Infrastructure Resources").
+			Description("Select the GCP resources for VM placement."),
+
+		huh.NewSelect[string]().
+			Title("Region").
+			Options(regionOpts...).
+			Value(&s.GCPRegion),
+
+		huh.NewSelect[string]().
+			Title("Zone").
+			OptionsFunc(fetchOptions(disc, discovery.ResourceZones, &s.GCPRegion), &s.GCPRegion).
+			Value(&s.GCPZone),
+
+		huh.NewSelect[string]().
+			Title("Network").
+			Options(networkOpts...).
+			Value(&s.GCPNetwork),
+
+		huh.NewSelect[string]().
+			Title("Subnetwork").
+			OptionsFunc(fetchOptions(disc, discovery.ResourceSubnets, &s.GCPRegion), &s.GCPRegion).
+			Value(&s.GCPSubnetwork),
 	)
 }
 
@@ -320,12 +503,14 @@ func workersStep(s *wizardState) *huh.Group {
 	})
 }
 
-// networkingStep configures pod/service CIDRs, VIP, and MetalLB pool.
+// networkingStep configures pod/service CIDRs. For on-prem providers it
+// also collects VIP and MetalLB pool. Cloud providers skip VIP/LB pool
+// since they use native load balancing.
 func networkingStep(s *wizardState) *huh.Group {
 	return huh.NewGroup(
 		huh.NewNote().
 			Title("Networking").
-			Description("Cluster networking and MetalLB load balancer pool."),
+			Description("Cluster networking CIDRs."),
 
 		huh.NewInput().
 			Title("Pod CIDR").
@@ -336,6 +521,16 @@ func networkingStep(s *wizardState) *huh.Group {
 			Title("Service CIDR").
 			Value(&s.ServiceCIDR).
 			Validate(validateCIDR),
+	)
+}
+
+// onPremNetworkingStep collects VIP and MetalLB pool, which only apply
+// to on-prem providers (Harvester, Nutanix). Hidden for cloud providers.
+func onPremNetworkingStep(s *wizardState) *huh.Group {
+	return huh.NewGroup(
+		huh.NewNote().
+			Title("On-Prem Networking").
+			Description("Management cluster VIP (kube-vip) and MetalLB pool.\nCloud providers skip this — they use native load balancing."),
 
 		huh.NewInput().
 			Title("Control Plane VIP").
@@ -357,7 +552,9 @@ func networkingStep(s *wizardState) *huh.Group {
 			Placeholder("10.40.0.250").
 			Value(&s.LBEnd).
 			Validate(validateIP),
-	)
+	).WithHideFunc(func() bool {
+		return !isOnPrem(s.Provider)
+	})
 }
 
 // ipamStep toggles whether the bootstrap creates a NetworkPool CR for
@@ -702,6 +899,12 @@ func reviewStep(s *wizardState, confirmed *bool) *huh.Group {
 	)
 }
 
+// isOnPrem reports whether the selected provider is an on-prem provider
+// that uses kube-vip, MetalLB, and IPAM rather than cloud-native networking.
+func isOnPrem(provider string) bool {
+	return provider == "harvester" || provider == "nutanix" || provider == "proxmox"
+}
+
 // validateConfig performs a final sanity check over the wizardState
 // just before the bootstrap is launched. It catches conditional
 // required fields that the per-field validators can't block (see
@@ -864,6 +1067,21 @@ func buildSummary(s *wizardState) string {
 		} else {
 			fmt.Fprintf(&b, "Image:          %s\n", s.NutImageUUID)
 		}
+	case "aws":
+		fmt.Fprintf(&b, "Region:         %s\n", s.AWSRegion)
+		fmt.Fprintf(&b, "VPC:            %s\n", s.AWSVPCID)
+		fmt.Fprintf(&b, "Subnet:         %s\n", s.AWSSubnetID)
+		fmt.Fprintf(&b, "Security Group: %s\n", s.AWSSecGroupID)
+	case "azure":
+		fmt.Fprintf(&b, "Location:       %s\n", s.AZLocation)
+		fmt.Fprintf(&b, "Resource Group: %s\n", s.AZResourceGroup)
+		fmt.Fprintf(&b, "VNet:           %s\n", s.AZVNet)
+		fmt.Fprintf(&b, "Subnet:         %s\n", s.AZSubnet)
+	case "gcp":
+		fmt.Fprintf(&b, "Region:         %s\n", s.GCPRegion)
+		fmt.Fprintf(&b, "Zone:           %s\n", s.GCPZone)
+		fmt.Fprintf(&b, "Network:        %s\n", s.GCPNetwork)
+		fmt.Fprintf(&b, "Subnetwork:     %s\n", s.GCPSubnetwork)
 	}
 
 	// Disclosure: what gets installed with defaults the wizard does not

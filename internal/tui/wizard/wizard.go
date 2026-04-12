@@ -57,6 +57,9 @@ func Run() (*orchestrator.Config, error) {
 			providerSelectGroup(s),
 			harvesterCredGroup(s),
 			nutanixCredGroup(s),
+			awsCredGroup(s),
+			azureCredGroup(s),
+			gcpCredGroup(s),
 		).
 			WithTheme(theme).
 			WithKeyMap(km).
@@ -91,6 +94,7 @@ func Run() (*orchestrator.Config, error) {
 			cpReplicasStep(s),
 			workersStep(s),
 			networkingStep(s),
+			onPremNetworkingStep(s),
 			ipamStep(s),
 			networkPoolStep(s),
 			providerNetworkStep(s),
@@ -329,6 +333,35 @@ func buildConfig(s *wizardState) (*orchestrator.Config, error) {
 			ClusterUUID: s.NutClusterUUID,
 			SubnetUUID:  s.NutSubnetUUID,
 			ImageUUID:   s.NutImageUUID,
+		}
+	case "aws":
+		cfg.ProviderConfig.AWS = &orchestrator.AWSProviderConfig{
+			AccessKeyID:     s.AWSAccessKey,
+			SecretAccessKey:  s.AWSSecretKey,
+			Region:          s.AWSRegion,
+			VPCID:           s.AWSVPCID,
+			SubnetID:        s.AWSSubnetID,
+			SecurityGroupID: s.AWSSecGroupID,
+		}
+	case "azure":
+		cfg.ProviderConfig.Azure = &orchestrator.AzureProviderConfig{
+			ClientID:       s.AZClientID,
+			ClientSecret:   s.AZClientSecret,
+			TenantID:       s.AZTenantID,
+			SubscriptionID: s.AZSubscriptionID,
+			ResourceGroup:  s.AZResourceGroup,
+			Location:       s.AZLocation,
+			VNetName:       s.AZVNet,
+			SubnetName:     s.AZSubnet,
+		}
+	case "gcp":
+		cfg.ProviderConfig.GCP = &orchestrator.GCPProviderConfig{
+			ServiceAccountKeyPath: orchestrator.ExpandPath(s.GCPKeyPath),
+			ProjectID:             s.GCPProjectID,
+			Region:                s.GCPRegion,
+			Zone:                  s.GCPZone,
+			Network:               s.GCPNetwork,
+			Subnetwork:            s.GCPSubnetwork,
 		}
 	}
 
