@@ -20,6 +20,7 @@ package orchestrator
 import (
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -33,6 +34,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/clientcmd"
@@ -219,11 +221,11 @@ func (o *Orchestrator) Run(ctx context.Context, cfg *Config) error {
 		return fmt.Errorf("deploying controllers: %w", err)
 	}
 
-	// Create NetworkPool CR for tenant IPAM (optional — only if config
+	// Create NetworkPool CR for management cluster IPAM (optional — only if config
 	// requested it). Runs before ProviderConfig so the ProviderConfig's
 	// poolRefs resolve immediately.
 	if cfg.NetworkPool != nil {
-		o.logger.Phase("Creating NetworkPool for tenant IPAM")
+		o.logger.Phase("Creating NetworkPool for management cluster IPAM")
 		o.emit(Event{Type: EventPhaseChange, Phase: "CreatingNetworkPool", Message: "Creating NetworkPool"})
 		if err := o.createNetworkPool(ctx, dynamicClient, cfg); err != nil {
 			return fmt.Errorf("creating NetworkPool: %w", err)
@@ -265,6 +267,28 @@ func (o *Orchestrator) Run(ctx context.Context, cfg *Config) error {
 	o.emit(Event{Type: EventPhaseChange, Phase: "SavingCredentials", Message: "Saving cluster credentials"})
 	if err := o.saveClusterCredentials(cfg.Cluster.Name, creds); err != nil {
 		return fmt.Errorf("saving cluster credentials: %w", err)
+	}
+
+	// Configure management cluster IPAM: create the NetworkPool and patch the
+	// ProviderConfig on the TENANT cluster (not KIND). The bootstrap
+	// controller already created a bare ProviderConfig on the tenant
+	// cluster from the ClusterBootstrap spec, but it has no spec.network
+	// section and no NetworkPool — both are management-cluster-only
+	// concerns that the bootstrap controller doesn't handle. Without
+	// this step operators have to stand them up manually before tenant
+	// cluster creation works.
+	if cfg.NetworkPool != nil {
+		o.logger.Phase("Configuring management cluster IPAM")
+		o.emit(Event{Type: EventPhaseChange, Phase: "ConfiguringIPAM", Message: "Configuring IPAM on management cluster"})
+
+		home, _ := os.UserHomeDir()
+		tenantKubeconfig := filepath.Join(home, ".butler", cfg.Cluster.Name+"-kubeconfig")
+		if err := o.configureIPAM(ctx, cfg, tenantKubeconfig); err != nil {
+			// Non-fatal: the cluster is usable without IPAM. Warn and
+			// let the operator fix it post-bootstrap.
+			o.logger.Warn("Failed to configure IPAM on management cluster", "error", err)
+			o.logger.Info("You can configure IPAM manually: kubectl apply -f networkpool.yaml && kubectl edit providerconfig")
+		}
 	}
 
 	o.logger.Success("Bootstrap complete!")
@@ -908,7 +932,7 @@ func (o *Orchestrator) createProviderConfig(ctx context.Context, client dynamic.
 }
 
 // createNetworkPool creates the NetworkPool CR from cfg.NetworkPool so the
-// platform has an IPAM pool ready for tenant cluster allocations. The pool
+// platform has an IPAM pool ready for management cluster allocations. The pool
 // name defaults to "<cluster>-underlay" if unset so every bootstrap gets a
 // uniquely-scoped pool without clobbering existing ones on upgrade reruns.
 func (o *Orchestrator) createNetworkPool(ctx context.Context, client dynamic.Interface, cfg *Config) error {
@@ -971,6 +995,49 @@ func (o *Orchestrator) createNetworkPool(ctx context.Context, client dynamic.Int
 	}
 
 	o.logger.Success("NetworkPool created", "name", name, "cidr", np.CIDR)
+	return nil
+}
+
+// configureIPAM connects to the freshly-bootstrapped management cluster and
+// creates the NetworkPool CR + patches the ProviderConfig's spec.network
+// section so the management cluster is immediately ready for tenant
+// cluster IP allocation. This runs AFTER saveClusterCredentials because
+// it needs the tenant kubeconfig that was just written to disk.
+func (o *Orchestrator) configureIPAM(ctx context.Context, cfg *Config, tenantKubeconfig string) error {
+	_, dynamicClient, err := o.createClients(tenantKubeconfig)
+	if err != nil {
+		return fmt.Errorf("connecting to management cluster: %w", err)
+	}
+
+	// 1. Create NetworkPool in butler-system.
+	if err := o.createNetworkPool(ctx, dynamicClient, cfg); err != nil {
+		return fmt.Errorf("creating NetworkPool on management cluster: %w", err)
+	}
+
+	// 2. Patch the existing ProviderConfig with spec.network. The
+	//    bootstrap controller created a ProviderConfig named after the
+	//    provider type (e.g., "harvester") during InstallingAddons, but
+	//    it has no spec.network section. Merge-patch it in.
+	network := o.buildProviderNetworkSection(cfg)
+	if network != nil {
+		patch := map[string]interface{}{
+			"spec": map[string]interface{}{
+				"network": network,
+			},
+		}
+		patchBytes, err := json.Marshal(patch)
+		if err != nil {
+			return fmt.Errorf("marshaling network patch: %w", err)
+		}
+
+		_, err = dynamicClient.Resource(providerConfigGVR).Namespace(butlerNamespace).Patch(
+			ctx, cfg.Provider, types.MergePatchType, patchBytes, metav1.PatchOptions{})
+		if err != nil {
+			return fmt.Errorf("patching ProviderConfig with IPAM network: %w", err)
+		}
+		o.logger.Success("ProviderConfig patched with IPAM network config")
+	}
+
 	return nil
 }
 
