@@ -21,6 +21,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -277,14 +278,34 @@ func (o *Orchestrator) Run(ctx context.Context, cfg *Config) error {
 	// Post-bootstrap management cluster configuration: apply settings that
 	// the bootstrap controller doesn't handle from ClusterBootstrap.spec
 	// (IPAM, multi-tenancy mode). Uses the freshly-saved kubeconfig.
-	if cfg.NetworkPool != nil || cfg.MultiTenancyMode != "" {
+	// Retries up to 3 times with 10s backoff — the management cluster's
+	// API server may not be reachable immediately after bootstrap if
+	// kube-vip hasn't converged or the node is still starting.
+	if cfg.NetworkPool != nil || cfg.ProviderNetwork != nil || cfg.MultiTenancyMode != "" {
 		o.logger.Phase("Configuring management cluster")
 		o.emit(Event{Type: EventPhaseChange, Phase: "ConfiguringManagement", Message: "Configuring management cluster"})
 
 		home, _ := os.UserHomeDir()
 		mgmtKubeconfig := filepath.Join(home, ".butler", cfg.Cluster.Name+"-kubeconfig")
-		if err := o.configureManagementCluster(ctx, cfg, mgmtKubeconfig); err != nil {
-			o.logger.Warn("Failed to configure management cluster", "error", err)
+
+		var lastErr error
+		for attempt := 1; attempt <= 3; attempt++ {
+			lastErr = o.configureManagementCluster(ctx, cfg, mgmtKubeconfig)
+			if lastErr == nil {
+				break
+			}
+			if attempt < 3 {
+				o.logger.Warn("Management cluster configuration failed, retrying...", "attempt", attempt, "error", lastErr)
+				select {
+				case <-ctx.Done():
+					lastErr = ctx.Err()
+					break
+				case <-time.After(10 * time.Second):
+				}
+			}
+		}
+		if lastErr != nil {
+			o.logger.Warn("Failed to configure management cluster after 3 attempts", "error", lastErr)
 			o.logger.Info("You can configure settings manually: kubectl edit butlerconfig butler / kubectl edit providerconfig")
 		}
 	}
@@ -999,20 +1020,27 @@ func (o *Orchestrator) createNetworkPool(ctx context.Context, client dynamic.Int
 // configureManagementCluster connects to the freshly-bootstrapped management
 // cluster and applies settings the bootstrap controller doesn't handle:
 // NetworkPool for IPAM, ProviderConfig.spec.network, ButlerConfig multi-tenancy
-// mode. Runs AFTER saveClusterCredentials.
+// mode. Each step is independent — a ProviderConfig patch failure doesn't
+// skip the ButlerConfig patch. All errors are collected and returned as one.
 func (o *Orchestrator) configureManagementCluster(ctx context.Context, cfg *Config, mgmtKubeconfig string) error {
 	_, dynamicClient, err := o.createClients(mgmtKubeconfig)
 	if err != nil {
 		return fmt.Errorf("connecting to management cluster: %w", err)
 	}
 
-	// 1. Create NetworkPool in butler-system (if IPAM enabled).
+	var errs []error
+
+	// 1. Create NetworkPool in butler-system.
 	if cfg.NetworkPool != nil {
 		if err := o.createNetworkPool(ctx, dynamicClient, cfg); err != nil {
-			return fmt.Errorf("creating NetworkPool: %w", err)
+			o.logger.Warn("NetworkPool creation failed", "error", err)
+			errs = append(errs, fmt.Errorf("NetworkPool: %w", err))
 		}
+	}
 
-		// 2. Patch ProviderConfig with spec.network.
+	// 2. Patch ProviderConfig with spec.network (independent of NetworkPool
+	//    creation succeeding — the pool reference is by name, not by UID).
+	if cfg.ProviderNetwork != nil {
 		if network := o.buildProviderNetworkSection(cfg); network != nil {
 			patch := map[string]interface{}{
 				"spec": map[string]interface{}{
@@ -1021,14 +1049,17 @@ func (o *Orchestrator) configureManagementCluster(ctx context.Context, cfg *Conf
 			}
 			patchBytes, err := json.Marshal(patch)
 			if err != nil {
-				return fmt.Errorf("marshaling network patch: %w", err)
+				errs = append(errs, fmt.Errorf("ProviderConfig marshal: %w", err))
+			} else {
+				_, err = dynamicClient.Resource(providerConfigGVR).Namespace(butlerNamespace).Patch(
+					ctx, cfg.Provider, types.MergePatchType, patchBytes, metav1.PatchOptions{})
+				if err != nil {
+					o.logger.Warn("ProviderConfig patch failed", "error", err)
+					errs = append(errs, fmt.Errorf("ProviderConfig: %w", err))
+				} else {
+					o.logger.Success("ProviderConfig patched with IPAM network config")
+				}
 			}
-			_, err = dynamicClient.Resource(providerConfigGVR).Namespace(butlerNamespace).Patch(
-				ctx, cfg.Provider, types.MergePatchType, patchBytes, metav1.PatchOptions{})
-			if err != nil {
-				return fmt.Errorf("patching ProviderConfig: %w", err)
-			}
-			o.logger.Success("ProviderConfig patched with IPAM network config")
 		}
 	}
 
@@ -1043,17 +1074,20 @@ func (o *Orchestrator) configureManagementCluster(ctx context.Context, cfg *Conf
 		}
 		patchBytes, err := json.Marshal(patch)
 		if err != nil {
-			return fmt.Errorf("marshaling ButlerConfig patch: %w", err)
+			errs = append(errs, fmt.Errorf("ButlerConfig marshal: %w", err))
+		} else {
+			_, err = dynamicClient.Resource(butlerConfigGVR).Patch(
+				ctx, "butler", types.MergePatchType, patchBytes, metav1.PatchOptions{})
+			if err != nil {
+				o.logger.Warn("ButlerConfig patch failed", "error", err)
+				errs = append(errs, fmt.Errorf("ButlerConfig: %w", err))
+			} else {
+				o.logger.Success("ButlerConfig updated", "multiTenancy.mode", cfg.MultiTenancyMode)
+			}
 		}
-		_, err = dynamicClient.Resource(butlerConfigGVR).Patch(
-			ctx, "butler", types.MergePatchType, patchBytes, metav1.PatchOptions{})
-		if err != nil {
-			return fmt.Errorf("patching ButlerConfig: %w", err)
-		}
-		o.logger.Success("ButlerConfig updated", "multiTenancy.mode", cfg.MultiTenancyMode)
 	}
 
-	return nil
+	return errors.Join(errs...)
 }
 
 // buildProviderNetworkSection returns the map that goes into
