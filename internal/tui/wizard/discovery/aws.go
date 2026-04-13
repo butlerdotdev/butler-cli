@@ -97,6 +97,7 @@ func (a *AWSDiscovery) ResourceTypes() []ResourceTypeInfo {
 		{Type: ResourceVPCs, Label: "VPC", ParentType: ResourceRegions},
 		{Type: ResourceSubnets, Label: "Subnet", ParentType: ResourceVPCs},
 		{Type: ResourceSecurityGroups, Label: "Security Group", ParentType: ResourceVPCs},
+		{Type: ResourceImages, Label: "AMI", ParentType: ResourceRegions},
 	}
 }
 
@@ -110,6 +111,8 @@ func (a *AWSDiscovery) FetchResource(ctx context.Context, resourceType string, p
 		return a.listSubnets(ctx, parentID)
 	case ResourceSecurityGroups:
 		return a.listSecurityGroups(ctx, parentID)
+	case ResourceImages:
+		return a.listAMIs(ctx)
 	default:
 		return nil, fmt.Errorf("unsupported resource type for AWS: %s", resourceType)
 	}
@@ -241,6 +244,39 @@ func (a *AWSDiscovery) clientForRegion(region string) *ec2.Client {
 	regionCfg := a.cfg.Copy()
 	regionCfg.Region = region
 	return ec2.NewFromConfig(regionCfg)
+}
+
+func (a *AWSDiscovery) listAMIs(ctx context.Context) ([]ProviderResource, error) {
+	client := a.clientForRegion(a.region)
+	result, err := client.DescribeImages(ctx, &ec2.DescribeImagesInput{
+		Owners: []string{"self"},
+	})
+	if err != nil {
+		return nil, fmt.Errorf("listing AMIs: %w", err)
+	}
+	var resources []ProviderResource
+	for _, img := range result.Images {
+		name := ""
+		if img.Name != nil {
+			name = *img.Name
+		}
+		id := ""
+		if img.ImageId != nil {
+			id = *img.ImageId
+		}
+		desc := ""
+		if img.Description != nil {
+			desc = *img.Description
+		} else if img.Architecture != "" {
+			desc = string(img.Architecture)
+		}
+		resources = append(resources, ProviderResource{
+			Name:        name,
+			ID:          id,
+			Description: desc,
+		})
+	}
+	return resources, nil
 }
 
 func (a *AWSDiscovery) SyncImage(_ context.Context, _, _ string) (string, error) {

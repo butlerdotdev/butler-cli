@@ -94,6 +94,7 @@ func (g *GCPDiscovery) ResourceTypes() []ResourceTypeInfo {
 	return []ResourceTypeInfo{
 		{Type: ResourceRegions, Label: "Region", ParentType: ""},
 		{Type: ResourceNetworks, Label: "Network", ParentType: ""},
+		{Type: ResourceImages, Label: "Image", ParentType: ""},
 		{Type: ResourceZones, Label: "Zone", ParentType: ResourceRegions},
 		{Type: ResourceSubnets, Label: "Subnetwork", ParentType: ResourceRegions},
 	}
@@ -109,6 +110,8 @@ func (g *GCPDiscovery) FetchResource(ctx context.Context, resourceType string, p
 		return g.listNetworks(ctx)
 	case ResourceSubnets:
 		return g.listSubnetworks(ctx, parentID)
+	case ResourceImages:
+		return g.listImages(ctx)
 	default:
 		return nil, fmt.Errorf("unsupported resource type for GCP: %s", resourceType)
 	}
@@ -196,6 +199,25 @@ func (g *GCPDiscovery) listSubnetworks(ctx context.Context, region string) ([]Pr
 			Name:        s.Name,
 			ID:          s.Name,
 			Description: s.IpCidrRange,
+		})
+	}
+	return resources, nil
+}
+
+func (g *GCPDiscovery) listImages(ctx context.Context) ([]ProviderResource, error) {
+	resp, err := g.service.Images.List(g.projectID).Context(ctx).Do()
+	if err != nil {
+		return nil, fmt.Errorf("listing GCE images: %w", err)
+	}
+	var resources []ProviderResource
+	for _, img := range resp.Items {
+		if img.Deprecated != nil && img.Deprecated.State == "DEPRECATED" {
+			continue
+		}
+		resources = append(resources, ProviderResource{
+			Name:        img.Name,
+			ID:          img.Name,
+			Description: fmt.Sprintf("%s (%d GB)", img.Family, img.DiskSizeGb),
 		})
 	}
 	return resources, nil

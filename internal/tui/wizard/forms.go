@@ -264,10 +264,10 @@ func awsResourceGroup(s *wizardState, disc discovery.ProviderDiscovery, resource
 			OptionsFunc(fetchOptions(disc, discovery.ResourceSecurityGroups, &s.AWSVPCID), &s.AWSVPCID).
 			Value(&s.AWSSecGroupID),
 
-		huh.NewInput().
-			Title("AMI ID").
-			Description("Amazon Machine Image ID for Talos (e.g., ami-0abc123...)").
-			Placeholder("ami-").
+		huh.NewSelect[string]().
+			Title("AMI").
+			Description("Talos machine image (owned by your account in this region)").
+			OptionsFunc(fetchOptions(disc, discovery.ResourceImages, &s.AWSRegion), &s.AWSRegion).
 			Value(&s.AWSAMI),
 	)
 }
@@ -301,15 +301,14 @@ func azureResourceGroup(s *wizardState, disc discovery.ProviderDiscovery, resour
 			OptionsFunc(fetchOptions(disc, discovery.ResourceSubnets, &s.AZVNet), &s.AZVNet).
 			Value(&s.AZSubnet),
 
-		huh.NewInput().
+		huh.NewSelect[string]().
 			Title("Network Security Group").
-			Description("Azure NSG name for the bootstrap nodes").
+			OptionsFunc(fetchOptions(disc, discovery.ResourceSecurityGroups, &s.AZResourceGroup), &s.AZResourceGroup).
 			Value(&s.AZSecurityGroup),
 
-		huh.NewInput().
+		huh.NewSelect[string]().
 			Title("VM Size").
-			Description("Azure VM size for cluster nodes").
-			Placeholder("Standard_D4s_v3").
+			OptionsFunc(fetchOptions(disc, discovery.ResourceVMSizes, &s.AZLocation), &s.AZLocation).
 			Value(&s.AZVMSize),
 
 		huh.NewInput().
@@ -348,16 +347,18 @@ func gcpResourceGroup(s *wizardState, disc discovery.ProviderDiscovery, resource
 			OptionsFunc(fetchOptions(disc, discovery.ResourceSubnets, &s.GCPRegion), &s.GCPRegion).
 			Value(&s.GCPSubnetwork),
 
-		huh.NewInput().
-			Title("Image Project").
-			Description("GCE project containing the Talos image").
-			Placeholder("my-project").
-			Value(&s.GCPImageProject),
-
-		huh.NewInput().
-			Title("Image Name").
-			Description("GCE image name for Talos boot disks").
-			Placeholder("talos-v1-12-5-iscsi").
+		huh.NewSelect[string]().
+			Title("Image").
+			Description("GCE image for Talos boot disks (from your project)").
+			OptionsFunc(func() []huh.Option[string] {
+				ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+				defer cancel()
+				results, err := disc.FetchResource(ctx, discovery.ResourceImages, "")
+				if err != nil {
+					return []huh.Option[string]{huh.NewOption(fmt.Sprintf("error: %v", err), "")}
+				}
+				return resourcesToOptions(results)
+			}, &s.GCPProjectID).
 			Value(&s.GCPImage),
 	)
 }

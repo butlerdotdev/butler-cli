@@ -41,6 +41,7 @@ const (
 	ResourceResourceGroups = "resource_groups"
 	ResourceVNets          = "vnets"
 	ResourceLocations      = "locations"
+	ResourceVMSizes        = "vm_sizes"
 )
 
 // ProviderResource represents a selectable infrastructure resource.

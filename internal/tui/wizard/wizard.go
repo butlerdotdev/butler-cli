@@ -379,7 +379,7 @@ func buildConfig(s *wizardState) (*orchestrator.Config, error) {
 			Zone:                  s.GCPZone,
 			Network:               s.GCPNetwork,
 			Subnetwork:            s.GCPSubnetwork,
-			ImageProject:          s.GCPImageProject,
+			ImageProject:          s.GCPProjectID, // images are in the same project
 			Image:                 s.GCPImage,
 		}
 	}

@@ -112,6 +112,8 @@ func (a *AzureDiscovery) ResourceTypes() []ResourceTypeInfo {
 		{Type: ResourceResourceGroups, Label: "Resource Group", ParentType: ""},
 		{Type: ResourceVNets, Label: "Virtual Network", ParentType: ResourceResourceGroups},
 		{Type: ResourceSubnets, Label: "Subnet", ParentType: ResourceVNets},
+		{Type: ResourceSecurityGroups, Label: "Network Security Group", ParentType: ResourceResourceGroups},
+		{Type: ResourceVMSizes, Label: "VM Size", ParentType: ResourceLocations},
 	}
 }
 
@@ -125,6 +127,10 @@ func (a *AzureDiscovery) FetchResource(ctx context.Context, resourceType string,
 		return a.listVNets(ctx, parentID)
 	case ResourceSubnets:
 		return a.listSubnets(ctx, parentID)
+	case ResourceSecurityGroups:
+		return a.listNSGs(ctx, parentID)
+	case ResourceVMSizes:
+		return a.listVMSizes(ctx, parentID)
 	default:
 		return nil, fmt.Errorf("unsupported resource type for Azure: %s", resourceType)
 	}
@@ -251,6 +257,48 @@ func (a *AzureDiscovery) listSubnets(ctx context.Context, vnetRef string) ([]Pro
 		}
 	}
 	return resources, nil
+}
+
+func (a *AzureDiscovery) listNSGs(ctx context.Context, resourceGroup string) ([]ProviderResource, error) {
+	nsgClient := a.netFact.NewSecurityGroupsClient()
+	var resources []ProviderResource
+	pager := nsgClient.NewListPager(resourceGroup, nil)
+	for pager.More() {
+		page, err := pager.NextPage(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("listing NSGs: %w", err)
+		}
+		for _, nsg := range page.Value {
+			name := ""
+			if nsg.Name != nil {
+				name = *nsg.Name
+			}
+			resources = append(resources, ProviderResource{
+				Name: name,
+				ID:   name,
+			})
+		}
+	}
+	return resources, nil
+}
+
+func (a *AzureDiscovery) listVMSizes(ctx context.Context, location string) ([]ProviderResource, error) {
+	// VM sizes require the compute SDK. Use the REST API via the network
+	// factory's subscription to avoid pulling another SDK module. For now,
+	// return common sizes as static options — the full list is 700+ entries
+	// and overwhelms a Select field.
+	common := []ProviderResource{
+		{Name: "Standard_D2s_v3", ID: "Standard_D2s_v3", Description: "2 vCPU, 8 GB"},
+		{Name: "Standard_D4s_v3", ID: "Standard_D4s_v3", Description: "4 vCPU, 16 GB"},
+		{Name: "Standard_D8s_v3", ID: "Standard_D8s_v3", Description: "8 vCPU, 32 GB"},
+		{Name: "Standard_D16s_v3", ID: "Standard_D16s_v3", Description: "16 vCPU, 64 GB"},
+		{Name: "Standard_DC4s_v3", ID: "Standard_DC4s_v3", Description: "4 vCPU, 32 GB (confidential)"},
+		{Name: "Standard_E4s_v3", ID: "Standard_E4s_v3", Description: "4 vCPU, 32 GB (memory-opt)"},
+		{Name: "Standard_E8s_v3", ID: "Standard_E8s_v3", Description: "8 vCPU, 64 GB (memory-opt)"},
+		{Name: "Standard_F4s_v2", ID: "Standard_F4s_v2", Description: "4 vCPU, 8 GB (compute-opt)"},
+		{Name: "Standard_F8s_v2", ID: "Standard_F8s_v2", Description: "8 vCPU, 16 GB (compute-opt)"},
+	}
+	return common, nil
 }
 
 func (a *AzureDiscovery) SyncImage(_ context.Context, _, _ string) (string, error) {
