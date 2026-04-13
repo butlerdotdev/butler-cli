@@ -112,7 +112,7 @@ func (a *AWSDiscovery) FetchResource(ctx context.Context, resourceType string, p
 	case ResourceSecurityGroups:
 		return a.listSecurityGroups(ctx, parentID)
 	case ResourceImages:
-		return a.listAMIs(ctx)
+		return a.listAMIs(ctx, parentID)
 	default:
 		return nil, fmt.Errorf("unsupported resource type for AWS: %s", resourceType)
 	}
@@ -246,8 +246,11 @@ func (a *AWSDiscovery) clientForRegion(region string) *ec2.Client {
 	return ec2.NewFromConfig(regionCfg)
 }
 
-func (a *AWSDiscovery) listAMIs(ctx context.Context) ([]ProviderResource, error) {
-	client := a.clientForRegion(a.region)
+func (a *AWSDiscovery) listAMIs(ctx context.Context, region string) ([]ProviderResource, error) {
+	if region == "" {
+		region = a.region
+	}
+	client := a.clientForRegion(region)
 	result, err := client.DescribeImages(ctx, &ec2.DescribeImagesInput{
 		Owners: []string{"self"},
 	})
