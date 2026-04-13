@@ -142,6 +142,8 @@ type wizardState struct {
 	AZLocation       string
 	AZVNet           string
 	AZSubnet         string
+	AZSecurityGroup  string // NSG name
+	AZVMSize         string // VM size (e.g., Standard_D4s_v3)
 	AZImageURN       string // VM image reference
 
 	// GCP provider inputs

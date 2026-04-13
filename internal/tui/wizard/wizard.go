@@ -359,15 +359,17 @@ func buildConfig(s *wizardState) (*orchestrator.Config, error) {
 		}
 	case "azure":
 		cfg.ProviderConfig.Azure = &orchestrator.AzureProviderConfig{
-			ClientID:       s.AZClientID,
-			ClientSecret:   s.AZClientSecret,
-			TenantID:       s.AZTenantID,
-			SubscriptionID: s.AZSubscriptionID,
-			ResourceGroup:  s.AZResourceGroup,
-			Location:       s.AZLocation,
-			VNetName:       s.AZVNet,
-			SubnetName:     s.AZSubnet,
-			ImageURN:       s.AZImageURN,
+			ClientID:          s.AZClientID,
+			ClientSecret:      s.AZClientSecret,
+			TenantID:          s.AZTenantID,
+			SubscriptionID:    s.AZSubscriptionID,
+			ResourceGroup:     s.AZResourceGroup,
+			Location:          s.AZLocation,
+			VNetName:          s.AZVNet,
+			SubnetName:        s.AZSubnet,
+			SecurityGroupName: s.AZSecurityGroup,
+			VMSize:            s.AZVMSize,
+			ImageURN:          s.AZImageURN,
 		}
 	case "gcp":
 		cfg.ProviderConfig.GCP = &orchestrator.GCPProviderConfig{

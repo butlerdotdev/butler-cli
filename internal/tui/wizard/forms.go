@@ -302,6 +302,17 @@ func azureResourceGroup(s *wizardState, disc discovery.ProviderDiscovery, resour
 			Value(&s.AZSubnet),
 
 		huh.NewInput().
+			Title("Network Security Group").
+			Description("Azure NSG name for the bootstrap nodes").
+			Value(&s.AZSecurityGroup),
+
+		huh.NewInput().
+			Title("VM Size").
+			Description("Azure VM size for cluster nodes").
+			Placeholder("Standard_D4s_v3").
+			Value(&s.AZVMSize),
+
+		huh.NewInput().
 			Title("Image URN").
 			Description("VM image reference (URN, managed image ID, or gallery image ID)").
 			Value(&s.AZImageURN),
