@@ -263,6 +263,12 @@ func awsResourceGroup(s *wizardState, disc discovery.ProviderDiscovery, resource
 			Title("Security Group").
 			OptionsFunc(fetchOptions(disc, discovery.ResourceSecurityGroups, &s.AWSVPCID), &s.AWSVPCID).
 			Value(&s.AWSSecGroupID),
+
+		huh.NewInput().
+			Title("AMI ID").
+			Description("Amazon Machine Image ID for Talos (e.g., ami-0abc123...)").
+			Placeholder("ami-").
+			Value(&s.AWSAMI),
 	)
 }
 
@@ -294,6 +300,11 @@ func azureResourceGroup(s *wizardState, disc discovery.ProviderDiscovery, resour
 			Title("Subnet").
 			OptionsFunc(fetchOptions(disc, discovery.ResourceSubnets, &s.AZVNet), &s.AZVNet).
 			Value(&s.AZSubnet),
+
+		huh.NewInput().
+			Title("Image URN").
+			Description("VM image reference (URN, managed image ID, or gallery image ID)").
+			Value(&s.AZImageURN),
 	)
 }
 
@@ -325,6 +336,18 @@ func gcpResourceGroup(s *wizardState, disc discovery.ProviderDiscovery, resource
 			Title("Subnetwork").
 			OptionsFunc(fetchOptions(disc, discovery.ResourceSubnets, &s.GCPRegion), &s.GCPRegion).
 			Value(&s.GCPSubnetwork),
+
+		huh.NewInput().
+			Title("Image Project").
+			Description("GCE project containing the Talos image").
+			Placeholder("my-project").
+			Value(&s.GCPImageProject),
+
+		huh.NewInput().
+			Title("Image Name").
+			Description("GCE image name for Talos boot disks").
+			Placeholder("talos-v1-12-5-iscsi").
+			Value(&s.GCPImage),
 	)
 }
 
@@ -1072,16 +1095,25 @@ func buildSummary(s *wizardState) string {
 		fmt.Fprintf(&b, "VPC:            %s\n", s.AWSVPCID)
 		fmt.Fprintf(&b, "Subnet:         %s\n", s.AWSSubnetID)
 		fmt.Fprintf(&b, "Security Group: %s\n", s.AWSSecGroupID)
+		if s.AWSAMI != "" {
+			fmt.Fprintf(&b, "AMI:            %s\n", s.AWSAMI)
+		}
 	case "azure":
 		fmt.Fprintf(&b, "Location:       %s\n", s.AZLocation)
 		fmt.Fprintf(&b, "Resource Group: %s\n", s.AZResourceGroup)
 		fmt.Fprintf(&b, "VNet:           %s\n", s.AZVNet)
 		fmt.Fprintf(&b, "Subnet:         %s\n", s.AZSubnet)
+		if s.AZImageURN != "" {
+			fmt.Fprintf(&b, "Image URN:      %s\n", s.AZImageURN)
+		}
 	case "gcp":
 		fmt.Fprintf(&b, "Region:         %s\n", s.GCPRegion)
 		fmt.Fprintf(&b, "Zone:           %s\n", s.GCPZone)
 		fmt.Fprintf(&b, "Network:        %s\n", s.GCPNetwork)
 		fmt.Fprintf(&b, "Subnetwork:     %s\n", s.GCPSubnetwork)
+		if s.GCPImageProject != "" || s.GCPImage != "" {
+			fmt.Fprintf(&b, "Image:          %s/%s\n", s.GCPImageProject, s.GCPImage)
+		}
 	}
 
 	// Disclosure: what gets installed with defaults the wizard does not

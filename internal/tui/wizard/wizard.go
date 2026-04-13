@@ -355,6 +355,7 @@ func buildConfig(s *wizardState) (*orchestrator.Config, error) {
 			VPCID:           s.AWSVPCID,
 			SubnetID:        s.AWSSubnetID,
 			SecurityGroupID: s.AWSSecGroupID,
+			AMI:             s.AWSAMI,
 		}
 	case "azure":
 		cfg.ProviderConfig.Azure = &orchestrator.AzureProviderConfig{
@@ -366,6 +367,7 @@ func buildConfig(s *wizardState) (*orchestrator.Config, error) {
 			Location:       s.AZLocation,
 			VNetName:       s.AZVNet,
 			SubnetName:     s.AZSubnet,
+			ImageURN:       s.AZImageURN,
 		}
 	case "gcp":
 		cfg.ProviderConfig.GCP = &orchestrator.GCPProviderConfig{
@@ -375,6 +377,8 @@ func buildConfig(s *wizardState) (*orchestrator.Config, error) {
 			Zone:                  s.GCPZone,
 			Network:               s.GCPNetwork,
 			Subnetwork:            s.GCPSubnetwork,
+			ImageProject:          s.GCPImageProject,
+			Image:                 s.GCPImage,
 		}
 	}
 

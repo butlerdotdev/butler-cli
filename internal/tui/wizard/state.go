@@ -131,6 +131,7 @@ type wizardState struct {
 	AWSVPCID      string
 	AWSSubnetID   string
 	AWSSecGroupID string
+	AWSAMI        string // AMI ID for Talos image
 
 	// Azure provider inputs
 	AZClientID       string
@@ -141,14 +142,17 @@ type wizardState struct {
 	AZLocation       string
 	AZVNet           string
 	AZSubnet         string
+	AZImageURN       string // VM image reference
 
 	// GCP provider inputs
-	GCPKeyPath    string
-	GCPProjectID  string
-	GCPRegion     string
-	GCPZone       string
-	GCPNetwork    string
-	GCPSubnetwork string
+	GCPKeyPath      string
+	GCPProjectID    string
+	GCPRegion       string
+	GCPZone         string
+	GCPNetwork      string
+	GCPSubnetwork   string
+	GCPImageProject string // GCE project containing the Talos image
+	GCPImage        string // GCE image name
 }
 
 // newWizardState returns a state seeded with sensible defaults so the
