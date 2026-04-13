@@ -131,12 +131,16 @@ func runDashboardLoop(kubeconfig, kubeContext string, admin bool) error {
 		//    user isn't kicked out of the app.
 		cfg, err := wizard.Run()
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "\nwizard: %v\n\n", err)
+			fmt.Fprintf(os.Stderr, "\nwizard error: %v\n", err)
+			fmt.Fprintf(os.Stderr, "Press Enter to return to the dashboard...\n")
+			fmt.Scanln()
 			continue
 		}
 
 		if err := runBootstrap(cfg); err != nil {
-			fmt.Fprintf(os.Stderr, "\nbootstrap: %v\n\n", err)
+			fmt.Fprintf(os.Stderr, "\nbootstrap error: %v\n", err)
+			fmt.Fprintf(os.Stderr, "Press Enter to return to the dashboard...\n")
+			fmt.Scanln()
 			continue
 		}
 

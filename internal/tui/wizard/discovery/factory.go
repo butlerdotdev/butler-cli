@@ -28,7 +28,22 @@ import (
 const DefaultFactoryURL = "https://factory.butlerlabs.dev"
 
 // DefaultTalosSchematic includes qemu-guest-agent, iscsi-tools, util-linux-tools.
-const DefaultTalosSchematic = "ce4c980550dd2ab1b17bbf2b08801c7eb59418eafe8f279833297925d67c7515"
+// For Harvester (KVM/QEMU). Registered with k8s v1.32.0 + Steward worker mode.
+const DefaultTalosSchematic = "75d479b0960e56ef9ecc3a11c0572e4fe41f8b1e8a24c70ad38fc34e89431524"
+
+// NutanixTalosSchematic includes iscsi-tools, util-linux-tools (no qemu-guest-agent).
+// qemu-guest-agent causes issues on Nutanix AHV which uses its own guest tools.
+const NutanixTalosSchematic = "026b6ae9b4e53a6a40e07e471d6f26617473ab59fdd0ab1fa00e643c170b91f2"
+
+// SchematicForProvider returns the appropriate Talos schematic ID for the
+// given provider. Nutanix gets a schematic without qemu-guest-agent;
+// all others use the default with qemu-guest-agent.
+func SchematicForProvider(provider string) string {
+	if provider == "nutanix" {
+		return NutanixTalosSchematic
+	}
+	return DefaultTalosSchematic
+}
 
 // FactoryClient queries the Butler Image Factory API.
 type FactoryClient struct {
