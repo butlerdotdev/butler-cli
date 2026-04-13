@@ -57,6 +57,9 @@ func Run() (*orchestrator.Config, error) {
 			providerSelectGroup(s),
 			harvesterCredGroup(s),
 			nutanixCredGroup(s),
+			awsCredGroup(s),
+			azureCredGroup(s),
+			gcpCredGroup(s),
 		).
 			WithTheme(theme).
 			WithKeyMap(km).
@@ -91,6 +94,7 @@ func Run() (*orchestrator.Config, error) {
 			cpReplicasStep(s),
 			workersStep(s),
 			networkingStep(s),
+			onPremNetworkingStep(s),
 			ipamStep(s),
 			networkPoolStep(s),
 			providerNetworkStep(s),
@@ -122,11 +126,12 @@ func Run() (*orchestrator.Config, error) {
 		return nil, fmt.Errorf("bootstrap cancelled by user")
 	}
 
-	// Sync Talos image from the Butler Image Factory if requested. The
-	// factory upload polls until the provider reports the image as ready,
-	// then we store the provider-specific reference (Harvester image name,
-	// Nutanix image UUID) back into wizard state before building Config.
-	if s.ImageSource == "factory" {
+	// Sync Talos image from the Butler Image Factory if requested. Only
+	// applies to on-prem providers (Harvester/Nutanix) where the wizard
+	// offers a "Sync from Factory" image source option. Cloud providers
+	// reference pre-existing images via provider-specific config fields
+	// (GCE image name, AMI ID, etc.) and don't support factory sync.
+	if isOnPrem(s.Provider) && s.ImageSource == "factory" {
 		factory := discovery.NewFactoryClient("")
 		artifactURL := factory.ArtifactURL(
 			s.TalosSchematic, s.TalosVersion, "talos", "amd64", "qcow2")
@@ -184,11 +189,6 @@ func buildConfig(s *wizardState) (*orchestrator.Config, error) {
 		Network: orchestrator.NetworkConfig{
 			PodCIDR:     s.PodCIDR,
 			ServiceCIDR: s.ServiceCIDR,
-			VIP:         s.VIP,
-			LoadBalancerPool: &orchestrator.LBPoolConfig{
-				Start: s.LBStart,
-				End:   s.LBEnd,
-			},
 		},
 		Talos: orchestrator.TalosConfig{
 			Version:   s.TalosVersion,
@@ -197,10 +197,6 @@ func buildConfig(s *wizardState) (*orchestrator.Config, error) {
 		Addons: orchestrator.AddonsConfig{
 			CNI:     orchestrator.CNIConfig{Type: "cilium"},
 			Storage: orchestrator.StorageConfig{Type: "longhorn"},
-			LoadBalancer: orchestrator.LoadBalancerConfig{
-				Type:        "metallb",
-				AddressPool: s.LBStart + "-" + s.LBEnd,
-			},
 			GitOps:           orchestrator.GitOpsConfig{Type: "flux"},
 			CAPI:             orchestrator.CAPIConfig{Enabled: true},
 			ButlerController: orchestrator.ButlerControllerConfig{Enabled: true},
@@ -225,6 +221,27 @@ func buildConfig(s *wizardState) (*orchestrator.Config, error) {
 			GatewayRef:       s.ExposureGatewayRef,
 		},
 		MultiTenancyMode: s.MultiTenancyMode,
+	}
+
+	// On-prem providers use kube-vip (VIP) and MetalLB for LoadBalancer
+	// services. Cloud providers use native cloud LBs via CCM/CAPI and
+	// set loadBalancer.type to "none" so the bootstrap controller skips
+	// MetalLB installation. The CRD validates the type field and rejects
+	// empty strings — it must be "metallb", "none", or omitted.
+	if isOnPrem(s.Provider) {
+		cfg.Network.VIP = s.VIP
+		cfg.Network.LoadBalancerPool = &orchestrator.LBPoolConfig{
+			Start: s.LBStart,
+			End:   s.LBEnd,
+		}
+		cfg.Addons.LoadBalancer = orchestrator.LoadBalancerConfig{
+			Type:        "metallb",
+			AddressPool: s.LBStart + "-" + s.LBEnd,
+		}
+	} else {
+		cfg.Addons.LoadBalancer = orchestrator.LoadBalancerConfig{
+			Type: "none",
+		}
 	}
 
 	// IPAM: emit a NetworkPool and wire the ProviderConfig's spec.network
@@ -329,6 +346,41 @@ func buildConfig(s *wizardState) (*orchestrator.Config, error) {
 			ClusterUUID: s.NutClusterUUID,
 			SubnetUUID:  s.NutSubnetUUID,
 			ImageUUID:   s.NutImageUUID,
+		}
+	case "aws":
+		cfg.ProviderConfig.AWS = &orchestrator.AWSProviderConfig{
+			AccessKeyID:     s.AWSAccessKey,
+			SecretAccessKey:  s.AWSSecretKey,
+			Region:          s.AWSRegion,
+			VPCID:           s.AWSVPCID,
+			SubnetID:        s.AWSSubnetID,
+			SecurityGroupID: s.AWSSecGroupID,
+			AMI:             s.AWSAMI,
+		}
+	case "azure":
+		cfg.ProviderConfig.Azure = &orchestrator.AzureProviderConfig{
+			ClientID:          s.AZClientID,
+			ClientSecret:      s.AZClientSecret,
+			TenantID:          s.AZTenantID,
+			SubscriptionID:    s.AZSubscriptionID,
+			ResourceGroup:     s.AZResourceGroup,
+			Location:          s.AZLocation,
+			VNetName:          s.AZVNet,
+			SubnetName:        s.AZSubnet,
+			SecurityGroupName: s.AZSecurityGroup,
+			VMSize:            s.AZVMSize,
+			ImageURN:          s.AZImageURN,
+		}
+	case "gcp":
+		cfg.ProviderConfig.GCP = &orchestrator.GCPProviderConfig{
+			ServiceAccountKeyPath: orchestrator.ExpandPath(s.GCPKeyPath),
+			ProjectID:             s.GCPProjectID,
+			Region:                s.GCPRegion,
+			Zone:                  s.GCPZone,
+			Network:               s.GCPNetwork,
+			Subnetwork:            s.GCPSubnetwork,
+			ImageProject:          s.GCPProjectID, // images are in the same project
+			Image:                 s.GCPImage,
 		}
 	}
 

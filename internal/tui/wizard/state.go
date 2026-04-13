@@ -123,6 +123,38 @@ type wizardState struct {
 	NutClusterUUID string
 	NutSubnetUUID  string
 	NutImageUUID   string
+
+	// AWS provider inputs
+	AWSAccessKey  string
+	AWSSecretKey  string
+	AWSRegion     string
+	AWSVPCID      string
+	AWSSubnetID   string
+	AWSSecGroupID string
+	AWSAMI        string // AMI ID for Talos image
+
+	// Azure provider inputs
+	AZClientID       string
+	AZClientSecret   string
+	AZTenantID       string
+	AZSubscriptionID string
+	AZResourceGroup  string
+	AZLocation       string
+	AZVNet           string
+	AZSubnet         string
+	AZSecurityGroup  string // NSG name
+	AZVMSize         string // VM size (e.g., Standard_D4s_v3)
+	AZImageURN       string // VM image reference
+
+	// GCP provider inputs
+	GCPKeyPath      string
+	GCPProjectID    string
+	GCPRegion       string
+	GCPZone         string
+	GCPNetwork      string
+	GCPSubnetwork   string
+	GCPImageProject string // GCE project containing the Talos image
+	GCPImage        string // GCE image name
 }
 
 // newWizardState returns a state seeded with sensible defaults so the
@@ -186,6 +218,33 @@ func (c *stateCredentials) Get(key string) string {
 			return c.s.NutUsername
 		case "password":
 			return c.s.NutPassword
+		}
+	case "aws":
+		switch key {
+		case "access_key":
+			return c.s.AWSAccessKey
+		case "secret_key":
+			return c.s.AWSSecretKey
+		case "region":
+			return c.s.AWSRegion
+		}
+	case "azure":
+		switch key {
+		case "client_id":
+			return c.s.AZClientID
+		case "client_secret":
+			return c.s.AZClientSecret
+		case "tenant_id":
+			return c.s.AZTenantID
+		case "subscription_id":
+			return c.s.AZSubscriptionID
+		}
+	case "gcp":
+		switch key {
+		case "key_path":
+			return c.s.GCPKeyPath
+		case "project_id":
+			return c.s.GCPProjectID
 		}
 	}
 	return ""
