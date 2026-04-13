@@ -224,9 +224,10 @@ func buildConfig(s *wizardState) (*orchestrator.Config, error) {
 	}
 
 	// On-prem providers use kube-vip (VIP) and MetalLB for LoadBalancer
-	// services. Cloud providers skip both — they use native cloud LBs
-	// provisioned via CCM/CAPI. The bootstrap controller detects the
-	// provider type and skips MetalLB/kube-vip installation accordingly.
+	// services. Cloud providers use native cloud LBs via CCM/CAPI and
+	// set loadBalancer.type to "none" so the bootstrap controller skips
+	// MetalLB installation. The CRD validates the type field and rejects
+	// empty strings — it must be "metallb", "none", or omitted.
 	if isOnPrem(s.Provider) {
 		cfg.Network.VIP = s.VIP
 		cfg.Network.LoadBalancerPool = &orchestrator.LBPoolConfig{
@@ -236,6 +237,10 @@ func buildConfig(s *wizardState) (*orchestrator.Config, error) {
 		cfg.Addons.LoadBalancer = orchestrator.LoadBalancerConfig{
 			Type:        "metallb",
 			AddressPool: s.LBStart + "-" + s.LBEnd,
+		}
+	} else {
+		cfg.Addons.LoadBalancer = orchestrator.LoadBalancerConfig{
+			Type: "none",
 		}
 	}
 
