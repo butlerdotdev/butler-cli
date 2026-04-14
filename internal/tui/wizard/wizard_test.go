@@ -184,8 +184,8 @@ func TestBuildConfig_Nutanix(t *testing.T) {
 	if cfg.ProviderConfig.Harvester != nil {
 		t.Error("Harvester config should be nil for nutanix provider")
 	}
-	if cfg.ProviderConfig.Nutanix.Endpoint != "prism.example.com" {
-		t.Errorf("Endpoint = %q", cfg.ProviderConfig.Nutanix.Endpoint)
+	if cfg.ProviderConfig.Nutanix.Endpoint != "https://prism.example.com" {
+		t.Errorf("Endpoint = %q, want %q", cfg.ProviderConfig.Nutanix.Endpoint, "https://prism.example.com")
 	}
 	if cfg.ProviderConfig.Nutanix.Port != 9440 {
 		t.Errorf("Port = %d", cfg.ProviderConfig.Nutanix.Port)
