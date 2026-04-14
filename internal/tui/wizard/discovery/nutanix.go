@@ -24,6 +24,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 )
 
@@ -76,7 +77,12 @@ func NewNutanixDiscovery(creds CredentialProvider) (*NutanixDiscovery, error) {
 }
 
 func (n *NutanixDiscovery) Connect(ctx context.Context) error {
-	n.baseURL = fmt.Sprintf("%s:%s/api/nutanix/v3", n.endpoint, n.port)
+	// Normalize endpoint: ensure https:// prefix, strip trailing slashes.
+	endpoint := strings.TrimRight(n.endpoint, "/")
+	if !strings.HasPrefix(endpoint, "https://") && !strings.HasPrefix(endpoint, "http://") {
+		endpoint = "https://" + endpoint
+	}
+	n.baseURL = fmt.Sprintf("%s:%s/api/nutanix/v3", endpoint, n.port)
 	n.authHeader = "Basic " + base64.StdEncoding.EncodeToString(
 		[]byte(n.username+":"+n.password))
 
@@ -89,8 +95,9 @@ func (n *NutanixDiscovery) Connect(ctx context.Context) error {
 		},
 	}
 
-	// Validate connectivity by listing clusters with limit 1.
-	_, err := n.listResource(ctx, "clusters", 1)
+	// Validate connectivity by listing clusters. Some Prism Central
+	// versions reject small length values, so use 20.
+	_, err := n.listResource(ctx, "clusters", 20)
 	if err != nil {
 		return fmt.Errorf("connecting to prism central: %w", err)
 	}
@@ -278,10 +285,12 @@ func (n *NutanixDiscovery) PollImageSync(ctx context.Context, syncID string) (bo
 	}
 }
 
-// listResource posts to the Prism Central v3 list endpoint.
+// listResource posts to the Prism Central v3 list endpoint. The URL
+// path uses the plural resource name (e.g., /clusters/list) but the
+// request body's "kind" field must be singular (e.g., "cluster").
 func (n *NutanixDiscovery) listResource(ctx context.Context, kind string, limit int) ([]map[string]interface{}, error) {
 	body := map[string]interface{}{
-		"kind":   kind,
+		"kind":   strings.TrimSuffix(kind, "s"),
 		"length": limit,
 	}
 
@@ -305,10 +314,15 @@ func (n *NutanixDiscovery) listResource(ctx context.Context, kind string, limit 
 	defer resp.Body.Close()
 
 	if resp.StatusCode == http.StatusUnauthorized {
-		return nil, fmt.Errorf("authentication failed (401)")
+		return nil, fmt.Errorf("authentication failed (401) — verify credentials are for a local Prism Central account, not SSO")
 	}
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("list %s returned status %d", kind, resp.StatusCode)
+		// Read the response body for diagnostic detail — Prism Central
+		// often returns a JSON error with a message_list explaining why
+		// the request was rejected.
+		var errBody bytes.Buffer
+		errBody.ReadFrom(resp.Body)
+		return nil, fmt.Errorf("list %s returned status %d: %s", kind, resp.StatusCode, errBody.String())
 	}
 
 	var result map[string]interface{}

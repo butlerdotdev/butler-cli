@@ -173,7 +173,7 @@ func newWizardState() *wizardState {
 		PodCIDR:                "10.244.0.0/16",
 		ServiceCIDR:            "10.96.0.0/12",
 		ImageSource:            "factory",
-		TalosVersion:           "v1.12.2",
+		TalosVersion:           "v1.12.4",
 		TalosSchematic:         discovery.DefaultTalosSchematic,
 		NutPort:                "9440",
 		MultiTenancyMode:        "Optional",

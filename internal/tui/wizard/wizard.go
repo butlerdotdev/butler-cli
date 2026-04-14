@@ -126,6 +126,11 @@ func Run() (*orchestrator.Config, error) {
 		return nil, fmt.Errorf("bootstrap cancelled by user")
 	}
 
+	// Select the provider-appropriate Talos schematic. Nutanix gets a
+	// schematic without qemu-guest-agent (causes issues on AHV);
+	// Harvester keeps it (needed for KVM).
+	s.TalosSchematic = discovery.SchematicForProvider(s.Provider)
+
 	// Sync Talos image from the Butler Image Factory if requested. Only
 	// applies to on-prem providers (Harvester/Nutanix) where the wizard
 	// offers a "Sync from Factory" image source option. Cloud providers
