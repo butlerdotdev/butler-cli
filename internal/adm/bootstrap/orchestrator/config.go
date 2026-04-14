@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/spf13/viper"
 )
@@ -643,6 +644,14 @@ func LoadConfig() (*Config, error) {
 		if cfg.ProviderConfig.Nutanix.Port == 0 {
 			cfg.ProviderConfig.Nutanix.Port = 9440
 		}
+		// Normalize endpoint URL: ensure https:// prefix so the provider
+		// controller can reach Prism Central. Matches the normalization in
+		// discovery/nutanix.go Connect() and wizard buildConfig().
+		ep := strings.TrimRight(cfg.ProviderConfig.Nutanix.Endpoint, "/")
+		if ep != "" && !strings.HasPrefix(ep, "https://") && !strings.HasPrefix(ep, "http://") {
+			ep = "https://" + ep
+		}
+		cfg.ProviderConfig.Nutanix.Endpoint = ep
 	}
 
 	// GCP defaults

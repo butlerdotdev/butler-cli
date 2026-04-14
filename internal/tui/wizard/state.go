@@ -97,6 +97,9 @@ type wizardState struct {
 	// them post-bootstrap with kubectl edit providerconfig.
 	IPAMEnabled             bool
 	PoolCIDR                string // e.g., 10.40.0.0/22 — the full network the pool manages
+	ReservedStart           string // first IP in management cluster reserved range
+	ReservedEnd             string // last IP in management cluster reserved range
+	ReservedDescription     string // description for the reserved range
 	TenantAllocStart        string // first IP allocatable to tenants
 	TenantAllocEnd          string // last IP allocatable to tenants
 	TenantLBPoolPerTenant   string // default LB IPs per tenant (int as string for huh input)

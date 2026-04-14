@@ -23,6 +23,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -181,11 +183,24 @@ func (o *Orchestrator) Run(ctx context.Context, cfg *Config) error {
 		}
 	}()
 
-	// Inject host aliases for corporate DNS resolution (must be after KIND cluster creation)
+	// Inject host aliases for corporate DNS resolution (must be after KIND cluster creation).
+	// Start with any explicitly configured aliases, then auto-resolve the
+	// provider endpoint from the host. Docker Desktop's DNS proxy often
+	// can't resolve hostnames that require VPN/ZTNA split-DNS, so we
+	// resolve on the Mac and inject the result into the KIND node.
 	hostAliases := o.getHostAliases(cfg)
+	if auto := o.autoResolveProviderEndpoint(cfg); auto != "" {
+		hostAliases = append(hostAliases, auto)
+	}
 	if len(hostAliases) > 0 {
 		if err := o.injectHostAliases(ctx, hostAliases); err != nil {
 			o.logger.Warn("Failed to inject host aliases", "error", err)
+		}
+		// Re-patch CoreDNS with host overrides so cluster DNS (used by
+		// the provider controller with ClusterFirstWithHostNet) returns
+		// the correct IPs for VPN/ZTNA-only hostnames.
+		if err := o.patchCoreDNS(kubeconfigPath, hostAliases...); err != nil {
+			o.logger.Warn("Failed to re-patch CoreDNS with host overrides", "error", err)
 		}
 	}
 
@@ -541,6 +556,60 @@ func (o *Orchestrator) getHostAliases(cfg *Config) []string {
 	return nil
 }
 
+// autoResolveProviderEndpoint resolves the provider endpoint hostname using
+// the host's DNS and returns a "/etc/hosts"-style entry (e.g. "1.2.3.4 host").
+// Docker Desktop's DNS proxy often cannot resolve hostnames that require
+// VPN/ZTNA split-DNS (e.g. Zscaler Private Access). Resolving on the host
+// and injecting the result into KIND ensures the provider controller can
+// reach the endpoint regardless of Docker's DNS limitations.
+// Returns "" if the endpoint is already an IP or resolution fails.
+func (o *Orchestrator) autoResolveProviderEndpoint(cfg *Config) string {
+	var endpoint string
+	switch cfg.Provider {
+	case "nutanix":
+		if cfg.ProviderConfig.Nutanix != nil {
+			endpoint = cfg.ProviderConfig.Nutanix.Endpoint
+		}
+	case "proxmox":
+		if cfg.ProviderConfig.Proxmox != nil {
+			endpoint = cfg.ProviderConfig.Proxmox.Endpoint
+		}
+	default:
+		return ""
+	}
+	if endpoint == "" {
+		return ""
+	}
+
+	// Extract hostname from endpoint (may be a URL like https://host)
+	host := endpoint
+	if strings.Contains(host, "://") {
+		if u, err := url.Parse(host); err == nil {
+			host = u.Hostname()
+		}
+	}
+	// Strip port if present
+	if h, _, err := net.SplitHostPort(host); err == nil {
+		host = h
+	}
+
+	// If it's already an IP address, nothing to do
+	if net.ParseIP(host) != nil {
+		return ""
+	}
+
+	// Resolve using the host's DNS (which goes through VPN/ZTNA)
+	ips, err := net.LookupHost(host)
+	if err != nil || len(ips) == 0 {
+		o.logger.Debug("Could not auto-resolve provider endpoint", "host", host, "error", err)
+		return ""
+	}
+
+	alias := ips[0] + " " + host
+	o.logger.Info("Auto-resolved provider endpoint for KIND /etc/hosts", "alias", alias)
+	return alias
+}
+
 // injectHostAliases adds /etc/hosts entries to the KIND container
 func (o *Orchestrator) injectHostAliases(ctx context.Context, hostAliases []string) error {
 	if len(hostAliases) == 0 {
@@ -664,10 +733,44 @@ func (o *Orchestrator) tuneKINDNode(ctx context.Context) error {
 	return nil
 }
 
-// patchCoreDNS fixes CoreDNS to use Google DNS instead of /etc/resolv.conf
-// This is needed because KIND's resolv.conf may not work properly on Mac
-func (o *Orchestrator) patchCoreDNS(kubeconfigPath string) error {
-	corefile := `.:53 {
+// patchCoreDNS configures CoreDNS to forward external queries to the KIND
+// node's upstream DNS servers (read from /etc/resolv.conf inside the Docker
+// container) with Google DNS as a fallback. This preserves resolution of
+// corporate/internal hostnames (e.g., Nutanix Prism Central) while also
+// ensuring public DNS works on platforms where Docker DNS is unreliable.
+//
+// hostOverrides are optional "/etc/hosts"-style entries ("IP hostname") that
+// are added as a CoreDNS `hosts` block. This handles VPN/ZTNA split-DNS
+// scenarios where Docker Desktop's DNS proxy cannot resolve internal names.
+func (o *Orchestrator) patchCoreDNS(kubeconfigPath string, hostOverrides ...string) error {
+	// Read the KIND node's /etc/resolv.conf to discover Docker-provided
+	// upstream DNS servers. These chain to the host's resolver and can
+	// resolve internal hostnames that Google DNS cannot.
+	upstreams := o.getKINDUpstreamDNS()
+	// Always include Google DNS as fallback for reliability on Mac.
+	upstreams = append(upstreams, "8.8.8.8", "8.8.4.4")
+	forwardList := strings.Join(upstreams, " ")
+
+	// Build optional hosts block for VPN/ZTNA overrides
+	var hostsBlock string
+	if len(hostOverrides) > 0 {
+		var entries []string
+		for _, h := range hostOverrides {
+			h = strings.TrimSpace(h)
+			if h != "" {
+				entries = append(entries, "       "+h)
+			}
+		}
+		if len(entries) > 0 {
+			hostsBlock = fmt.Sprintf(`    hosts {
+%s
+       fallthrough
+    }
+`, strings.Join(entries, "\n"))
+		}
+	}
+
+	corefile := fmt.Sprintf(`.:53 {
     errors
     health {
        lameduck 5s
@@ -679,7 +782,7 @@ func (o *Orchestrator) patchCoreDNS(kubeconfigPath string) error {
        ttl 30
     }
     prometheus :9153
-    forward . 8.8.8.8 8.8.4.4 {
+%s    forward . %s {
        max_concurrent 1000
     }
     cache 30
@@ -687,7 +790,8 @@ func (o *Orchestrator) patchCoreDNS(kubeconfigPath string) error {
     reload
     loadbalance
 }
-`
+`, hostsBlock, forwardList)
+
 	// Create the patch JSON
 	patch := fmt.Sprintf(`{"data":{"Corefile":%q}}`, corefile)
 
@@ -707,8 +811,48 @@ func (o *Orchestrator) patchCoreDNS(kubeconfigPath string) error {
 		return fmt.Errorf("restarting CoreDNS: %w, output: %s", err, string(output))
 	}
 
-	o.logger.Debug("CoreDNS patched to use Google DNS")
+	// Wait for CoreDNS rollout to complete so DNS is fully available
+	// before the provider controller tries to resolve external hostnames.
+	cmd = exec.Command("kubectl", "--kubeconfig", kubeconfigPath,
+		"rollout", "status", "deployment/coredns", "-n", "kube-system",
+		"--timeout=60s")
+
+	if output, err := cmd.CombinedOutput(); err != nil {
+		o.logger.Warn("CoreDNS rollout status wait failed", "error", err, "output", string(output))
+	}
+
+	o.logger.Debug("CoreDNS patched and ready", "upstreams", forwardList)
 	return nil
+}
+
+// getKINDUpstreamDNS reads nameservers from the KIND node's /etc/resolv.conf.
+// These are the Docker-provided DNS servers that chain to the host resolver
+// and can resolve corporate/internal hostnames.
+func (o *Orchestrator) getKINDUpstreamDNS() []string {
+	cmd := exec.Command("docker", "exec", kindClusterName+"-control-plane",
+		"cat", "/etc/resolv.conf")
+	output, err := cmd.Output()
+	if err != nil {
+		o.logger.Debug("Could not read KIND resolv.conf, using Google DNS only", "error", err)
+		return nil
+	}
+
+	var servers []string
+	for _, line := range strings.Split(string(output), "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "nameserver ") {
+			ns := strings.TrimSpace(strings.TrimPrefix(line, "nameserver"))
+			// Skip loopback and Kubernetes cluster DNS (would cause a loop).
+			if ns != "" && ns != "127.0.0.1" && ns != "::1" && !strings.HasPrefix(ns, "10.96.") {
+				servers = append(servers, ns)
+			}
+		}
+	}
+
+	if len(servers) > 0 {
+		o.logger.Debug("Discovered KIND upstream DNS servers", "servers", servers)
+	}
+	return servers
 }
 
 // getKINDKubeconfig retrieves the kubeconfig for the KIND cluster

@@ -22,6 +22,7 @@ package wizard
 
 import (
 	"fmt"
+	"net"
 	"strconv"
 	"strings"
 
@@ -264,7 +265,7 @@ func buildConfig(s *wizardState) (*orchestrator.Config, error) {
 
 		poolName := s.ClusterName + "-underlay"
 
-		cfg.NetworkPool = &orchestrator.NetworkPoolConfig{
+		np := &orchestrator.NetworkPoolConfig{
 			Name: poolName,
 			CIDR: s.PoolCIDR,
 			TenantAllocation: orchestrator.TenantAllocationConfig{
@@ -276,6 +277,26 @@ func buildConfig(s *wizardState) (*orchestrator.Config, error) {
 				},
 			},
 		}
+
+		// Reserved range for management cluster static IPs (VIP, MetalLB
+		// pool, node IPs). The IPAM allocator won't hand these to tenants.
+		// The CRD requires CIDR notation, so we compute the minimal set of
+		// CIDRs that covers the start-end range the operator entered.
+		if s.ReservedStart != "" && s.ReservedEnd != "" {
+			desc := s.ReservedDescription
+			if desc == "" {
+				desc = "Management cluster infrastructure"
+			}
+			cidrs := rangeToCIDRs(s.ReservedStart, s.ReservedEnd)
+			for _, cidr := range cidrs {
+				np.Reserved = append(np.Reserved, orchestrator.ReservedRangeConfig{
+					CIDR:        cidr,
+					Description: desc,
+				})
+			}
+		}
+
+		cfg.NetworkPool = np
 
 		// Gateway and DNS are deliberately omitted: Harvester/Nutanix
 		// workload networks run DHCP, so tenant VMs pick both up
@@ -342,8 +363,16 @@ func buildConfig(s *wizardState) (*orchestrator.Config, error) {
 		}
 	case "nutanix":
 		port, _ := parseInt32(s.NutPort)
+		// Normalize endpoint: the discovery client normalizes locally in
+		// Connect(), but that doesn't propagate back to wizard state. The
+		// ProviderConfig CRD must carry the full URL so the provider
+		// controller can reach Prism Central.
+		nutEndpoint := strings.TrimRight(s.NutEndpoint, "/")
+		if !strings.HasPrefix(nutEndpoint, "https://") && !strings.HasPrefix(nutEndpoint, "http://") {
+			nutEndpoint = "https://" + nutEndpoint
+		}
 		cfg.ProviderConfig.Nutanix = &orchestrator.NutanixProviderConfig{
-			Endpoint:    s.NutEndpoint,
+			Endpoint:    nutEndpoint,
 			Port:        port,
 			Insecure:    s.NutInsecure,
 			Username:    s.NutUsername,
@@ -390,6 +419,58 @@ func buildConfig(s *wizardState) (*orchestrator.Config, error) {
 	}
 
 	return cfg, nil
+}
+
+// rangeToCIDRs converts an IP range (start, end) into the minimal set of
+// CIDR blocks that exactly cover that range. For example:
+//
+//	10.92.90.1 - 10.92.90.10 → [10.92.90.1/32, 10.92.90.2/31, 10.92.90.4/30, 10.92.90.8/31, 10.92.90.10/32]
+//
+// This is needed because the NetworkPool CRD requires CIDR notation for
+// reserved ranges, but operators think in terms of start/end IP ranges.
+func rangeToCIDRs(startStr, endStr string) []string {
+	start := ipToUint32(net.ParseIP(startStr))
+	end := ipToUint32(net.ParseIP(endStr))
+	if start == 0 || end == 0 || start > end {
+		// Fall back: treat start as a /32 if parsing fails
+		if startStr != "" {
+			return []string{startStr + "/32"}
+		}
+		return nil
+	}
+
+	var cidrs []string
+	for start <= end {
+		// Find the largest block starting at 'start' that fits within [start, end]
+		maxBits := 32
+		for maxBits > 0 {
+			mask := uint32(1<<(32-maxBits+1)) - 1
+			// Check alignment: start must be aligned to the block size
+			if start&mask != 0 {
+				break
+			}
+			// Check the block doesn't exceed end
+			if start+(1<<(32-maxBits+1))-1 > end {
+				break
+			}
+			maxBits--
+		}
+		cidrs = append(cidrs, fmt.Sprintf("%s/%d", uint32ToIP(start), maxBits))
+		start += 1 << (32 - maxBits)
+	}
+	return cidrs
+}
+
+func ipToUint32(ip net.IP) uint32 {
+	ip = ip.To4()
+	if ip == nil {
+		return 0
+	}
+	return uint32(ip[0])<<24 | uint32(ip[1])<<16 | uint32(ip[2])<<8 | uint32(ip[3])
+}
+
+func uint32ToIP(n uint32) string {
+	return fmt.Sprintf("%d.%d.%d.%d", n>>24, (n>>16)&0xff, (n>>8)&0xff, n&0xff)
 }
 
 func parseInt32(s string) (int32, error) {
