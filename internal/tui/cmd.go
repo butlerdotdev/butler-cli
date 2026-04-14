@@ -39,6 +39,7 @@ import (
 // views (bootstrap, teams, users, health) are shown.
 func NewTUICmd(admin bool) *cobra.Command {
 	var kubeconfig string
+	var skipCleanup bool
 
 	cmd := &cobra.Command{
 		Use:   "tui",
@@ -65,15 +66,17 @@ Examples:
   butlerctl tui
   butlerctl tui --kubeconfig ~/.butler/butler-beta-kubeconfig
   butlerctl tui --context butler-beta
-  butleradm tui    # starts on bootstrap tab if no kubeconfig is set`,
+  butleradm tui    # starts on bootstrap tab if no kubeconfig is set
+  butleradm tui --skip-cleanup   # preserve KIND cluster on bootstrap failure`,
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			kubeContext, _ := cmd.Flags().GetString("context")
-			return runDashboardLoop(kubeconfig, kubeContext, admin)
+			return runDashboardLoop(kubeconfig, kubeContext, admin, skipCleanup)
 		},
 	}
 
 	cmd.Flags().StringVar(&kubeconfig, "kubeconfig", "", "path to kubeconfig file")
+	cmd.Flags().BoolVar(&skipCleanup, "skip-cleanup", false, "don't delete KIND cluster on bootstrap failure (for debugging)")
 
 	return cmd
 }
@@ -85,7 +88,7 @@ Examples:
 // cluster's kubeconfig. This nested-TUI pattern works around Bubbletea's
 // exclusive grab on stdin — huh forms and bootstrap's own tea.Program can't
 // literally nest inside the dashboard tea.Program.
-func runDashboardLoop(kubeconfig, kubeContext string, admin bool) error {
+func runDashboardLoop(kubeconfig, kubeContext string, admin bool, skipCleanup bool) error {
 	for {
 		// 1. Try to build a Kubernetes client. A missing or invalid
 		//    kubeconfig is not a fatal error in admin mode — the app
@@ -137,7 +140,7 @@ func runDashboardLoop(kubeconfig, kubeContext string, admin bool) error {
 			continue
 		}
 
-		if err := runBootstrap(cfg); err != nil {
+		if err := runBootstrap(cfg, skipCleanup); err != nil {
 			fmt.Fprintf(os.Stderr, "\nbootstrap error: %v\n", err)
 			fmt.Fprintf(os.Stderr, "Press Enter to return to the dashboard...\n")
 			fmt.Scanln()
@@ -155,7 +158,7 @@ func runDashboardLoop(kubeconfig, kubeContext string, admin bool) error {
 
 // runBootstrap hands a wizard-assembled Config to the bootstrap TUI.
 // Signal handling and orchestrator cleanup are delegated to bootstrap.Run.
-func runBootstrap(cfg *orchestrator.Config) error {
+func runBootstrap(cfg *orchestrator.Config, skipCleanup bool) error {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -166,7 +169,8 @@ func runBootstrap(cfg *orchestrator.Config) error {
 		Cancel: cancel,
 		Cfg:    cfg,
 		OrcOptions: orchestrator.Options{
-			Timeout: 30 * time.Minute,
+			Timeout:     30 * time.Minute,
+			SkipCleanup: skipCleanup,
 		},
 		LoggerName: logger.Name(),
 		LogLevel:   logger.Level(),

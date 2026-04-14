@@ -342,8 +342,16 @@ func buildConfig(s *wizardState) (*orchestrator.Config, error) {
 		}
 	case "nutanix":
 		port, _ := parseInt32(s.NutPort)
+		// Normalize endpoint: the discovery client normalizes locally in
+		// Connect(), but that doesn't propagate back to wizard state. The
+		// ProviderConfig CRD must carry the full URL so the provider
+		// controller can reach Prism Central.
+		nutEndpoint := strings.TrimRight(s.NutEndpoint, "/")
+		if !strings.HasPrefix(nutEndpoint, "https://") && !strings.HasPrefix(nutEndpoint, "http://") {
+			nutEndpoint = "https://" + nutEndpoint
+		}
 		cfg.ProviderConfig.Nutanix = &orchestrator.NutanixProviderConfig{
-			Endpoint:    s.NutEndpoint,
+			Endpoint:    nutEndpoint,
 			Port:        port,
 			Insecure:    s.NutInsecure,
 			Username:    s.NutUsername,
