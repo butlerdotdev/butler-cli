@@ -204,3 +204,37 @@ func TestBuildConfig_InvalidNumeric(t *testing.T) {
 		t.Fatal("expected error for non-numeric CPReplicas")
 	}
 }
+
+func TestRangeToCIDRs(t *testing.T) {
+	tests := []struct {
+		name     string
+		start    string
+		end      string
+		wantLen  int
+		wantFirst string
+		wantLast  string
+	}{
+		{"clean /27", "10.40.0.0", "10.40.0.31", 1, "10.40.0.0/27", "10.40.0.0/27"},
+		{"single IP", "10.0.0.5", "10.0.0.5", 1, "10.0.0.5/32", "10.0.0.5/32"},
+		{".1 to .10", "10.92.90.1", "10.92.90.10", 5, "10.92.90.1/32", "10.92.90.10/32"},
+		{".1 to .63", "10.92.90.1", "10.92.90.63", 6, "10.92.90.1/32", "10.92.90.32/27"},
+		{"empty start", "", "10.0.0.5", 0, "", ""},
+		{"reversed", "10.0.0.10", "10.0.0.5", 1, "10.0.0.10/32", "10.0.0.10/32"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cidrs := rangeToCIDRs(tt.start, tt.end)
+			if len(cidrs) != tt.wantLen {
+				t.Errorf("got %d CIDRs, want %d: %v", len(cidrs), tt.wantLen, cidrs)
+			}
+			if tt.wantLen > 0 && len(cidrs) > 0 {
+				if cidrs[0] != tt.wantFirst {
+					t.Errorf("first = %q, want %q", cidrs[0], tt.wantFirst)
+				}
+				if cidrs[len(cidrs)-1] != tt.wantLast {
+					t.Errorf("last = %q, want %q", cidrs[len(cidrs)-1], tt.wantLast)
+				}
+			}
+		})
+	}
+}
