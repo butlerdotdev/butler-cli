@@ -628,30 +628,54 @@ func networkPoolStep(s *wizardState) *huh.Group {
 		huh.NewNote().
 			Title("NetworkPool").
 			Description(
-				"Pool CIDR is the full network range the pool manages. The\n" +
-					"Tenant Allocation sub-range is what the pool will hand out to\n" +
-					"tenant clusters — leave room outside it for the management\n" +
-					"cluster's own nodes, VIP, and LoadBalancer pool.\n\n" +
-					"Example: pool CIDR 10.40.0.0/22, management cluster lives in\n" +
-					"10.40.0.0/24 and 10.40.1.0/24, tenant allocation runs from\n" +
-					"10.40.2.0 to 10.40.3.254."),
+				"Pool CIDR is the full network range the pool manages.\n\n" +
+					"Reserved Range: IPs outside DHCP that the management cluster\n" +
+					"uses for static assignments (VIP, MetalLB pool, node IPs).\n" +
+					"The IPAM allocator will never hand these to tenants. Use\n" +
+					"start/end IPs — doesn't need to be a power-of-2 block.\n\n" +
+					"Example: subnet 10.92.90.0/23, IPs .1 through .10 are\n" +
+					"outside DHCP for static use:\n" +
+					"  Reserved: 10.92.90.1 - 10.92.90.10\n" +
+					"  VIP: 10.92.90.5, LB pool: .33-.254\n" +
+					"  Tenant alloc: 10.92.90.33 - 10.92.91.254\n\n" +
+					"Tenant Allocation is the sub-range the pool hands out to\n" +
+					"tenant clusters. Everything outside it (including the\n" +
+					"reserved range) is untouched by IPAM."),
 
 		huh.NewInput().
 			Title("Pool CIDR").
 			Description("Full network range the NetworkPool manages.").
-			Placeholder("10.40.0.0/22").
+			Placeholder("10.92.90.0/23").
 			Value(&s.PoolCIDR),
+
+		huh.NewInput().
+			Title("Reserved Range Start").
+			Description("First IP reserved for management cluster static assignments\n(VIP, MetalLB pool, node IPs outside DHCP). IPAM won't\nallocate anything in this range to tenants.").
+			Placeholder("10.92.90.1").
+			Value(&s.ReservedStart),
+
+		huh.NewInput().
+			Title("Reserved Range End").
+			Description("Last IP in the reserved range. Doesn't need to be a\npower-of-2 block — just the actual range you've carved\nout from DHCP for static use.").
+			Placeholder("10.92.90.10").
+			Value(&s.ReservedEnd),
+
+		huh.NewInput().
+			Title("Reserved Description").
+			Description("Label for the reserved range (shown in kubectl get networkpool).").
+			Placeholder("Management cluster infrastructure").
+			Value(&s.ReservedDescription),
 
 		huh.NewInput().
 			Title("Tenant Allocation Start").
 			Description("First IP allocatable to tenant clusters.").
-			Placeholder("10.40.2.0").
+			Placeholder("10.92.90.33").
 			Value(&s.TenantAllocStart),
 
 		huh.NewInput().
 			Title("Tenant Allocation End").
 			Description("Last IP allocatable to tenant clusters.").
-			Placeholder("10.40.3.254").
+			Placeholder("10.92.91.254").
 			Value(&s.TenantAllocEnd),
 
 		huh.NewInput().
@@ -1055,6 +1079,9 @@ func buildSummary(s *wizardState) string {
 	if s.IPAMEnabled {
 		fmt.Fprintf(&b, "IPAM:           enabled\n")
 		fmt.Fprintf(&b, "Pool CIDR:      %s\n", s.PoolCIDR)
+		if s.ReservedStart != "" && s.ReservedEnd != "" {
+			fmt.Fprintf(&b, "Reserved:       %s - %s (%s)\n", s.ReservedStart, s.ReservedEnd, s.ReservedDescription)
+		}
 		fmt.Fprintf(&b, "Tenant Range:   %s - %s\n", s.TenantAllocStart, s.TenantAllocEnd)
 		fmt.Fprintf(&b, "LB Alloc:       %s (initial=%s, default=%s, growth=%s)\n",
 			s.LBAllocationMode, s.LBInitialPoolSize, s.LBDefaultPoolSize, s.LBGrowthIncrement)
