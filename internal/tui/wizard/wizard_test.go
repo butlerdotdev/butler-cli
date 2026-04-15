@@ -205,6 +205,83 @@ func TestBuildConfig_InvalidNumeric(t *testing.T) {
 	}
 }
 
+func TestBuildConfig_NTPServers(t *testing.T) {
+	s := newWizardState()
+	s.Provider = "nutanix"
+	s.ClusterName = "ntp-test"
+	s.Topology = "single-node"
+	s.NTPServers = "10.92.92.2, 10.92.92.4"
+	s.NutEndpoint = "https://prism.example.com"
+	s.NutPort = "9440"
+	s.NutUsername = "admin"
+	s.NutPassword = "secret"
+	s.NutClusterUUID = "uuid-1"
+	s.NutSubnetUUID = "uuid-2"
+	s.NutImageUUID = "uuid-3"
+	s.IPAMEnabled = false
+
+	cfg, err := buildConfig(s)
+	if err != nil {
+		t.Fatalf("buildConfig() error: %v", err)
+	}
+
+	if len(cfg.Talos.TimeServers) != 2 {
+		t.Fatalf("TimeServers len = %d, want 2", len(cfg.Talos.TimeServers))
+	}
+	if cfg.Talos.TimeServers[0] != "10.92.92.2" {
+		t.Errorf("TimeServers[0] = %q, want 10.92.92.2", cfg.Talos.TimeServers[0])
+	}
+	if cfg.Talos.TimeServers[1] != "10.92.92.4" {
+		t.Errorf("TimeServers[1] = %q, want 10.92.92.4", cfg.Talos.TimeServers[1])
+	}
+}
+
+func TestBuildConfig_NTPDefault(t *testing.T) {
+	s := newWizardState()
+	s.Provider = "harvester"
+	s.ClusterName = "ntp-default"
+	s.Topology = "single-node"
+	s.HarvKubeconfig = "/tmp/kc"
+	s.HarvNamespace = "default"
+	s.HarvNetwork = "default/net"
+	s.HarvImage = "default/img"
+	s.IPAMEnabled = false
+	// NTPServers defaults to "time.cloudflare.com" from newWizardState()
+
+	cfg, err := buildConfig(s)
+	if err != nil {
+		t.Fatalf("buildConfig() error: %v", err)
+	}
+
+	if len(cfg.Talos.TimeServers) != 1 || cfg.Talos.TimeServers[0] != "time.cloudflare.com" {
+		t.Errorf("TimeServers = %v, want [time.cloudflare.com]", cfg.Talos.TimeServers)
+	}
+}
+
+func TestSplitCSV(t *testing.T) {
+	tests := []struct {
+		input string
+		want  []string
+	}{
+		{"a, b, c", []string{"a", "b", "c"}},
+		{"single", []string{"single"}},
+		{" , , ", nil},
+		{"10.0.0.1,10.0.0.2", []string{"10.0.0.1", "10.0.0.2"}},
+	}
+	for _, tt := range tests {
+		got := splitCSV(tt.input)
+		if len(got) != len(tt.want) {
+			t.Errorf("splitCSV(%q) = %v, want %v", tt.input, got, tt.want)
+			continue
+		}
+		for i := range got {
+			if got[i] != tt.want[i] {
+				t.Errorf("splitCSV(%q)[%d] = %q, want %q", tt.input, i, got[i], tt.want[i])
+			}
+		}
+	}
+}
+
 func TestRangeToCIDRs(t *testing.T) {
 	tests := []struct {
 		name     string
