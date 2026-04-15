@@ -1516,10 +1516,7 @@ func (o *Orchestrator) buildClusterBootstrapUnstructured(cfg *Config) *unstructu
 					}
 					return n
 				}(),
-				"talos": map[string]interface{}{
-					"version":   cfg.Talos.Version,
-					"schematic": cfg.Talos.Schematic,
-				},
+				"talos": buildTalosSpec(cfg),
 				"addons": buildAddonsConfig(cfg),
 			},
 		},
@@ -1870,6 +1867,31 @@ func (o *Orchestrator) buildAndLoadImages(ctx context.Context, provider string) 
 }
 
 // buildAddonsConfig builds the addons config for the ClusterBootstrap CR.
+// buildTalosSpec builds the talos section of the ClusterBootstrap spec.
+// When TimeServers is set, it emits configPatches to override Talos NTP.
+func buildTalosSpec(cfg *Config) map[string]interface{} {
+	spec := map[string]interface{}{
+		"version":   cfg.Talos.Version,
+		"schematic": cfg.Talos.Schematic,
+	}
+	if len(cfg.Talos.TimeServers) > 0 {
+		// The CRD value field is a string that the bootstrap controller
+		// splices directly into a JSON patch (no additional quoting).
+		// Marshal the value as raw JSON so it can be inserted as-is.
+		valueJSON, _ := json.Marshal(map[string]interface{}{
+			"servers": cfg.Talos.TimeServers,
+		})
+		spec["configPatches"] = []interface{}{
+			map[string]interface{}{
+				"op":    "add",
+				"path":  "/machine/time",
+				"value": string(valueJSON),
+			},
+		}
+	}
+	return spec
+}
+
 // Fields with CRD-level defaults (butlerController, capi) are only included
 // when explicitly configured. Omitting them lets the CRD *bool defaults
 // (nil = enabled) take effect instead of writing Go's bool zero value (false).
