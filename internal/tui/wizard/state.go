@@ -64,6 +64,10 @@ type wizardState struct {
 	TalosVersion   string
 	TalosSchematic string
 
+	// NTP servers (comma-separated). Overrides Talos default
+	// (time.cloudflare.com) for isolated networks.
+	NTPServers string
+
 	// Control plane exposure mode for tenant clusters. Determines how
 	// tenant-cluster Kubernetes API servers are reached from outside.
 	//   LoadBalancer (default): 1 LoadBalancer IP per tenant
@@ -178,6 +182,7 @@ func newWizardState() *wizardState {
 		ImageSource:            "factory",
 		TalosVersion:           "v1.12.4",
 		TalosSchematic:         discovery.DefaultTalosSchematic,
+		NTPServers:             "time.cloudflare.com",
 		NutPort:                "9440",
 		MultiTenancyMode:        "Optional",
 		ExposureMode:            "LoadBalancer",

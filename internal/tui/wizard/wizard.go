@@ -95,6 +95,7 @@ func Run() (*orchestrator.Config, error) {
 			cpReplicasStep(s),
 			workersStep(s),
 			networkingStep(s),
+			ntpStep(s),
 			onPremNetworkingStep(s),
 			ipamStep(s),
 			networkPoolStep(s),
@@ -197,8 +198,9 @@ func buildConfig(s *wizardState) (*orchestrator.Config, error) {
 			ServiceCIDR: s.ServiceCIDR,
 		},
 		Talos: orchestrator.TalosConfig{
-			Version:   s.TalosVersion,
-			Schematic: s.TalosSchematic,
+			Version:     s.TalosVersion,
+			Schematic:   s.TalosSchematic,
+			TimeServers: splitCSV(s.NTPServers),
 		},
 		Addons: orchestrator.AddonsConfig{
 			CNI:     orchestrator.CNIConfig{Type: "cilium"},
@@ -419,6 +421,19 @@ func buildConfig(s *wizardState) (*orchestrator.Config, error) {
 	}
 
 	return cfg, nil
+}
+
+// splitCSV splits a comma-separated string into a slice, trimming
+// whitespace and dropping empty entries.
+func splitCSV(s string) []string {
+	var out []string
+	for _, part := range strings.Split(s, ",") {
+		part = strings.TrimSpace(part)
+		if part != "" {
+			out = append(out, part)
+		}
+	}
+	return out
 }
 
 // rangeToCIDRs converts an IP range (start, end) into the minimal set of
