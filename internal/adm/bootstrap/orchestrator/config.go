@@ -251,6 +251,11 @@ type TalosConfig struct {
 
 	// Schematic is the Talos schematic ID (for extensions)
 	Schematic string `mapstructure:"schematic,omitempty"`
+
+	// TimeServers overrides the default NTP servers used by Talos.
+	// Required on networks without external connectivity where the
+	// default (time.cloudflare.com) is unreachable.
+	TimeServers []string `mapstructure:"timeServers,omitempty"`
 }
 
 // AddonsConfig defines which addons to install
