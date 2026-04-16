@@ -29,6 +29,11 @@ network:
 talos:
   version: v1.12.1
   schematic: dc7b152cb3ea99b821fcb7340ce7168313ce393d663740b791c36f6e95fc8586
+  # Override NTP servers for networks without external connectivity.
+  # Omit to use the Talos default (time.cloudflare.com).
+  # timeServers:
+  #   - 10.92.92.2
+  #   - 10.92.92.4
 
 addons:
   cni:

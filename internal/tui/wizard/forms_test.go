@@ -189,6 +189,28 @@ func TestBuildSummary_ConsolePortForward(t *testing.T) {
 	}
 }
 
+func TestBuildSummary_NTPServers(t *testing.T) {
+	s := &wizardState{
+		Provider:       "nutanix",
+		ClusterName:    "ntp-test",
+		Topology:       "single-node",
+		CPReplicas:     "1",
+		CPCPU:          "4",
+		CPMemoryMB:     "8192",
+		CPDiskGB:       "50",
+		NTPServers:     "10.92.92.2, 10.92.92.4",
+		ExposureMode:   "LoadBalancer",
+		IPAMEnabled:    false,
+		NutEndpoint:    "https://prism.example.com",
+		ImageSource:    "factory",
+	}
+
+	summary := buildSummary(s)
+	if !strings.Contains(summary, "NTP Servers:    10.92.92.2, 10.92.92.4") {
+		t.Errorf("expected NTP servers in summary\ngot:\n%s", summary)
+	}
+}
+
 // --- validateConfig tests ---
 
 func validState() *wizardState {

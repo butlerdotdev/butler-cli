@@ -559,6 +559,29 @@ func networkingStep(s *wizardState) *huh.Group {
 	)
 }
 
+// ntpStep configures NTP servers for Talos time sync. Defaults to
+// time.cloudflare.com but must be overridden on isolated networks
+// where external NTP is unreachable.
+func ntpStep(s *wizardState) *huh.Group {
+	return huh.NewGroup(
+		huh.NewNote().
+			Title("NTP Servers").
+			Description("Time servers for Talos NTP sync. Required before etcd can start.\nComma-separated. Use internal servers on isolated networks."),
+
+		huh.NewInput().
+			Title("NTP Servers").
+			Description("Comma-separated list of NTP server addresses").
+			Placeholder("time.cloudflare.com").
+			Value(&s.NTPServers).
+			Validate(func(v string) error {
+				if strings.TrimSpace(v) == "" {
+					return fmt.Errorf("at least one NTP server is required")
+				}
+				return nil
+			}),
+	)
+}
+
 // onPremNetworkingStep collects VIP and MetalLB pool, which only apply
 // to on-prem providers (Harvester, Nutanix). Hidden for cloud providers.
 func onPremNetworkingStep(s *wizardState) *huh.Group {
@@ -1071,6 +1094,7 @@ func buildSummary(s *wizardState) string {
 		fmt.Fprintf(&b, "VIP:            %s\n", s.VIP)
 	}
 	fmt.Fprintf(&b, "LB Pool:        %s - %s\n", s.LBStart, s.LBEnd)
+	fmt.Fprintf(&b, "NTP Servers:    %s\n", s.NTPServers)
 
 	// Platform settings
 	fmt.Fprintf(&b, "Multi-Tenancy:  %s\n", s.MultiTenancyMode)
