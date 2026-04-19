@@ -28,7 +28,12 @@ network:
   # Override the node NIC MTU when the cluster path traverses a sub-1500
   # tunnel (IPsec/NAT-T, VPN, ZTNA, SD-WAN). Cilium follows device MTU.
   # Omit for the Talos default (1500). Valid range 576-9000.
+  # Values above 1500 (jumbo frames) additionally require jumboFrames: true
+  # as an explicit opt-in after verifying every hop on the end-to-end path
+  # supports the frame size — a misconfigured jumbo path silently stalls
+  # large flows while control traffic still succeeds.
   # mtu: 1380
+  # jumboFrames: false
 
 talos:
   version: v1.12.1

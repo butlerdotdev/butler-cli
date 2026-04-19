@@ -611,7 +611,10 @@ func advancedNetworkingStep(s *wizardState) *huh.Group {
 				"correctly today, leave this blank — the defaults are fine.\n\n"+
 				"Override only when an upstream fix isn't possible. Typical\n"+
 				"values on a broken path: 1380–1420. Cilium auto-derives its\n"+
-				"tunnel MTU from this, so no separate CNI setting is needed.").
+				"tunnel MTU from this, so no separate CNI setting is needed.\n\n"+
+				"Values above 1500 (jumbo frames) are accepted but will\n"+
+				"trigger a follow-up confirmation asking you to verify the\n"+
+				"end-to-end path supports the frame size.").
 			Placeholder("1500 (default)").
 			Value(&s.NetworkMTU).
 			Validate(func(v string) error {
@@ -629,6 +632,44 @@ func advancedNetworkingStep(s *wizardState) *huh.Group {
 				return nil
 			}),
 	)
+}
+
+// jumboFramesStep only surfaces when the operator has set MTU > 1500.
+// It's a dedicated confirmation step — not an inline checkbox — because
+// a misconfigured jumbo path silently breaks large flows while control
+// traffic still succeeds, and the wizard should force the operator to
+// stop and think before the bootstrap emits a patch that can leave the
+// cluster unreachable. Declining the confirm leaves NetworkJumboFrames
+// false; buildConfig then fails ValidateMTU and the wizard surfaces a
+// clear error rather than emitting an un-opted-in jumbo patch.
+func jumboFramesStep(s *wizardState) *huh.Group {
+	return huh.NewGroup(
+		huh.NewNote().
+			Title("Jumbo Frames Confirmation").
+			Description("You entered MTU > 1500. This requires jumbo frames.\n\n"+
+				"Before confirming, verify every hop on the end-to-end path\n"+
+				"supports this MTU:\n"+
+				"  • physical switch ports (MTU and jumbo-frames setting)\n"+
+				"  • host NIC driver and firmware\n"+
+				"  • any VLAN, VXLAN, or overlay interfaces\n"+
+				"  • cloud VPC/subnet MTU setting\n"+
+				"  • any VPN, IPsec, or interconnect tunnel MTU\n\n"+
+				"If any hop doesn't support the frame size, control traffic\n"+
+				"will succeed but large flows (image pulls, `kubectl cp`,\n"+
+				"large API responses) will silently stall on PMTUD timeouts.\n\n"+
+				"Decline to abort so you can lower the MTU instead."),
+		huh.NewConfirm().
+			Title("I have verified jumbo frames end-to-end").
+			Affirmative("Confirm").
+			Negative("Cancel").
+			Value(&s.NetworkJumboFrames),
+	).WithHideFunc(func() bool {
+		mtu, err := strconv.Atoi(strings.TrimSpace(s.NetworkMTU))
+		if err != nil {
+			return true
+		}
+		return mtu <= 1500
+	})
 }
 
 // onPremNetworkingStep collects VIP and MetalLB pool, which only apply
@@ -1146,6 +1187,9 @@ func buildSummary(s *wizardState) string {
 	fmt.Fprintf(&b, "NTP Servers:    %s\n", s.NTPServers)
 	if strings.TrimSpace(s.NetworkMTU) != "" {
 		fmt.Fprintf(&b, "Interface MTU:  %s\n", s.NetworkMTU)
+		if s.NetworkJumboFrames {
+			fmt.Fprintf(&b, "Jumbo Frames:   enabled (verified end-to-end)\n")
+		}
 	}
 
 	// Platform settings

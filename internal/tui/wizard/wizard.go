@@ -97,6 +97,7 @@ func Run() (*orchestrator.Config, error) {
 			networkingStep(s),
 			ntpStep(s),
 			advancedNetworkingStep(s),
+			jumboFramesStep(s),
 			onPremNetworkingStep(s),
 			ipamStep(s),
 			networkPoolStep(s),
@@ -198,6 +199,7 @@ func buildConfig(s *wizardState) (*orchestrator.Config, error) {
 			PodCIDR:     s.PodCIDR,
 			ServiceCIDR: s.ServiceCIDR,
 			MTU:         parseMTU(s.NetworkMTU),
+			JumboFrames: s.NetworkJumboFrames,
 		},
 		Talos: orchestrator.TalosConfig{
 			Version:     s.TalosVersion,
@@ -420,6 +422,15 @@ func buildConfig(s *wizardState) (*orchestrator.Config, error) {
 			ImageProject:          s.GCPProjectID, // images are in the same project
 			Image:                 s.GCPImage,
 		}
+	}
+
+	// Cross-field MTU validation. The MTU input validator only enforces
+	// numeric bounds; the jumbo-frames opt-in lives in a separate step
+	// that may be skipped if the operator edits the MTU back down. Run
+	// the shared validator as a final gate so the wizard and config-file
+	// paths enforce identical rules.
+	if err := orchestrator.ValidateMTU(cfg.Network.MTU, cfg.Network.JumboFrames); err != nil {
+		return nil, err
 	}
 
 	return cfg, nil

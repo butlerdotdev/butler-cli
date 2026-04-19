@@ -183,15 +183,19 @@ func TestBuildTalosSpec_MTUAndTimeServers(t *testing.T) {
 		t.Fatalf("configPatches = %v, want 2-element slice", spec["configPatches"])
 	}
 
-	// Order is stable: NTP first, MTU second. This matches the order
-	// in buildTalosSpec and keeps test assertions deterministic.
-	first := patches[0].(map[string]interface{})
-	if first["path"] != "/machine/time" {
-		t.Errorf("first patch path = %v, want /machine/time", first["path"])
+	// Both patches must be present, but order between them isn't
+	// load-bearing: the bootstrap controller ships each patch as its
+	// own --config-patch arg, independent of the others. Assert on the
+	// set of paths, not their indexes, so future reorderings of
+	// buildTalosSpec don't break the test.
+	paths := make(map[string]bool, len(patches))
+	for _, p := range patches {
+		paths[p.(map[string]interface{})["path"].(string)] = true
 	}
-
-	second := patches[1].(map[string]interface{})
-	if second["path"] != "/machine/network/interfaces" {
-		t.Errorf("second patch path = %v, want /machine/network/interfaces", second["path"])
+	if !paths["/machine/time"] {
+		t.Errorf("missing /machine/time patch, got paths %v", paths)
+	}
+	if !paths["/machine/network/interfaces"] {
+		t.Errorf("missing /machine/network/interfaces patch, got paths %v", paths)
 	}
 }

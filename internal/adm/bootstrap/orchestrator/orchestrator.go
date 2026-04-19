@@ -1866,7 +1866,6 @@ func (o *Orchestrator) buildAndLoadImages(ctx context.Context, provider string) 
 	return nil
 }
 
-// buildAddonsConfig builds the addons config for the ClusterBootstrap CR.
 // buildTalosSpec builds the talos section of the ClusterBootstrap spec.
 // Emits configPatches for optional overrides: NTP servers (when TimeServers
 // is set) and primary NIC MTU (when Network.MTU is non-zero).
@@ -1905,11 +1904,19 @@ func buildTalosSpec(cfg *Config) map[string]interface{} {
 		// key on the existing /machine/network object (which is always
 		// present in generated configs).
 		//
-		// deviceSelector.physical=true matches the primary non-virtual
-		// NIC and works across all supported providers (harvester,
-		// nutanix, proxmox, aws, azure, gcp) without hard-coding ens3
-		// vs eth0 vs ens5. Cilium re-derives its tunnel MTU from device
-		// MTU at startup, so no separate Cilium knob is required.
+		// deviceSelector.physical=true matches any non-virtual NIC and
+		// works across all supported providers (harvester, nutanix,
+		// proxmox, aws, azure, gcp) without hard-coding ens3 vs eth0 vs
+		// ens5. Cilium re-derives its tunnel MTU from device MTU at
+		// startup, so no separate Cilium knob is required.
+		//
+		// Single-NIC shape only. On nodes with more than one physical
+		// NIC, this selector matches all of them — every physical NIC
+		// gets the MTU override and dhcp:true. That is acceptable
+		// today because every supported provider provisions nodes with
+		// a single data NIC. If we grow to node shapes with separate
+		// mgmt/data NICs, this patch must be scoped by busPath, driver,
+		// or hardwareAddr before shipping.
 		//
 		// dhcp:true is set explicitly. Talos only auto-enables DHCP on
 		// physical NICs when the interfaces array is absent; once an
