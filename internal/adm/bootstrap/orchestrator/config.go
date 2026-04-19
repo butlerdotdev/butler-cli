@@ -233,6 +233,46 @@ type NetworkConfig struct {
 	// LoadBalancerPool defines the IP range for MetalLB LoadBalancer services.
 	// Uses validated start/end format. Takes precedence over addons.loadBalancer.addressPool.
 	LoadBalancerPool *LBPoolConfig `mapstructure:"loadBalancerPool"`
+
+	// MTU overrides the default network interface MTU on Talos nodes.
+	// Set when the path traverses a sub-1500 link (IPsec/NAT-T, VPN,
+	// ZTNA, SD-WAN) and PMTUD is unreliable. Cilium auto-detects device
+	// MTU and derives tunnel MTU from this value, so no separate Cilium
+	// knob is required. Typical range 1380-1420. Omit (or zero) for the
+	// Talos default (1500). Values above 1500 additionally require
+	// JumboFrames to be set.
+	MTU int `mapstructure:"mtu,omitempty"`
+
+	// JumboFrames is the explicit opt-in required for MTU > 1500. Gated
+	// separately from MTU because a misconfigured jumbo path silently
+	// breaks traffic — ARP/ICMP and small control packets succeed, but
+	// the first large TCP flow stalls on PMTUD timeouts. Requiring this
+	// flag forces the operator to confirm every hop on the end-to-end
+	// path (switches, NICs, cloud peering, tunnel MTUs) supports the
+	// requested frame size before the bootstrap will emit an MTU patch
+	// above 1500.
+	JumboFrames bool `mapstructure:"jumboFrames,omitempty"`
+}
+
+// ValidateMTU returns an error when the requested MTU is outside the
+// supported range or when a jumbo-frame MTU is configured without an
+// explicit opt-in. A return of nil with mtu == 0 signals "no MTU patch
+// will be emitted" and is the common case. Shared between the config-file
+// path (LoadConfig) and the wizard so both enforce identical rules.
+func ValidateMTU(mtu int, jumboFrames bool) error {
+	if mtu == 0 {
+		return nil
+	}
+	if mtu < 576 {
+		return fmt.Errorf("network.mtu %d is below the minimum of 576", mtu)
+	}
+	if mtu > 9000 {
+		return fmt.Errorf("network.mtu %d exceeds the supported maximum of 9000", mtu)
+	}
+	if mtu > 1500 && !jumboFrames {
+		return fmt.Errorf("network.mtu %d exceeds standard Ethernet (1500); set network.jumboFrames: true to opt in after verifying end-to-end path support (switches, NICs, tunnels, cloud peering)", mtu)
+	}
+	return nil
 }
 
 // LBPoolConfig defines a validated IP address range for LoadBalancer services
@@ -628,6 +668,13 @@ func LoadConfig() (*Config, error) {
 		if cfg.Addons.Console.Ingress.Enabled && cfg.Addons.Console.Ingress.Host == "" {
 			cfg.Addons.Console.Ingress.Host = fmt.Sprintf("butler.%s.local", cfg.Cluster.Name)
 		}
+	}
+
+	// Network MTU validation. Shared with the wizard path via ValidateMTU
+	// so YAML configs cannot sneak in out-of-range or un-opted-in jumbo
+	// MTUs that the wizard validator would reject.
+	if err := ValidateMTU(cfg.Network.MTU, cfg.Network.JumboFrames); err != nil {
+		return nil, err
 	}
 
 	// ControlPlaneExposure validation

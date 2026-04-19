@@ -1866,28 +1866,82 @@ func (o *Orchestrator) buildAndLoadImages(ctx context.Context, provider string) 
 	return nil
 }
 
-// buildAddonsConfig builds the addons config for the ClusterBootstrap CR.
 // buildTalosSpec builds the talos section of the ClusterBootstrap spec.
-// When TimeServers is set, it emits configPatches to override Talos NTP.
+// Emits configPatches for optional overrides: NTP servers (when TimeServers
+// is set) and primary NIC MTU (when Network.MTU is non-zero).
+//
+// The CRD value field is a string that the bootstrap controller splices
+// directly into a JSON patch via fmt.Sprintf with %s (no additional
+// quoting). Each value must therefore be raw JSON that parses verbatim
+// when pasted — json.Marshal produces the correct form for both objects
+// (NTP) and bare integers (MTU).
 func buildTalosSpec(cfg *Config) map[string]interface{} {
 	spec := map[string]interface{}{
 		"version":   cfg.Talos.Version,
 		"schematic": cfg.Talos.Schematic,
 	}
+
+	var patches []interface{}
+
 	if len(cfg.Talos.TimeServers) > 0 {
-		// The CRD value field is a string that the bootstrap controller
-		// splices directly into a JSON patch (no additional quoting).
-		// Marshal the value as raw JSON so it can be inserted as-is.
 		valueJSON, _ := json.Marshal(map[string]interface{}{
 			"servers": cfg.Talos.TimeServers,
 		})
-		spec["configPatches"] = []interface{}{
+		patches = append(patches, map[string]interface{}{
+			"op":    "add",
+			"path":  "/machine/time",
+			"value": string(valueJSON),
+		})
+	}
+
+	if cfg.Network.MTU > 0 {
+		// Replace the entire interfaces array with a single entry that
+		// matches any physical NIC by deviceSelector. This is required
+		// because Talos's default generated config has no interfaces
+		// array — RFC6902 `add` at a deep path like .../interfaces/0/mtu
+		// fails with "doc is missing path" when the parent array is
+		// absent. Patching at /machine/network/interfaces creates the
+		// key on the existing /machine/network object (which is always
+		// present in generated configs).
+		//
+		// deviceSelector.physical=true matches any non-virtual NIC and
+		// works across all supported providers (harvester, nutanix,
+		// proxmox, aws, azure, gcp) without hard-coding ens3 vs eth0 vs
+		// ens5. Cilium re-derives its tunnel MTU from device MTU at
+		// startup, so no separate Cilium knob is required.
+		//
+		// Single-NIC shape only. On nodes with more than one physical
+		// NIC, this selector matches all of them — every physical NIC
+		// gets the MTU override and dhcp:true. That is acceptable
+		// today because every supported provider provisions nodes with
+		// a single data NIC. If we grow to node shapes with separate
+		// mgmt/data NICs, this patch must be scoped by busPath, driver,
+		// or hardwareAddr before shipping.
+		//
+		// dhcp:true is set explicitly. Talos only auto-enables DHCP on
+		// physical NICs when the interfaces array is absent; once an
+		// interface entry exists, any addressing mode it omits is
+		// treated as disabled. Without this the node boots with MTU
+		// 1380 but no IP lease, and talosctl bootstrap fails with a
+		// gRPC auth-handshake timeout because the API is unreachable.
+		valueJSON, _ := json.Marshal([]interface{}{
 			map[string]interface{}{
-				"op":    "add",
-				"path":  "/machine/time",
-				"value": string(valueJSON),
+				"deviceSelector": map[string]interface{}{
+					"physical": true,
+				},
+				"dhcp": true,
+				"mtu":  cfg.Network.MTU,
 			},
-		}
+		})
+		patches = append(patches, map[string]interface{}{
+			"op":    "add",
+			"path":  "/machine/network/interfaces",
+			"value": string(valueJSON),
+		})
+	}
+
+	if len(patches) > 0 {
+		spec["configPatches"] = patches
 	}
 	return spec
 }

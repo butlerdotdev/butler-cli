@@ -68,6 +68,19 @@ type wizardState struct {
 	// (time.cloudflare.com) for isolated networks.
 	NTPServers string
 
+	// NetworkMTU overrides the Talos interface MTU. Empty = default (1500).
+	// Needed on tunneled/VPN/SD-WAN paths where the effective MTU is below 1500.
+	NetworkMTU string
+
+	// NetworkJumboFrames is the operator's explicit opt-in to MTU > 1500.
+	// Mirrors network.jumboFrames in the bootstrap config. Only surfaced in
+	// the wizard when the entered MTU is above 1500. Gated separately
+	// because misconfigured jumbo paths silently break traffic (control
+	// packets succeed while large flows stall on PMTUD timeouts), so the
+	// operator must affirmatively confirm every hop on the end-to-end path
+	// supports the requested frame size.
+	NetworkJumboFrames bool
+
 	// Control plane exposure mode for tenant clusters. Determines how
 	// tenant-cluster Kubernetes API servers are reached from outside.
 	//   LoadBalancer (default): 1 LoadBalancer IP per tenant

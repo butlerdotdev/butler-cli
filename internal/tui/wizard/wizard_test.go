@@ -16,7 +16,10 @@ limitations under the License.
 
 package wizard
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestBuildConfig_HAHarvester(t *testing.T) {
 	s := &wizardState{
@@ -255,6 +258,146 @@ func TestBuildConfig_NTPDefault(t *testing.T) {
 
 	if len(cfg.Talos.TimeServers) != 1 || cfg.Talos.TimeServers[0] != "time.cloudflare.com" {
 		t.Errorf("TimeServers = %v, want [time.cloudflare.com]", cfg.Talos.TimeServers)
+	}
+}
+
+func TestBuildConfig_NetworkMTU(t *testing.T) {
+	base := func() *wizardState {
+		s := newWizardState()
+		s.Provider = "nutanix"
+		s.ClusterName = "mtu-test"
+		s.Topology = "single-node"
+		s.NutEndpoint = "https://prism.example.com"
+		s.NutPort = "9440"
+		s.NutUsername = "admin"
+		s.NutPassword = "secret"
+		s.NutClusterUUID = "uuid-1"
+		s.NutSubnetUUID = "uuid-2"
+		s.NutImageUUID = "uuid-3"
+		s.IPAMEnabled = false
+		return s
+	}
+
+	tests := []struct {
+		name        string
+		mtu         string
+		jumboFrames bool
+		wantMTU     int
+	}{
+		{"valid MTU", "1380", false, 1380},
+		{"empty string", "", false, 0},
+		{"whitespace only", "   ", false, 0},
+		{"non-numeric (clamped to 0)", "abc", false, 0},
+		{"below lower bound (clamped to 0)", "100", false, 0},
+		{"above upper bound (clamped to 0)", "10000", false, 0},
+		{"exact lower bound", "576", false, 576},
+		{"exact upper bound with jumbo", "9000", true, 9000},
+		{"standard Ethernet", "1500", false, 1500},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s := base()
+			s.NetworkMTU = tt.mtu
+			s.NetworkJumboFrames = tt.jumboFrames
+
+			cfg, err := buildConfig(s)
+			if err != nil {
+				t.Fatalf("buildConfig() error: %v", err)
+			}
+
+			if cfg.Network.MTU != tt.wantMTU {
+				t.Errorf("Network.MTU = %d, want %d", cfg.Network.MTU, tt.wantMTU)
+			}
+			if cfg.Network.JumboFrames != tt.jumboFrames {
+				t.Errorf("Network.JumboFrames = %v, want %v", cfg.Network.JumboFrames, tt.jumboFrames)
+			}
+		})
+	}
+}
+
+// TestBuildConfig_JumboFramesCrossValidation proves that the wizard's
+// final ValidateMTU gate refuses to emit an un-opted-in jumbo MTU even
+// when the individual MTU Input validator lets the value through. This
+// is the failure mode the gate was added to catch: an operator enters
+// MTU > 1500, the jumbo confirmation step is shown, they Cancel (which
+// leaves NetworkJumboFrames false), and buildConfig must refuse.
+func TestBuildConfig_JumboFramesCrossValidation(t *testing.T) {
+	base := func() *wizardState {
+		s := newWizardState()
+		s.Provider = "nutanix"
+		s.ClusterName = "jumbo-test"
+		s.Topology = "single-node"
+		s.NutEndpoint = "https://prism.example.com"
+		s.NutPort = "9440"
+		s.NutUsername = "admin"
+		s.NutPassword = "secret"
+		s.NutClusterUUID = "uuid-1"
+		s.NutSubnetUUID = "uuid-2"
+		s.NutImageUUID = "uuid-3"
+		s.IPAMEnabled = false
+		return s
+	}
+
+	tests := []struct {
+		name         string
+		mtu          string
+		jumboFrames  bool
+		wantErr      bool
+		errSubstring string
+	}{
+		{"jumbo MTU with opt-in passes", "9000", true, false, ""},
+		{"jumbo MTU without opt-in fails", "9000", false, true, "set network.jumboFrames: true"},
+		{"mid jumbo without opt-in fails", "1501", false, true, "set network.jumboFrames: true"},
+		{"below jumbo threshold ignores flag", "1380", false, false, ""},
+		{"unset MTU ignores flag", "", true, false, ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s := base()
+			s.NetworkMTU = tt.mtu
+			s.NetworkJumboFrames = tt.jumboFrames
+
+			_, err := buildConfig(s)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatalf("buildConfig() = nil, want error containing %q", tt.errSubstring)
+				}
+				if !strings.Contains(err.Error(), tt.errSubstring) {
+					t.Errorf("buildConfig() error = %q, want substring %q", err.Error(), tt.errSubstring)
+				}
+				return
+			}
+			if err != nil {
+				t.Errorf("buildConfig() = %v, want nil", err)
+			}
+		})
+	}
+}
+
+func TestParseMTU(t *testing.T) {
+	tests := []struct {
+		in   string
+		want int
+	}{
+		{"1380", 1380},
+		{"", 0},
+		{"  ", 0},
+		{"abc", 0},
+		{"-1", 0},
+		{"0", 0},
+		{"575", 0},
+		{"9001", 0},
+		{"576", 576},
+		{"9000", 9000},
+		{" 1500 ", 1500},
+	}
+	for _, tt := range tests {
+		got := parseMTU(tt.in)
+		if got != tt.want {
+			t.Errorf("parseMTU(%q) = %d, want %d", tt.in, got, tt.want)
+		}
 	}
 }
 

@@ -16,6 +16,15 @@ network:
   # No VIP for cloud providers — first CP node's public IP is used
   podCIDR: "10.244.0.0/16"
   serviceCIDR: "10.96.0.0/12"
+  # Override the node NIC MTU when the cluster path traverses a sub-1500
+  # tunnel (Site-to-Site VPN, Direct Connect with added overhead, Transit
+  # Gateway peering). Cilium follows device MTU. Omit for the Talos
+  # default (1500). Valid range 576-9000. Values above 1500 (jumbo
+  # frames) also require jumboFrames: true after verifying every hop on
+  # the end-to-end path supports the frame size — a misconfigured jumbo
+  # path silently stalls large flows while control traffic still succeeds.
+  # mtu: 1380
+  # jumboFrames: false
 
 talos:
   version: v1.12.2

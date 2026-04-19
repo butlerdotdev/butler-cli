@@ -96,6 +96,8 @@ func Run() (*orchestrator.Config, error) {
 			workersStep(s),
 			networkingStep(s),
 			ntpStep(s),
+			advancedNetworkingStep(s),
+			jumboFramesStep(s),
 			onPremNetworkingStep(s),
 			ipamStep(s),
 			networkPoolStep(s),
@@ -196,6 +198,8 @@ func buildConfig(s *wizardState) (*orchestrator.Config, error) {
 		Network: orchestrator.NetworkConfig{
 			PodCIDR:     s.PodCIDR,
 			ServiceCIDR: s.ServiceCIDR,
+			MTU:         parseMTU(s.NetworkMTU),
+			JumboFrames: s.NetworkJumboFrames,
 		},
 		Talos: orchestrator.TalosConfig{
 			Version:     s.TalosVersion,
@@ -420,6 +424,15 @@ func buildConfig(s *wizardState) (*orchestrator.Config, error) {
 		}
 	}
 
+	// Cross-field MTU validation. The MTU input validator only enforces
+	// numeric bounds; the jumbo-frames opt-in lives in a separate step
+	// that may be skipped if the operator edits the MTU back down. Run
+	// the shared validator as a final gate so the wizard and config-file
+	// paths enforce identical rules.
+	if err := orchestrator.ValidateMTU(cfg.Network.MTU, cfg.Network.JumboFrames); err != nil {
+		return nil, err
+	}
+
 	return cfg, nil
 }
 
@@ -434,6 +447,21 @@ func splitCSV(s string) []string {
 		}
 	}
 	return out
+}
+
+// parseMTU returns the parsed MTU or 0 if the string is empty or fails
+// the same bounds check the advancedNetworkingStep validator applies.
+// Zero signals "do not emit a Talos MTU patch".
+func parseMTU(s string) int {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return 0
+	}
+	mtu, err := strconv.Atoi(s)
+	if err != nil || mtu < 576 || mtu > 9000 {
+		return 0
+	}
+	return mtu
 }
 
 // rangeToCIDRs converts an IP range (start, end) into the minimal set of
