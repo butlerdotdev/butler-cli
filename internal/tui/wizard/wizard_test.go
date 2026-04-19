@@ -258,6 +258,80 @@ func TestBuildConfig_NTPDefault(t *testing.T) {
 	}
 }
 
+func TestBuildConfig_NetworkMTU(t *testing.T) {
+	base := func() *wizardState {
+		s := newWizardState()
+		s.Provider = "nutanix"
+		s.ClusterName = "mtu-test"
+		s.Topology = "single-node"
+		s.NutEndpoint = "https://prism.example.com"
+		s.NutPort = "9440"
+		s.NutUsername = "admin"
+		s.NutPassword = "secret"
+		s.NutClusterUUID = "uuid-1"
+		s.NutSubnetUUID = "uuid-2"
+		s.NutImageUUID = "uuid-3"
+		s.IPAMEnabled = false
+		return s
+	}
+
+	tests := []struct {
+		name    string
+		mtu     string
+		wantMTU int
+	}{
+		{"valid MTU", "1380", 1380},
+		{"empty string", "", 0},
+		{"whitespace only", "   ", 0},
+		{"non-numeric", "abc", 0},
+		{"below lower bound", "100", 0},
+		{"above upper bound", "10000", 0},
+		{"exact lower bound", "576", 576},
+		{"exact upper bound", "9000", 9000},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s := base()
+			s.NetworkMTU = tt.mtu
+
+			cfg, err := buildConfig(s)
+			if err != nil {
+				t.Fatalf("buildConfig() error: %v", err)
+			}
+
+			if cfg.Network.MTU != tt.wantMTU {
+				t.Errorf("Network.MTU = %d, want %d", cfg.Network.MTU, tt.wantMTU)
+			}
+		})
+	}
+}
+
+func TestParseMTU(t *testing.T) {
+	tests := []struct {
+		in   string
+		want int
+	}{
+		{"1380", 1380},
+		{"", 0},
+		{"  ", 0},
+		{"abc", 0},
+		{"-1", 0},
+		{"0", 0},
+		{"575", 0},
+		{"9001", 0},
+		{"576", 576},
+		{"9000", 9000},
+		{" 1500 ", 1500},
+	}
+	for _, tt := range tests {
+		got := parseMTU(tt.in)
+		if got != tt.want {
+			t.Errorf("parseMTU(%q) = %d, want %d", tt.in, got, tt.want)
+		}
+	}
+}
+
 func TestSplitCSV(t *testing.T) {
 	tests := []struct {
 		input string

@@ -211,6 +211,52 @@ func TestBuildSummary_NTPServers(t *testing.T) {
 	}
 }
 
+func TestBuildSummary_NetworkMTU(t *testing.T) {
+	base := func() *wizardState {
+		return &wizardState{
+			Provider:     "nutanix",
+			ClusterName:  "mtu-summary",
+			Topology:     "single-node",
+			CPReplicas:   "1",
+			CPCPU:        "4",
+			CPMemoryMB:   "8192",
+			CPDiskGB:     "50",
+			NTPServers:   "time.cloudflare.com",
+			ExposureMode: "LoadBalancer",
+			IPAMEnabled:  false,
+			ImageSource:  "factory",
+			NutEndpoint:  "https://prism.example.com",
+		}
+	}
+
+	t.Run("populated shows MTU line", func(t *testing.T) {
+		s := base()
+		s.NetworkMTU = "1380"
+		summary := buildSummary(s)
+		if !strings.Contains(summary, "Interface MTU:  1380") {
+			t.Errorf("expected Interface MTU in summary\ngot:\n%s", summary)
+		}
+	})
+
+	t.Run("empty omits MTU line", func(t *testing.T) {
+		s := base()
+		s.NetworkMTU = ""
+		summary := buildSummary(s)
+		if strings.Contains(summary, "Interface MTU") {
+			t.Errorf("did not expect Interface MTU in summary\ngot:\n%s", summary)
+		}
+	})
+
+	t.Run("whitespace-only omits MTU line", func(t *testing.T) {
+		s := base()
+		s.NetworkMTU = "   "
+		summary := buildSummary(s)
+		if strings.Contains(summary, "Interface MTU") {
+			t.Errorf("did not expect Interface MTU for whitespace input\ngot:\n%s", summary)
+		}
+	})
+}
+
 // --- validateConfig tests ---
 
 func validState() *wizardState {

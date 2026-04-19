@@ -68,6 +68,10 @@ type wizardState struct {
 	// (time.cloudflare.com) for isolated networks.
 	NTPServers string
 
+	// NetworkMTU overrides the Talos interface MTU. Empty = default (1500).
+	// Needed on tunneled/VPN/SD-WAN paths where the effective MTU is below 1500.
+	NetworkMTU string
+
 	// Control plane exposure mode for tenant clusters. Determines how
 	// tenant-cluster Kubernetes API servers are reached from outside.
 	//   LoadBalancer (default): 1 LoadBalancer IP per tenant

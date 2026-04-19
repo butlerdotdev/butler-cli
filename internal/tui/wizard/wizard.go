@@ -96,6 +96,7 @@ func Run() (*orchestrator.Config, error) {
 			workersStep(s),
 			networkingStep(s),
 			ntpStep(s),
+			advancedNetworkingStep(s),
 			onPremNetworkingStep(s),
 			ipamStep(s),
 			networkPoolStep(s),
@@ -196,6 +197,7 @@ func buildConfig(s *wizardState) (*orchestrator.Config, error) {
 		Network: orchestrator.NetworkConfig{
 			PodCIDR:     s.PodCIDR,
 			ServiceCIDR: s.ServiceCIDR,
+			MTU:         parseMTU(s.NetworkMTU),
 		},
 		Talos: orchestrator.TalosConfig{
 			Version:     s.TalosVersion,
@@ -434,6 +436,21 @@ func splitCSV(s string) []string {
 		}
 	}
 	return out
+}
+
+// parseMTU returns the parsed MTU or 0 if the string is empty or fails
+// the same bounds check the advancedNetworkingStep validator applies.
+// Zero signals "do not emit a Talos MTU patch".
+func parseMTU(s string) int {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return 0
+	}
+	mtu, err := strconv.Atoi(s)
+	if err != nil || mtu < 576 || mtu > 9000 {
+		return 0
+	}
+	return mtu
 }
 
 // rangeToCIDRs converts an IP range (start, end) into the minimal set of

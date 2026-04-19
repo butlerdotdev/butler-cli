@@ -25,6 +25,10 @@ network:
   loadBalancerPool:
     start: 10.127.14.30
     end: 10.127.14.50
+  # Override the node NIC MTU when the cluster path traverses a sub-1500
+  # tunnel (IPsec/NAT-T, VPN, ZTNA, SD-WAN). Cilium follows device MTU.
+  # Omit for the Talos default (1500). Valid range 576-9000.
+  # mtu: 1380
 
 talos:
   version: v1.12.1

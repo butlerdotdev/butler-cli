@@ -19,6 +19,7 @@ package wizard
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -582,6 +583,54 @@ func ntpStep(s *wizardState) *huh.Group {
 	)
 }
 
+// advancedNetworkingStep collects optional network-tuning knobs. All
+// fields are optional; empty values emit no Talos configPatches. The
+// primary use case is operators whose path traverses a tunnel (IPsec,
+// VPN, ZTNA, SD-WAN) with an effective MTU below 1500.
+func advancedNetworkingStep(s *wizardState) *huh.Group {
+	return huh.NewGroup(
+		huh.NewNote().
+			Title("Advanced Networking (optional)").
+			Description("The defaults work for most clusters. Only change these if\n"+
+				"you know the network path has non-standard characteristics\n"+
+				"(see the field description below for specifics).\n\n"+
+				"Leave every field blank to accept the defaults."),
+
+		huh.NewInput().
+			Title("Interface MTU").
+			Description("Default: 1500 (standard Ethernet). Leave blank to use it.\n\n"+
+				"Only override this if you have already observed the symptom:\n"+
+				"small API calls succeed but larger transfers stall or time\n"+
+				"out — for example, the Butler Console loads its HTML but the\n"+
+				"JS bundle hangs, `kubectl logs` or `kubectl cp` stalls, or\n"+
+				"image pulls hang partway through.\n\n"+
+				"Running behind a VPN, ZTNA, SD-WAN, IPsec, or cloud VPN\n"+
+				"gateway is NOT by itself a reason to lower the MTU. Most\n"+
+				"well-configured tunnels apply MSS clamping or PMTUD upstream\n"+
+				"and the host never sees the issue. If your traffic works\n"+
+				"correctly today, leave this blank — the defaults are fine.\n\n"+
+				"Override only when an upstream fix isn't possible. Typical\n"+
+				"values on a broken path: 1380–1420. Cilium auto-derives its\n"+
+				"tunnel MTU from this, so no separate CNI setting is needed.").
+			Placeholder("1500 (default)").
+			Value(&s.NetworkMTU).
+			Validate(func(v string) error {
+				v = strings.TrimSpace(v)
+				if v == "" {
+					return nil
+				}
+				mtu, err := strconv.Atoi(v)
+				if err != nil {
+					return fmt.Errorf("MTU must be an integer")
+				}
+				if mtu < 576 || mtu > 9000 {
+					return fmt.Errorf("MTU must be between 576 and 9000")
+				}
+				return nil
+			}),
+	)
+}
+
 // onPremNetworkingStep collects VIP and MetalLB pool, which only apply
 // to on-prem providers (Harvester, Nutanix). Hidden for cloud providers.
 func onPremNetworkingStep(s *wizardState) *huh.Group {
@@ -1095,6 +1144,9 @@ func buildSummary(s *wizardState) string {
 	}
 	fmt.Fprintf(&b, "LB Pool:        %s - %s\n", s.LBStart, s.LBEnd)
 	fmt.Fprintf(&b, "NTP Servers:    %s\n", s.NTPServers)
+	if strings.TrimSpace(s.NetworkMTU) != "" {
+		fmt.Fprintf(&b, "Interface MTU:  %s\n", s.NetworkMTU)
+	}
 
 	// Platform settings
 	fmt.Fprintf(&b, "Multi-Tenancy:  %s\n", s.MultiTenancyMode)

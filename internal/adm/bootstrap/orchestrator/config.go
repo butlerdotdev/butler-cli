@@ -233,6 +233,14 @@ type NetworkConfig struct {
 	// LoadBalancerPool defines the IP range for MetalLB LoadBalancer services.
 	// Uses validated start/end format. Takes precedence over addons.loadBalancer.addressPool.
 	LoadBalancerPool *LBPoolConfig `mapstructure:"loadBalancerPool"`
+
+	// MTU overrides the default network interface MTU on Talos nodes.
+	// Set when the path traverses a sub-1500 link (IPsec/NAT-T, VPN,
+	// ZTNA, SD-WAN) and PMTUD is unreliable. Cilium auto-detects device
+	// MTU and derives tunnel MTU from this value, so no separate Cilium
+	// knob is required. Typical range 1380-1420. Omit (or zero) for the
+	// Talos default (1500).
+	MTU int `mapstructure:"mtu,omitempty"`
 }
 
 // LBPoolConfig defines a validated IP address range for LoadBalancer services
