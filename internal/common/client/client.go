@@ -385,6 +385,8 @@ func New(kubeconfig, context string) (*Client, error) {
 
 // newClient creates a client from a rest config
 func newClient(config *rest.Config) (*Client, error) {
+	applyImpersonationFromCredentials(config)
+
 	clientset, err := kubernetes.NewForConfig(config)
 	if err != nil {
 		return nil, fmt.Errorf("creating clientset: %w", err)
@@ -400,6 +402,36 @@ func newClient(config *rest.Config) (*Client, error) {
 		Dynamic:   dynamicClient,
 		Config:    config,
 	}, nil
+}
+
+// applyImpersonationFromCredentials sets rest.Config.Impersonate when a device-flow
+// credential with a user email is active. Implements ADR-011: butler-cli performs
+// client-side impersonation so apiserver webhooks see the end-user identity instead
+// of the scoped ServiceAccount identity.
+//
+// When no active credential is present, or the active credential has an empty
+// User.Email (raw-kubeconfig short-circuit), the rest.Config is left untouched so
+// operator kubeconfigs reach the apiserver unchanged.
+func applyImpersonationFromCredentials(config *rest.Config) {
+	if config == nil {
+		return
+	}
+	creds, err := auth.LoadCredentials()
+	if err != nil {
+		return
+	}
+	cred := creds.ActiveCredential()
+	if cred == nil {
+		return
+	}
+	email := strings.ToLower(strings.TrimSpace(cred.User.Email))
+	if email == "" {
+		return
+	}
+	config.Impersonate = rest.ImpersonationConfig{
+		UserName: email,
+		Groups:   []string{"butler-api-users", "system:authenticated"},
+	}
 }
 
 // GetTenantCluster gets a TenantCluster by name
