@@ -42,6 +42,12 @@ const (
 
 	// EnvironmentLabel is the label key for ADR-009 Team Environments membership.
 	EnvironmentLabel = "butler.butlerlabs.dev/environment"
+
+	// CreatorEmailAnnotation records the authenticated user who created the
+	// TenantCluster. Required by the admission webhook when the target
+	// environment sets maxClustersPerMember; always audit-useful otherwise.
+	// Mirrors butler-server's API-path behavior for CLI-direct (ADR-002) creates.
+	CreatorEmailAnnotation = "butler.butlerlabs.dev/creator-email"
 )
 
 // NamespaceFlags holds namespace-related flag values

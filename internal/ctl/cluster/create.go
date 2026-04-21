@@ -25,6 +25,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/butlerdotdev/butler/internal/common/auth"
 	"github.com/butlerdotdev/butler/internal/common/client"
 	"github.com/butlerdotdev/butler/internal/common/log"
 	"github.com/butlerdotdev/butler/internal/common/output"
@@ -93,6 +94,12 @@ type CreateOptions struct {
 
 	// Environment label (ADR-009 Team Environments)
 	Environment string
+
+	// CreatorEmail is the authenticated user's email, copied onto the
+	// TenantCluster as the CreatorEmailAnnotation. Populated from the active
+	// device-flow credential by the command runner; empty under raw-kubeconfig
+	// (the webhook will reject env-gated creates without it).
+	CreatorEmail string
 
 	// Behavior flags
 	Wait    bool
@@ -373,6 +380,18 @@ func runCreate(ctx context.Context, opts *CreateOptions) error {
 		return err
 	}
 
+	// Populate CreatorEmail from the active device-flow credential. The
+	// CreatorEmailAnnotation mirrors the server's API-path behavior and is
+	// required by the admission webhook when the target environment sets
+	// maxClustersPerMember.
+	if opts.CreatorEmail == "" {
+		if cf, err := auth.LoadCredentials(); err == nil {
+			if cred := cf.ActiveCredential(); cred != nil {
+				opts.CreatorEmail = strings.ToLower(strings.TrimSpace(cred.User.Email))
+			}
+		}
+	}
+
 	// Auto-detect provider if not specified
 	if opts.Provider == "" {
 		provider, err := autoDetectProvider(ctx, c, opts.Logger)
@@ -482,6 +501,18 @@ func buildTenantCluster(opts *CreateOptions) *unstructured.Unstructured {
 		}
 		labels[EnvironmentLabel] = opts.Environment
 		tc.SetLabels(labels)
+	}
+
+	// Creator identity annotation (ADR-009, ADR-011). Set when the active
+	// credential carries a Butler email so the admission webhook can match
+	// the impersonated identity on per-member cap enforcement.
+	if opts.CreatorEmail != "" {
+		annotations := tc.GetAnnotations()
+		if annotations == nil {
+			annotations = map[string]string{}
+		}
+		annotations[CreatorEmailAnnotation] = opts.CreatorEmail
+		tc.SetAnnotations(annotations)
 	}
 
 	// Build machineTemplate
