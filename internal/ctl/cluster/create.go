@@ -91,6 +91,9 @@ type CreateOptions struct {
 	CPSchedulerCPULim string
 	CPSchedulerMemLim string
 
+	// Environment label (ADR-009 Team Environments)
+	Environment string
+
 	// Behavior flags
 	Wait    bool
 	Timeout time.Duration
@@ -290,6 +293,9 @@ Examples:
 	// Namespace
 	cmd.Flags().StringVarP(&opts.Namespace, "namespace", "n", opts.Namespace, "Namespace for the TenantCluster")
 
+	// Environment (ADR-009)
+	cmd.Flags().StringVar(&opts.Environment, "environment", "", "Team environment to associate the cluster with (sets butler.butlerlabs.dev/environment label)")
+
 	// Behavior
 	cmd.Flags().BoolVar(&opts.Wait, "wait", false, "Wait for cluster to reach Ready status")
 	cmd.Flags().DurationVar(&opts.Timeout, "timeout", opts.Timeout, "Timeout when using --wait")
@@ -468,6 +474,16 @@ func buildTenantCluster(opts *CreateOptions) *unstructured.Unstructured {
 	tc.SetName(opts.Name)
 	tc.SetNamespace(opts.Namespace)
 
+	// Environment label (ADR-009 Team Environments).
+	if opts.Environment != "" {
+		labels := tc.GetLabels()
+		if labels == nil {
+			labels = map[string]string{}
+		}
+		labels[EnvironmentLabel] = opts.Environment
+		tc.SetLabels(labels)
+	}
+
 	// Build machineTemplate
 	machineTemplate := map[string]interface{}{
 		"cpu":      int64(opts.CPU),
@@ -577,6 +593,9 @@ func buildCPComponentResources(cpuReq, memReq, cpuLim, memLim string) map[string
 func printCreationSummary(opts *CreateOptions) {
 	fmt.Fprintf(opts.Output, "\nCreating TenantCluster %s:\n", output.ColorizePhase(opts.Name))
 	fmt.Fprintf(opts.Output, "  Provider:    %s\n", opts.Provider)
+	if opts.Environment != "" {
+		fmt.Fprintf(opts.Output, "  Environment: %s\n", opts.Environment)
+	}
 	fmt.Fprintf(opts.Output, "  Kubernetes:  %s\n", opts.KubernetesVersion)
 	fmt.Fprintf(opts.Output, "  Workers:     %d × (%d CPU, %s RAM, %s disk)\n",
 		opts.Workers, opts.CPU, formatMemory(opts.MemoryMB), formatDisk(opts.DiskGB))

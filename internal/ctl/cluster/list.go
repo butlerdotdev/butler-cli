@@ -37,6 +37,7 @@ type listOptions struct {
 	outputFormat string
 	kubeconfig   string
 	kubeContext  string
+	environment  string
 }
 
 // newListCmd creates the cluster list command
@@ -66,7 +67,10 @@ Examples:
   butlerctl cluster list -o wide
 
   # Output as JSON
-  butlerctl cluster list -o json`,
+  butlerctl cluster list -o json
+
+  # Filter clusters by team environment
+  butlerctl cluster list --environment staging`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			opts.kubeContext, _ = cmd.Flags().GetString("context")
 			return runList(cmd.Context(), logger, opts)
@@ -76,6 +80,7 @@ Examples:
 	AddNamespaceFlags(cmd, &opts.nsFlags)
 	cmd.Flags().StringVarP(&opts.outputFormat, "output", "o", "table", "output format (table, wide, json, yaml)")
 	cmd.Flags().StringVar(&opts.kubeconfig, "kubeconfig", "", "path to kubeconfig file")
+	cmd.Flags().StringVar(&opts.environment, "environment", "", "filter clusters by team environment label")
 
 	return cmd
 }
@@ -97,18 +102,23 @@ func runList(ctx context.Context, logger *log.Logger, opts *listOptions) error {
 	namespace, allNamespaces := opts.nsFlags.ResolveNamespace()
 
 	// List TenantClusters
+	listOpts := metav1.ListOptions{}
+	if opts.environment != "" {
+		listOpts.LabelSelector = fmt.Sprintf("%s=%s", EnvironmentLabel, opts.environment)
+	}
+
 	var clusters []unstructured.Unstructured
 
 	if allNamespaces {
 		// List across all namespaces
-		list, err := c.Dynamic.Resource(client.TenantClusterGVR).List(ctx, metav1.ListOptions{})
+		list, err := c.Dynamic.Resource(client.TenantClusterGVR).List(ctx, listOpts)
 		if err != nil {
 			return fmt.Errorf("listing TenantClusters: %w", err)
 		}
 		clusters = list.Items
 	} else {
 		// List in specific namespace
-		list, err := c.Dynamic.Resource(client.TenantClusterGVR).Namespace(namespace).List(ctx, metav1.ListOptions{})
+		list, err := c.Dynamic.Resource(client.TenantClusterGVR).Namespace(namespace).List(ctx, listOpts)
 		if err != nil {
 			return fmt.Errorf("listing TenantClusters in namespace %s: %w", namespace, err)
 		}
@@ -154,24 +164,44 @@ func runList(ctx context.Context, logger *log.Logger, opts *listOptions) error {
 				"tenantNamespace": info.TenantNamespace,
 				"providerConfig":  info.ProviderConfig,
 				"creationTime":    info.CreationTime,
+				"environment":     info.Environment,
 			}
 		}
 		return printer.Print(outputData, nil)
 	}
 
+	// Show the ENV column whenever at least one cluster in the result set has
+	// an environment label, or the user asked to filter by environment.
+	showEnv := opts.environment != "" || anyHasEnvironment(infos)
+
 	// Table output
 	return printer.Print(nil, func(w io.Writer) error {
-		return printClusterTable(w, infos, format == output.FormatWide, allNamespaces)
+		return printClusterTable(w, infos, format == output.FormatWide, allNamespaces, showEnv)
 	})
 }
 
-func printClusterTable(w io.Writer, clusters []TenantClusterInfo, wide, showNamespace bool) error {
+// anyHasEnvironment reports whether any cluster in the slice carries a
+// non-empty environment label.
+func anyHasEnvironment(infos []TenantClusterInfo) bool {
+	for _, info := range infos {
+		if info.Environment != "" {
+			return true
+		}
+	}
+	return false
+}
+
+func printClusterTable(w io.Writer, clusters []TenantClusterInfo, wide, showNamespace, showEnv bool) error {
 	// Build headers based on options
 	headers := []string{"NAME"}
 	if showNamespace {
 		headers = append(headers, "NAMESPACE")
 	}
-	headers = append(headers, "PHASE", "K8S VERSION", "WORKERS", "AGE")
+	headers = append(headers, "PHASE", "K8S VERSION", "WORKERS")
+	if showEnv {
+		headers = append(headers, "ENV")
+	}
+	headers = append(headers, "AGE")
 	if wide {
 		headers = append(headers, "ENDPOINT", "PROVIDER")
 	}
@@ -207,7 +237,15 @@ func printClusterTable(w io.Writer, clusters []TenantClusterInfo, wide, showName
 		if showNamespace {
 			row = append(row, tc.Namespace)
 		}
-		row = append(row, phase, tc.KubernetesVersion, workers, age)
+		row = append(row, phase, tc.KubernetesVersion, workers)
+		if showEnv {
+			env := tc.Environment
+			if env == "" {
+				env = "-"
+			}
+			row = append(row, env)
+		}
+		row = append(row, age)
 		if wide {
 			endpoint := tc.Endpoint
 			if endpoint == "" {

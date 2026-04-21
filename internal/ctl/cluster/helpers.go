@@ -39,6 +39,9 @@ const (
 
 	// EnvButlerNamespace allows overriding the default namespace via environment
 	EnvButlerNamespace = "BUTLER_NAMESPACE"
+
+	// EnvironmentLabel is the label key for ADR-009 Team Environments membership.
+	EnvironmentLabel = "butler.butlerlabs.dev/environment"
 )
 
 // NamespaceFlags holds namespace-related flag values
@@ -86,6 +89,7 @@ type TenantClusterInfo struct {
 	TenantNamespace   string
 	ProviderConfig    string
 	CreationTime      string
+	Environment       string
 }
 
 // ExtractTenantClusterInfo extracts display information from an unstructured TenantCluster
@@ -112,6 +116,7 @@ func ExtractTenantClusterInfo(tc *unstructured.Unstructured) TenantClusterInfo {
 		TenantNamespace:   client.GetNestedString(obj, "status", "tenantNamespace"),
 		ProviderConfig:    client.GetNestedString(obj, "spec", "providerConfigRef", "name"),
 		CreationTime:      tc.GetCreationTimestamp().UTC().Format(time.RFC3339),
+		Environment:       tc.GetLabels()[EnvironmentLabel],
 	}
 }
 
