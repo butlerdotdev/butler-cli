@@ -220,6 +220,77 @@ func TestParseClusterDefaults(t *testing.T) {
 	}
 }
 
+func TestParseAccessUsers(t *testing.T) {
+	got, err := parseAccessUsers([]string{
+		"alice@example.com:admin",
+		"bob@example.com:operator",
+		"carol@example.com:viewer",
+	})
+	if err != nil {
+		t.Fatalf("parseAccessUsers returned error: %v", err)
+	}
+	if len(got) != 3 {
+		t.Fatalf("expected 3 users, got %d", len(got))
+	}
+	first := got[0].(map[string]interface{})
+	if first["name"] != "alice@example.com" || first["role"] != "admin" {
+		t.Errorf("first user = %v, want alice/admin", first)
+	}
+
+	bad := [][]string{
+		{"no-colon"},
+		{":admin"},                          // missing email
+		{"alice@example.com:"},              // empty role in create
+		{"alice@example.com:superadmin"},    // invalid role
+		{"alice@example.com:admin", "alice@example.com:viewer"}, // duplicate
+	}
+	for _, pairs := range bad {
+		if _, err := parseAccessUsers(pairs); err == nil {
+			t.Errorf("parseAccessUsers(%v) returned nil error, expected failure", pairs)
+		}
+	}
+}
+
+func TestMergeAccessUserPatches(t *testing.T) {
+	existing := []interface{}{
+		map[string]interface{}{"name": "alice@example.com", "role": "admin"},
+		map[string]interface{}{"name": "bob@example.com", "role": "viewer"},
+	}
+
+	// Overwrite alice's role, remove bob, add carol.
+	merged, err := mergeAccessUserPatches(existing, []string{
+		"alice@example.com:operator",
+		"bob@example.com:",
+		"carol@example.com:viewer",
+	})
+	if err != nil {
+		t.Fatalf("mergeAccessUserPatches returned error: %v", err)
+	}
+	if len(merged) != 2 {
+		t.Fatalf("expected 2 users, got %d (%v)", len(merged), merged)
+	}
+
+	roleByEmail := map[string]string{}
+	for _, e := range merged {
+		m := e.(map[string]interface{})
+		roleByEmail[m["name"].(string)] = m["role"].(string)
+	}
+	if roleByEmail["alice@example.com"] != "operator" {
+		t.Errorf("alice role = %q, want operator", roleByEmail["alice@example.com"])
+	}
+	if _, stillThere := roleByEmail["bob@example.com"]; stillThere {
+		t.Errorf("bob should have been removed, got %v", roleByEmail)
+	}
+	if roleByEmail["carol@example.com"] != "viewer" {
+		t.Errorf("carol role = %q, want viewer", roleByEmail["carol@example.com"])
+	}
+
+	// Invalid role still rejected on merge.
+	if _, err := mergeAccessUserPatches(nil, []string{"x@y.com:bogus"}); err == nil {
+		t.Errorf("merge with invalid role returned nil error, expected failure")
+	}
+}
+
 func TestMergeClusterDefaultPatches(t *testing.T) {
 	existing := map[string]interface{}{
 		"kubernetesVersion": "v1.30.0",
