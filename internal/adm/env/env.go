@@ -109,6 +109,7 @@ func newCreateCmd(logger *log.Logger) *cobra.Command {
 		team                 string
 		maxClusters          int32
 		maxClustersPerMember int32
+		description          string
 		kubeconfig           string
 	)
 
@@ -124,24 +125,26 @@ MaxClustersPerMember to bound usage inside the environment.
 Examples:
   butleradm env create staging --team payments
   butleradm env create sandbox --team payments --max-clusters-per-member 1
-  butleradm env create prod --team payments --max-clusters 10`,
+  butleradm env create prod --team payments --max-clusters 10
+  butleradm env create prod --team payments --description "production workloads"`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			kubeContext, _ := cmd.Flags().GetString("context")
-			return runCreate(cmd.Context(), logger, args[0], team, maxClusters, maxClustersPerMember, kubeconfig, kubeContext)
+			return runCreate(cmd.Context(), logger, args[0], team, description, maxClusters, maxClustersPerMember, kubeconfig, kubeContext)
 		},
 	}
 
 	cmd.Flags().StringVar(&team, "team", "", "team name (required)")
 	cmd.Flags().Int32Var(&maxClusters, "max-clusters", 0, "max TenantClusters in this environment (0 = no cap)")
 	cmd.Flags().Int32Var(&maxClustersPerMember, "max-clusters-per-member", 0, "max TenantClusters per member in this environment (0 = no cap)")
+	cmd.Flags().StringVar(&description, "description", "", "human-readable description for this environment")
 	cmd.Flags().StringVar(&kubeconfig, "kubeconfig", "", "path to management cluster kubeconfig")
 	_ = cmd.MarkFlagRequired("team")
 
 	return cmd
 }
 
-func runCreate(ctx context.Context, logger *log.Logger, name, team string, maxClusters, maxClustersPerMember int32, kubeconfigPath, kubeContext string) error {
+func runCreate(ctx context.Context, logger *log.Logger, name, team, description string, maxClusters, maxClustersPerMember int32, kubeconfigPath, kubeContext string) error {
 	if err := validateEnvName(name); err != nil {
 		return err
 	}
@@ -165,6 +168,9 @@ func runCreate(ctx context.Context, logger *log.Logger, name, team string, maxCl
 
 	entry := map[string]interface{}{
 		"name": name,
+	}
+	if description != "" {
+		entry["description"] = description
 	}
 	limits := map[string]interface{}{}
 	if maxClusters > 0 {
@@ -199,6 +205,7 @@ type updateOptions struct {
 	maxClusters          int32
 	maxClustersPerMember int32
 	clearLimits          bool
+	description          string
 	kubeconfig           string
 	kubeContext          string
 }
@@ -219,7 +226,8 @@ single call.
 Examples:
   butleradm env update staging --team payments --max-clusters 10
   butleradm env update sandbox --team payments --max-clusters-per-member 2
-  butleradm env update prod --team payments --clear-limits`,
+  butleradm env update prod --team payments --clear-limits
+  butleradm env update prod --team payments --description "production workloads"`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			opts.name = args[0]
@@ -232,6 +240,7 @@ Examples:
 	cmd.Flags().Int32Var(&opts.maxClusters, "max-clusters", 0, "max TenantClusters in this environment (0 = no cap)")
 	cmd.Flags().Int32Var(&opts.maxClustersPerMember, "max-clusters-per-member", 0, "max TenantClusters per member in this environment (0 = no cap)")
 	cmd.Flags().BoolVar(&opts.clearLimits, "clear-limits", false, "drop MaxClusters and MaxClustersPerMember on this environment")
+	cmd.Flags().StringVar(&opts.description, "description", "", "human-readable description for this environment (pass empty string to clear)")
 	cmd.Flags().StringVar(&opts.kubeconfig, "kubeconfig", "", "path to management cluster kubeconfig")
 	_ = cmd.MarkFlagRequired("team")
 
@@ -274,6 +283,18 @@ func runUpdate(ctx context.Context, logger *log.Logger, cmd *cobra.Command, opts
 	// call and give operators a clear error when they pass no patch flags.
 	changed := false
 
+	if cmd.Flags().Changed("description") {
+		if opts.description == "" {
+			if _, hadDesc := entry["description"]; hadDesc {
+				delete(entry, "description")
+				changed = true
+			}
+		} else {
+			entry["description"] = opts.description
+			changed = true
+		}
+	}
+
 	if opts.clearLimits {
 		if _, hasLimits := entry["limits"]; hasLimits {
 			delete(entry, "limits")
@@ -308,7 +329,7 @@ func runUpdate(ctx context.Context, logger *log.Logger, cmd *cobra.Command, opts
 	}
 
 	if !changed {
-		return fmt.Errorf("nothing to update: pass --max-clusters, --max-clusters-per-member, or --clear-limits")
+		return fmt.Errorf("nothing to update: pass --description, --max-clusters, --max-clusters-per-member, or --clear-limits")
 	}
 
 	envs[idx] = entry
