@@ -144,12 +144,7 @@ func runMigrate(ctx context.Context, logger *log.Logger, opts *migrateOptions) e
 
 	for _, t := range targets {
 		item := tcList.Items[t.Index]
-		labels := item.GetLabels()
-		if labels == nil {
-			labels = map[string]string{}
-		}
-		labels[EnvironmentLabel] = opts.environment
-		item.SetLabels(labels)
+		applyMigrationMutation(&item, opts.environment)
 
 		if _, err := c.Dynamic.Resource(client.TenantClusterGVR).Namespace(ns).Update(ctx, &item, metav1.UpdateOptions{}); err != nil {
 			return fmt.Errorf("updating TenantCluster %s: %w", item.GetName(), err)
@@ -158,6 +153,27 @@ func runMigrate(ctx context.Context, logger *log.Logger, opts *migrateOptions) e
 	}
 
 	return nil
+}
+
+// applyMigrationMutation stamps the env label and the migration-operation
+// annotation on a TenantCluster prior to Update. The annotation is what the
+// controller admission webhook requires for env-label changes (ADR-009
+// phased migration); without it the update is rejected. Existing labels and
+// annotations are preserved.
+func applyMigrationMutation(item *unstructured.Unstructured, env string) {
+	labels := item.GetLabels()
+	if labels == nil {
+		labels = map[string]string{}
+	}
+	labels[EnvironmentLabel] = env
+	item.SetLabels(labels)
+
+	annotations := item.GetAnnotations()
+	if annotations == nil {
+		annotations = map[string]string{}
+	}
+	annotations[MigrationOperationAnnotation] = "true"
+	item.SetAnnotations(annotations)
 }
 
 // MigrationTarget records a single rename that SelectMigrationTargets chose.

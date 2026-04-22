@@ -163,6 +163,44 @@ func TestSelectMigrationTargets_NoFlagsReturnsEmpty(t *testing.T) {
 	}
 }
 
+func TestApplyMigrationMutation_SetsLabelAndAnnotation(t *testing.T) {
+	item := makeTC("alpha", "")
+	applyMigrationMutation(&item, "prod")
+
+	if got := item.GetLabels()[EnvironmentLabel]; got != "prod" {
+		t.Errorf("env label = %q, want prod", got)
+	}
+	if got := item.GetAnnotations()[MigrationOperationAnnotation]; got != "true" {
+		t.Errorf("migration-operation annotation = %q, want \"true\"", got)
+	}
+}
+
+func TestApplyMigrationMutation_PreservesExistingMetadata(t *testing.T) {
+	item := makeTC("alpha", "staging")
+	item.SetAnnotations(map[string]string{"custom.example.com/foo": "bar"})
+	existingLabels := item.GetLabels()
+	existingLabels["app.kubernetes.io/managed-by"] = "butler"
+	item.SetLabels(existingLabels)
+
+	applyMigrationMutation(&item, "prod")
+
+	labels := item.GetLabels()
+	if got := labels["app.kubernetes.io/managed-by"]; got != "butler" {
+		t.Errorf("existing label clobbered: got %q, want butler", got)
+	}
+	if got := labels[EnvironmentLabel]; got != "prod" {
+		t.Errorf("env label after relabel = %q, want prod", got)
+	}
+
+	annotations := item.GetAnnotations()
+	if got := annotations["custom.example.com/foo"]; got != "bar" {
+		t.Errorf("existing annotation clobbered: got %q, want bar", got)
+	}
+	if got := annotations[MigrationOperationAnnotation]; got != "true" {
+		t.Errorf("migration-operation annotation = %q, want \"true\"", got)
+	}
+}
+
 func TestValidateEnvName(t *testing.T) {
 	ok := []string{"staging", "prod", "env-1", "a", "A", "dev.1", "user_sandbox"}
 	for _, name := range ok {

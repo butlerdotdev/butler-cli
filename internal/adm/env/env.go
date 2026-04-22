@@ -43,6 +43,13 @@ import (
 // webhook.
 const EnvironmentLabel = "butler.butlerlabs.dev/environment"
 
+// MigrationOperationAnnotation opts a TenantCluster update into env-label
+// mutation. The controller admission webhook requires this annotation set
+// to "true" for any update that changes EnvironmentLabel; without it the
+// update is rejected as an attempt at direct label editing. Must stay in
+// sync with butler-api's AnnotationMigrationOperation constant.
+const MigrationOperationAnnotation = "butler.butlerlabs.dev/migration-operation"
+
 // NewEnvCmd creates the env parent command for butleradm.
 func NewEnvCmd(logger *log.Logger) *cobra.Command {
 	cmd := &cobra.Command{
