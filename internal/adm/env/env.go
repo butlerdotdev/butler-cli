@@ -56,6 +56,7 @@ butler.butlerlabs.dev/environment label.
 
 Examples:
   butleradm env create staging --team payments --max-clusters 5
+  butleradm env update staging --team payments --max-clusters 10
   butleradm env list --team payments
   butleradm env delete staging --team payments
   butleradm env migrate --team payments --environment staging --all`,
@@ -65,6 +66,7 @@ Examples:
 	}
 
 	cmd.AddCommand(newCreateCmd(logger))
+	cmd.AddCommand(newUpdateCmd(logger))
 	cmd.AddCommand(newListCmd(logger))
 	cmd.AddCommand(newDeleteCmd(logger))
 	cmd.AddCommand(newMigrateCmd(logger))
@@ -185,6 +187,140 @@ func runCreate(ctx context.Context, logger *log.Logger, name, team string, maxCl
 	}
 
 	logger.Success("environment created", "team", team, "environment", name)
+	return nil
+}
+
+// updateOptions holds inputs to the env update subcommand. Parity with
+// migrateOptions and the server's PUT /api/teams/{name}/environments
+// body: name is immutable, everything else is a partial patch.
+type updateOptions struct {
+	team                 string
+	name                 string
+	maxClusters          int32
+	maxClustersPerMember int32
+	clearLimits          bool
+	kubeconfig           string
+	kubeContext          string
+}
+
+func newUpdateCmd(logger *log.Logger) *cobra.Command {
+	opts := &updateOptions{}
+
+	cmd := &cobra.Command{
+		Use:   "update NAME",
+		Short: "Update an existing environment on a team",
+		Long: `Update fields on an existing environment in the Team's spec.environments list.
+
+The environment name is immutable and identifies which entry to patch.
+Flags that are not set leave the corresponding field unchanged. Pass
+--clear-limits to drop both MaxClusters and MaxClustersPerMember in a
+single call.
+
+Examples:
+  butleradm env update staging --team payments --max-clusters 10
+  butleradm env update sandbox --team payments --max-clusters-per-member 2
+  butleradm env update prod --team payments --clear-limits`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			opts.name = args[0]
+			opts.kubeContext, _ = cmd.Flags().GetString("context")
+			return runUpdate(cmd.Context(), logger, cmd, opts)
+		},
+	}
+
+	cmd.Flags().StringVar(&opts.team, "team", "", "team name (required)")
+	cmd.Flags().Int32Var(&opts.maxClusters, "max-clusters", 0, "max TenantClusters in this environment (0 = no cap)")
+	cmd.Flags().Int32Var(&opts.maxClustersPerMember, "max-clusters-per-member", 0, "max TenantClusters per member in this environment (0 = no cap)")
+	cmd.Flags().BoolVar(&opts.clearLimits, "clear-limits", false, "drop MaxClusters and MaxClustersPerMember on this environment")
+	cmd.Flags().StringVar(&opts.kubeconfig, "kubeconfig", "", "path to management cluster kubeconfig")
+	_ = cmd.MarkFlagRequired("team")
+
+	return cmd
+}
+
+func runUpdate(ctx context.Context, logger *log.Logger, cmd *cobra.Command, opts *updateOptions) error {
+	if err := validateEnvName(opts.name); err != nil {
+		return err
+	}
+
+	c, err := client.New(opts.kubeconfig, opts.kubeContext)
+	if err != nil {
+		return fmt.Errorf("connecting to management cluster: %w", err)
+	}
+
+	tm, err := fetchTeam(ctx, c, opts.team)
+	if err != nil {
+		return err
+	}
+
+	envs := envEntries(tm)
+	idx := -1
+	for i, e := range envs {
+		if envName(e) == opts.name {
+			idx = i
+			break
+		}
+	}
+	if idx < 0 {
+		return fmt.Errorf("environment %q not found on team %s", opts.name, opts.team)
+	}
+
+	entry, ok := envs[idx].(map[string]interface{})
+	if !ok {
+		return fmt.Errorf("environment %q has unexpected shape in team %s", opts.name, opts.team)
+	}
+
+	// Track whether anything changed so we can short-circuit the Update
+	// call and give operators a clear error when they pass no patch flags.
+	changed := false
+
+	if opts.clearLimits {
+		if _, hasLimits := entry["limits"]; hasLimits {
+			delete(entry, "limits")
+			changed = true
+		}
+	} else if cmd.Flags().Changed("max-clusters") || cmd.Flags().Changed("max-clusters-per-member") {
+		limits, _ := entry["limits"].(map[string]interface{})
+		if limits == nil {
+			limits = map[string]interface{}{}
+		}
+		if cmd.Flags().Changed("max-clusters") {
+			if opts.maxClusters > 0 {
+				limits["maxClusters"] = int64(opts.maxClusters)
+			} else {
+				delete(limits, "maxClusters")
+			}
+			changed = true
+		}
+		if cmd.Flags().Changed("max-clusters-per-member") {
+			if opts.maxClustersPerMember > 0 {
+				limits["maxClustersPerMember"] = int64(opts.maxClustersPerMember)
+			} else {
+				delete(limits, "maxClustersPerMember")
+			}
+			changed = true
+		}
+		if len(limits) == 0 {
+			delete(entry, "limits")
+		} else {
+			entry["limits"] = limits
+		}
+	}
+
+	if !changed {
+		return fmt.Errorf("nothing to update: pass --max-clusters, --max-clusters-per-member, or --clear-limits")
+	}
+
+	envs[idx] = entry
+	if err := unstructured.SetNestedSlice(tm.Object, envs, "spec", "environments"); err != nil {
+		return fmt.Errorf("setting spec.environments: %w", err)
+	}
+
+	if _, err := c.Dynamic.Resource(client.TeamGVR).Update(ctx, tm, metav1.UpdateOptions{}); err != nil {
+		return fmt.Errorf("updating Team %s: %w", opts.team, err)
+	}
+
+	logger.Success("environment updated", "team", opts.team, "environment", opts.name)
 	return nil
 }
 
