@@ -178,3 +178,75 @@ func TestValidateEnvName(t *testing.T) {
 		}
 	}
 }
+
+func TestParseClusterDefaults(t *testing.T) {
+	got, err := parseClusterDefaults([]string{
+		"kubernetesVersion=v1.31.0",
+		"workerCount=3",
+		"workerCPU=4",
+		"workerMemoryGi=16",
+		"workerDiskGi=100",
+	})
+	if err != nil {
+		t.Fatalf("parseClusterDefaults returned error: %v", err)
+	}
+	if got["kubernetesVersion"] != "v1.31.0" {
+		t.Errorf("kubernetesVersion = %v, want v1.31.0", got["kubernetesVersion"])
+	}
+	if got["workerCount"] != int64(3) {
+		t.Errorf("workerCount = %v (%T), want int64(3)", got["workerCount"], got["workerCount"])
+	}
+	if got["workerCPU"] != int64(4) {
+		t.Errorf("workerCPU = %v, want int64(4)", got["workerCPU"])
+	}
+	if got["workerMemoryGi"] != int64(16) {
+		t.Errorf("workerMemoryGi = %v, want int64(16)", got["workerMemoryGi"])
+	}
+	if got["workerDiskGi"] != int64(100) {
+		t.Errorf("workerDiskGi = %v, want int64(100)", got["workerDiskGi"])
+	}
+
+	bad := [][]string{
+		{"unknownKey=foo"},           // unknown key
+		{"workerCount=notanumber"},   // non-integer numeric
+		{"=v1.31.0"},                 // missing key
+		{"kubernetesVersion"},        // missing '='
+		{"kubernetesVersion="},       // empty value in create semantics
+	}
+	for _, pairs := range bad {
+		if _, err := parseClusterDefaults(pairs); err == nil {
+			t.Errorf("parseClusterDefaults(%v) returned nil error, expected failure", pairs)
+		}
+	}
+}
+
+func TestMergeClusterDefaultPatches(t *testing.T) {
+	existing := map[string]interface{}{
+		"kubernetesVersion": "v1.30.0",
+		"workerCount":       int64(2),
+	}
+
+	// Mixed: overwrite one key, clear another, set a new one.
+	merged, err := mergeClusterDefaultPatches(existing, []string{
+		"kubernetesVersion=v1.31.0",
+		"workerCount=",
+		"workerCPU=8",
+	})
+	if err != nil {
+		t.Fatalf("mergeClusterDefaultPatches returned error: %v", err)
+	}
+	if merged["kubernetesVersion"] != "v1.31.0" {
+		t.Errorf("kubernetesVersion = %v, want v1.31.0", merged["kubernetesVersion"])
+	}
+	if _, still := merged["workerCount"]; still {
+		t.Errorf("workerCount should have been cleared; merged = %v", merged)
+	}
+	if merged["workerCPU"] != int64(8) {
+		t.Errorf("workerCPU = %v, want int64(8)", merged["workerCPU"])
+	}
+
+	// Unknown key still rejected on update merge.
+	if _, err := mergeClusterDefaultPatches(nil, []string{"unknown=x"}); err == nil {
+		t.Errorf("merge with unknown key returned nil error, expected failure")
+	}
+}

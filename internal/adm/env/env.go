@@ -26,6 +26,7 @@ import (
 	"fmt"
 	"os"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/butlerdotdev/butler/internal/common/auth"
@@ -104,14 +105,22 @@ func envName(entry interface{}) string {
 	return name
 }
 
+// createOptions holds inputs to the env create subcommand. Mirrors
+// updateOptions so both commands evolve together as ADR-009
+// EnvironmentSpec fields grow.
+type createOptions struct {
+	team                 string
+	name                 string
+	maxClusters          int32
+	maxClustersPerMember int32
+	description          string
+	clusterDefaults      []string
+	kubeconfig           string
+	kubeContext          string
+}
+
 func newCreateCmd(logger *log.Logger) *cobra.Command {
-	var (
-		team                 string
-		maxClusters          int32
-		maxClustersPerMember int32
-		description          string
-		kubeconfig           string
-	)
+	opts := &createOptions{}
 
 	cmd := &cobra.Command{
 		Use:   "create NAME",
@@ -126,61 +135,72 @@ Examples:
   butleradm env create staging --team payments
   butleradm env create sandbox --team payments --max-clusters-per-member 1
   butleradm env create prod --team payments --max-clusters 10
-  butleradm env create prod --team payments --description "production workloads"`,
+  butleradm env create prod --team payments --description "production workloads"
+  butleradm env create prod --team payments --cluster-default kubernetesVersion=v1.31.0 --cluster-default workerCount=3`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			kubeContext, _ := cmd.Flags().GetString("context")
-			return runCreate(cmd.Context(), logger, args[0], team, description, maxClusters, maxClustersPerMember, kubeconfig, kubeContext)
+			opts.name = args[0]
+			opts.kubeContext, _ = cmd.Flags().GetString("context")
+			return runCreate(cmd.Context(), logger, opts)
 		},
 	}
 
-	cmd.Flags().StringVar(&team, "team", "", "team name (required)")
-	cmd.Flags().Int32Var(&maxClusters, "max-clusters", 0, "max TenantClusters in this environment (0 = no cap)")
-	cmd.Flags().Int32Var(&maxClustersPerMember, "max-clusters-per-member", 0, "max TenantClusters per member in this environment (0 = no cap)")
-	cmd.Flags().StringVar(&description, "description", "", "human-readable description for this environment")
-	cmd.Flags().StringVar(&kubeconfig, "kubeconfig", "", "path to management cluster kubeconfig")
+	cmd.Flags().StringVar(&opts.team, "team", "", "team name (required)")
+	cmd.Flags().Int32Var(&opts.maxClusters, "max-clusters", 0, "max TenantClusters in this environment (0 = no cap)")
+	cmd.Flags().Int32Var(&opts.maxClustersPerMember, "max-clusters-per-member", 0, "max TenantClusters per member in this environment (0 = no cap)")
+	cmd.Flags().StringVar(&opts.description, "description", "", "human-readable description for this environment")
+	cmd.Flags().StringArrayVar(&opts.clusterDefaults, "cluster-default", nil, "env-level cluster default, key=value (repeatable). Keys: kubernetesVersion, workerCount, workerCPU, workerMemoryGi, workerDiskGi")
+	cmd.Flags().StringVar(&opts.kubeconfig, "kubeconfig", "", "path to management cluster kubeconfig")
 	_ = cmd.MarkFlagRequired("team")
 
 	return cmd
 }
 
-func runCreate(ctx context.Context, logger *log.Logger, name, team, description string, maxClusters, maxClustersPerMember int32, kubeconfigPath, kubeContext string) error {
-	if err := validateEnvName(name); err != nil {
+func runCreate(ctx context.Context, logger *log.Logger, opts *createOptions) error {
+	if err := validateEnvName(opts.name); err != nil {
 		return err
 	}
 
-	c, err := client.New(kubeconfigPath, kubeContext)
+	defaults, err := parseClusterDefaults(opts.clusterDefaults)
+	if err != nil {
+		return err
+	}
+
+	c, err := client.New(opts.kubeconfig, opts.kubeContext)
 	if err != nil {
 		return fmt.Errorf("connecting to management cluster: %w", err)
 	}
 
-	tm, err := fetchTeam(ctx, c, team)
+	tm, err := fetchTeam(ctx, c, opts.team)
 	if err != nil {
 		return err
 	}
 
 	envs := envEntries(tm)
 	for _, e := range envs {
-		if envName(e) == name {
-			return fmt.Errorf("environment %q already exists on team %s", name, team)
+		if envName(e) == opts.name {
+			return fmt.Errorf("environment %q already exists on team %s", opts.name, opts.team)
 		}
 	}
 
 	entry := map[string]interface{}{
-		"name": name,
+		"name": opts.name,
 	}
-	if description != "" {
-		entry["description"] = description
+	if opts.description != "" {
+		entry["description"] = opts.description
 	}
 	limits := map[string]interface{}{}
-	if maxClusters > 0 {
-		limits["maxClusters"] = int64(maxClusters)
+	if opts.maxClusters > 0 {
+		limits["maxClusters"] = int64(opts.maxClusters)
 	}
-	if maxClustersPerMember > 0 {
-		limits["maxClustersPerMember"] = int64(maxClustersPerMember)
+	if opts.maxClustersPerMember > 0 {
+		limits["maxClustersPerMember"] = int64(opts.maxClustersPerMember)
 	}
 	if len(limits) > 0 {
 		entry["limits"] = limits
+	}
+	if len(defaults) > 0 {
+		entry["clusterDefaults"] = defaults
 	}
 	envs = append(envs, entry)
 
@@ -189,10 +209,10 @@ func runCreate(ctx context.Context, logger *log.Logger, name, team, description 
 	}
 
 	if _, err := c.Dynamic.Resource(client.TeamGVR).Update(ctx, tm, metav1.UpdateOptions{}); err != nil {
-		return fmt.Errorf("updating Team %s: %w", team, err)
+		return fmt.Errorf("updating Team %s: %w", opts.team, err)
 	}
 
-	logger.Success("environment created", "team", team, "environment", name)
+	logger.Success("environment created", "team", opts.team, "environment", opts.name)
 	return nil
 }
 
@@ -206,6 +226,8 @@ type updateOptions struct {
 	maxClustersPerMember int32
 	clearLimits          bool
 	description          string
+	clusterDefaults      []string
+	clearClusterDefaults bool
 	kubeconfig           string
 	kubeContext          string
 }
@@ -227,7 +249,10 @@ Examples:
   butleradm env update staging --team payments --max-clusters 10
   butleradm env update sandbox --team payments --max-clusters-per-member 2
   butleradm env update prod --team payments --clear-limits
-  butleradm env update prod --team payments --description "production workloads"`,
+  butleradm env update prod --team payments --description "production workloads"
+  butleradm env update prod --team payments --cluster-default kubernetesVersion=v1.31.0
+  butleradm env update prod --team payments --cluster-default workerCount= (clears one key)
+  butleradm env update prod --team payments --clear-cluster-defaults`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			opts.name = args[0]
@@ -241,6 +266,8 @@ Examples:
 	cmd.Flags().Int32Var(&opts.maxClustersPerMember, "max-clusters-per-member", 0, "max TenantClusters per member in this environment (0 = no cap)")
 	cmd.Flags().BoolVar(&opts.clearLimits, "clear-limits", false, "drop MaxClusters and MaxClustersPerMember on this environment")
 	cmd.Flags().StringVar(&opts.description, "description", "", "human-readable description for this environment (pass empty string to clear)")
+	cmd.Flags().StringArrayVar(&opts.clusterDefaults, "cluster-default", nil, "env-level cluster default, key=value (repeatable). Empty value clears that key. Keys: kubernetesVersion, workerCount, workerCPU, workerMemoryGi, workerDiskGi")
+	cmd.Flags().BoolVar(&opts.clearClusterDefaults, "clear-cluster-defaults", false, "drop the entire clusterDefaults block on this environment")
 	cmd.Flags().StringVar(&opts.kubeconfig, "kubeconfig", "", "path to management cluster kubeconfig")
 	_ = cmd.MarkFlagRequired("team")
 
@@ -328,8 +355,27 @@ func runUpdate(ctx context.Context, logger *log.Logger, cmd *cobra.Command, opts
 		}
 	}
 
+	if opts.clearClusterDefaults {
+		if _, had := entry["clusterDefaults"]; had {
+			delete(entry, "clusterDefaults")
+			changed = true
+		}
+	} else if len(opts.clusterDefaults) > 0 {
+		existing, _ := entry["clusterDefaults"].(map[string]interface{})
+		merged, err := mergeClusterDefaultPatches(existing, opts.clusterDefaults)
+		if err != nil {
+			return err
+		}
+		if len(merged) == 0 {
+			delete(entry, "clusterDefaults")
+		} else {
+			entry["clusterDefaults"] = merged
+		}
+		changed = true
+	}
+
 	if !changed {
-		return fmt.Errorf("nothing to update: pass --description, --max-clusters, --max-clusters-per-member, or --clear-limits")
+		return fmt.Errorf("nothing to update: pass --description, --max-clusters, --max-clusters-per-member, --clear-limits, --cluster-default, or --clear-cluster-defaults")
 	}
 
 	envs[idx] = entry
@@ -549,6 +595,104 @@ func confirmDelete(name, team string) error {
 		return fmt.Errorf("deletion cancelled: you typed %q, expected %q", input, name)
 	}
 	return nil
+}
+
+// clusterDefaultNumericKeys are ClusterDefaults fields with int32 types
+// in butler-api's Team CRD. parseClusterDefaultValue coerces them to
+// int64 so SetNestedSlice accepts the unstructured shape.
+var clusterDefaultNumericKeys = map[string]struct{}{
+	"workerCount":    {},
+	"workerCPU":      {},
+	"workerMemoryGi": {},
+	"workerDiskGi":   {},
+}
+
+// clusterDefaultStringKeys are string-typed ClusterDefaults fields.
+var clusterDefaultStringKeys = map[string]struct{}{
+	"kubernetesVersion": {},
+}
+
+// parseClusterDefaults expands repeatable --cluster-default key=value
+// pairs into a map the ClusterDefaults schema accepts. Empty value is
+// rejected here because create semantics never want a zero-length
+// string. The update path has its own merge that treats empty as delete.
+func parseClusterDefaults(pairs []string) (map[string]interface{}, error) {
+	if len(pairs) == 0 {
+		return nil, nil
+	}
+	out := map[string]interface{}{}
+	for _, raw := range pairs {
+		key, val, err := splitClusterDefaultPair(raw)
+		if err != nil {
+			return nil, err
+		}
+		if val == "" {
+			return nil, fmt.Errorf("--cluster-default %q: value is required (empty values are only allowed in env update to clear a key)", raw)
+		}
+		typed, err := coerceClusterDefaultValue(key, val)
+		if err != nil {
+			return nil, err
+		}
+		out[key] = typed
+	}
+	return out, nil
+}
+
+// mergeClusterDefaultPatches applies a series of key=value pairs over
+// an existing clusterDefaults map for env update. An empty value
+// deletes the key so operators can narrow the set without a full
+// --clear-cluster-defaults reset.
+func mergeClusterDefaultPatches(existing map[string]interface{}, pairs []string) (map[string]interface{}, error) {
+	merged := map[string]interface{}{}
+	for k, v := range existing {
+		merged[k] = v
+	}
+	for _, raw := range pairs {
+		key, val, err := splitClusterDefaultPair(raw)
+		if err != nil {
+			return nil, err
+		}
+		if val == "" {
+			delete(merged, key)
+			continue
+		}
+		typed, err := coerceClusterDefaultValue(key, val)
+		if err != nil {
+			return nil, err
+		}
+		merged[key] = typed
+	}
+	return merged, nil
+}
+
+func splitClusterDefaultPair(raw string) (string, string, error) {
+	idx := strings.Index(raw, "=")
+	if idx < 0 {
+		return "", "", fmt.Errorf("--cluster-default %q: expected key=value", raw)
+	}
+	key := strings.TrimSpace(raw[:idx])
+	val := strings.TrimSpace(raw[idx+1:])
+	if key == "" {
+		return "", "", fmt.Errorf("--cluster-default %q: key is required", raw)
+	}
+	if _, ok := clusterDefaultNumericKeys[key]; ok {
+		return key, val, nil
+	}
+	if _, ok := clusterDefaultStringKeys[key]; ok {
+		return key, val, nil
+	}
+	return "", "", fmt.Errorf("--cluster-default %q: unknown key %q (supported: kubernetesVersion, workerCount, workerCPU, workerMemoryGi, workerDiskGi)", raw, key)
+}
+
+func coerceClusterDefaultValue(key, val string) (interface{}, error) {
+	if _, numeric := clusterDefaultNumericKeys[key]; numeric {
+		n, err := strconv.ParseInt(val, 10, 32)
+		if err != nil {
+			return nil, fmt.Errorf("--cluster-default %s=%s: value must be an integer", key, val)
+		}
+		return n, nil
+	}
+	return val, nil
 }
 
 // validateEnvName enforces the label-value syntax ADR-009 requires.
