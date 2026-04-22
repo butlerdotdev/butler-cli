@@ -18,6 +18,7 @@ package env
 
 import (
 	"sort"
+	"strings"
 	"testing"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -198,6 +199,38 @@ func TestApplyMigrationMutation_PreservesExistingMetadata(t *testing.T) {
 	}
 	if got := annotations[MigrationOperationAnnotation]; got != "true" {
 		t.Errorf("migration-operation annotation = %q, want \"true\"", got)
+	}
+}
+
+func TestTeamStatusNamespace_ReadsFromStatus(t *testing.T) {
+	tm := unstructured.Unstructured{}
+	tm.SetName("payments")
+	// Real controller convention: namespace is the bare team name, not
+	// "team-<name>". The CLI must read status.namespace, not concatenate.
+	if err := unstructured.SetNestedField(tm.Object, "payments", "status", "namespace"); err != nil {
+		t.Fatalf("set status.namespace: %v", err)
+	}
+	got, err := teamStatusNamespace(&tm)
+	if err != nil {
+		t.Fatalf("teamStatusNamespace returned error: %v", err)
+	}
+	if got != "payments" {
+		t.Errorf("teamStatusNamespace = %q, want payments (bare team name from status; a team- prefix would regress)", got)
+	}
+}
+
+func TestTeamStatusNamespace_ErrorsWhenUnreconciled(t *testing.T) {
+	tm := unstructured.Unstructured{}
+	tm.SetName("newly-created")
+	// status.namespace unset: controller has not yet reconciled.
+	_, err := teamStatusNamespace(&tm)
+	if err == nil {
+		t.Fatal("expected error when status.namespace is unset, got nil")
+	}
+	// Error must name the team so operators can see which Team blocked the
+	// command; the test asserts the team name is in the message.
+	if !strings.Contains(err.Error(), "newly-created") {
+		t.Errorf("error = %q, expected to contain team name %q", err.Error(), "newly-created")
 	}
 }
 

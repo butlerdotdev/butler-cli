@@ -82,11 +82,6 @@ Examples:
 	return cmd
 }
 
-// teamNamespace returns the namespace Butler creates for a given Team name.
-func teamNamespace(team string) string {
-	return "team-" + team
-}
-
 // fetchTeam returns the Team unstructured object for the given name.
 func fetchTeam(ctx context.Context, c *client.Client, name string) (*unstructured.Unstructured, error) {
 	tm, err := c.Dynamic.Resource(client.TeamGVR).Get(ctx, name, metav1.GetOptions{})
@@ -94,6 +89,20 @@ func fetchTeam(ctx context.Context, c *client.Client, name string) (*unstructure
 		return nil, fmt.Errorf("getting Team %s: %w", name, err)
 	}
 	return tm, nil
+}
+
+// teamStatusNamespace returns the namespace the Team controller created for
+// the given Team. Reads from status.namespace rather than computing from the
+// Team name because the controller's namespace convention is the bare team
+// name, not a "team-<name>" prefix, and the status field is the single source
+// of truth. Returns a helpful error when the controller has not yet reconciled
+// the Team (status.namespace unset) so callers can surface a retryable signal.
+func teamStatusNamespace(tm *unstructured.Unstructured) (string, error) {
+	ns, _, _ := unstructured.NestedString(tm.Object, "status", "namespace")
+	if ns == "" {
+		return "", fmt.Errorf("team %q has no status.namespace yet; wait for the Team controller to reconcile, then retry", tm.GetName())
+	}
+	return ns, nil
 }
 
 // envEntries returns the Team's spec.environments[] slice.
@@ -529,7 +538,10 @@ func runList(ctx context.Context, _ *log.Logger, team, outputFormat, kubeconfigP
 
 	// Count live clusters per env via label selector against the team ns.
 	usage := map[string]int{}
-	ns := teamNamespace(team)
+	ns, err := teamStatusNamespace(tm)
+	if err != nil {
+		return err
+	}
 	tcList, tcErr := c.Dynamic.Resource(client.TenantClusterGVR).Namespace(ns).List(ctx, metav1.ListOptions{})
 	if tcErr == nil {
 		for i := range tcList.Items {

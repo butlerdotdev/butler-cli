@@ -109,7 +109,10 @@ func runMigrate(ctx context.Context, logger *log.Logger, opts *migrateOptions) e
 		return fmt.Errorf("environment %q is not defined on team %s; create it first", opts.environment, opts.team)
 	}
 
-	ns := teamNamespace(opts.team)
+	ns, err := teamStatusNamespace(tm)
+	if err != nil {
+		return err
+	}
 	tcList, err := c.Dynamic.Resource(client.TenantClusterGVR).Namespace(ns).List(ctx, metav1.ListOptions{})
 	if err != nil {
 		return fmt.Errorf("listing TenantClusters in %s: %w", ns, err)
