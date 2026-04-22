@@ -291,6 +291,87 @@ func TestMergeAccessUserPatches(t *testing.T) {
 	}
 }
 
+func TestParseAccessGroups(t *testing.T) {
+	got, err := parseAccessGroups([]string{
+		"sre:admin",
+		"developers:viewer:okta",
+	})
+	if err != nil {
+		t.Fatalf("parseAccessGroups returned error: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("expected 2 groups, got %d", len(got))
+	}
+	sre := got[0].(map[string]interface{})
+	if sre["name"] != "sre" || sre["role"] != "admin" {
+		t.Errorf("sre = %v, want sre/admin", sre)
+	}
+	if _, hasIdP := sre["identityProvider"]; hasIdP {
+		t.Errorf("sre unexpectedly has identityProvider: %v", sre)
+	}
+	devs := got[1].(map[string]interface{})
+	if devs["identityProvider"] != "okta" {
+		t.Errorf("developers identityProvider = %v, want okta", devs["identityProvider"])
+	}
+
+	// Same name from two different IdPs is allowed.
+	if _, err := parseAccessGroups([]string{"admins:admin:okta", "admins:viewer:google"}); err != nil {
+		t.Errorf("parseAccessGroups rejected same-name-different-idp case: %v", err)
+	}
+
+	bad := [][]string{
+		{"no-role"},
+		{":admin"},                      // missing name
+		{"sre:"},                        // empty role in create
+		{"sre:bogus"},                   // invalid role
+		{"sre:admin", "sre:viewer"},     // duplicate (same name, empty idp)
+	}
+	for _, pairs := range bad {
+		if _, err := parseAccessGroups(pairs); err == nil {
+			t.Errorf("parseAccessGroups(%v) returned nil error, expected failure", pairs)
+		}
+	}
+}
+
+func TestMergeAccessGroupPatches(t *testing.T) {
+	existing := []interface{}{
+		map[string]interface{}{"name": "sre", "role": "admin"},
+		map[string]interface{}{"name": "developers", "role": "viewer", "identityProvider": "okta"},
+	}
+
+	// Overwrite sre's role, remove okta-developers, add a google-developers.
+	merged, err := mergeAccessGroupPatches(existing, []string{
+		"sre:operator",
+		"developers::okta",
+		"developers:viewer:google",
+	})
+	if err != nil {
+		t.Fatalf("mergeAccessGroupPatches returned error: %v", err)
+	}
+	if len(merged) != 2 {
+		t.Fatalf("expected 2 groups after merge, got %d (%v)", len(merged), merged)
+	}
+
+	type gk struct{ name, idp, role string }
+	seen := map[gk]bool{}
+	for _, g := range merged {
+		m := g.(map[string]interface{})
+		name, _ := m["name"].(string)
+		role, _ := m["role"].(string)
+		idp, _ := m["identityProvider"].(string)
+		seen[gk{name, idp, role}] = true
+	}
+	if !seen[gk{"sre", "", "operator"}] {
+		t.Errorf("expected sre to be operator, got %v", seen)
+	}
+	if !seen[gk{"developers", "google", "viewer"}] {
+		t.Errorf("expected google-developers to be viewer, got %v", seen)
+	}
+	if seen[gk{"developers", "okta", "viewer"}] {
+		t.Errorf("okta-developers should have been removed, got %v", seen)
+	}
+}
+
 func TestMergeClusterDefaultPatches(t *testing.T) {
 	existing := map[string]interface{}{
 		"kubernetesVersion": "v1.30.0",

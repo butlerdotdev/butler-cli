@@ -116,6 +116,7 @@ type createOptions struct {
 	description          string
 	clusterDefaults      []string
 	accessUsers          []string
+	accessGroups         []string
 	kubeconfig           string
 	kubeContext          string
 }
@@ -138,7 +139,8 @@ Examples:
   butleradm env create prod --team payments --max-clusters 10
   butleradm env create prod --team payments --description "production workloads"
   butleradm env create prod --team payments --cluster-default kubernetesVersion=v1.31.0 --cluster-default workerCount=3
-  butleradm env create prod --team payments --access-user alice@example.com:admin --access-user bob@example.com:operator`,
+  butleradm env create prod --team payments --access-user alice@example.com:admin --access-user bob@example.com:operator
+  butleradm env create prod --team payments --access-group sre:admin --access-group developers:viewer:okta`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			opts.name = args[0]
@@ -153,6 +155,7 @@ Examples:
 	cmd.Flags().StringVar(&opts.description, "description", "", "human-readable description for this environment")
 	cmd.Flags().StringArrayVar(&opts.clusterDefaults, "cluster-default", nil, "env-level cluster default, key=value (repeatable). Keys: kubernetesVersion, workerCount, workerCPU, workerMemoryGi, workerDiskGi")
 	cmd.Flags().StringArrayVar(&opts.accessUsers, "access-user", nil, "env access user, email:role (repeatable). Role is admin, operator, or viewer. Additive only; cannot reduce a team-level role.")
+	cmd.Flags().StringArrayVar(&opts.accessGroups, "access-group", nil, "env access group, name:role or name:role:identityProvider (repeatable). Role is admin, operator, or viewer.")
 	cmd.Flags().StringVar(&opts.kubeconfig, "kubeconfig", "", "path to management cluster kubeconfig")
 	_ = cmd.MarkFlagRequired("team")
 
@@ -170,6 +173,11 @@ func runCreate(ctx context.Context, logger *log.Logger, opts *createOptions) err
 	}
 
 	users, err := parseAccessUsers(opts.accessUsers)
+	if err != nil {
+		return err
+	}
+
+	groups, err := parseAccessGroups(opts.accessGroups)
 	if err != nil {
 		return err
 	}
@@ -210,8 +218,15 @@ func runCreate(ctx context.Context, logger *log.Logger, opts *createOptions) err
 	if len(defaults) > 0 {
 		entry["clusterDefaults"] = defaults
 	}
-	if len(users) > 0 {
-		entry["access"] = map[string]interface{}{"users": users}
+	if len(users) > 0 || len(groups) > 0 {
+		access := map[string]interface{}{}
+		if len(users) > 0 {
+			access["users"] = users
+		}
+		if len(groups) > 0 {
+			access["groups"] = groups
+		}
+		entry["access"] = access
 	}
 	envs = append(envs, entry)
 
@@ -240,6 +255,7 @@ type updateOptions struct {
 	clusterDefaults      []string
 	clearClusterDefaults bool
 	accessUsers          []string
+	accessGroups         []string
 	clearAccess          bool
 	kubeconfig           string
 	kubeContext          string
@@ -268,6 +284,9 @@ Examples:
   butleradm env update prod --team payments --clear-cluster-defaults
   butleradm env update prod --team payments --access-user alice@example.com:admin
   butleradm env update prod --team payments --access-user alice@example.com: (remove one user)
+  butleradm env update prod --team payments --access-group sre:admin
+  butleradm env update prod --team payments --access-group developers:viewer:okta
+  butleradm env update prod --team payments --access-group sre: (remove one group)
   butleradm env update prod --team payments --clear-access`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -285,6 +304,7 @@ Examples:
 	cmd.Flags().StringArrayVar(&opts.clusterDefaults, "cluster-default", nil, "env-level cluster default, key=value (repeatable). Empty value clears that key. Keys: kubernetesVersion, workerCount, workerCPU, workerMemoryGi, workerDiskGi")
 	cmd.Flags().BoolVar(&opts.clearClusterDefaults, "clear-cluster-defaults", false, "drop the entire clusterDefaults block on this environment")
 	cmd.Flags().StringArrayVar(&opts.accessUsers, "access-user", nil, "env access user, email:role (repeatable). Empty role removes that user. Role is admin, operator, or viewer.")
+	cmd.Flags().StringArrayVar(&opts.accessGroups, "access-group", nil, "env access group, name:role or name:role:identityProvider (repeatable). Empty role removes that group.")
 	cmd.Flags().BoolVar(&opts.clearAccess, "clear-access", false, "drop the entire access block (users and groups) on this environment")
 	cmd.Flags().StringVar(&opts.kubeconfig, "kubeconfig", "", "path to management cluster kubeconfig")
 	_ = cmd.MarkFlagRequired("team")
@@ -397,20 +417,34 @@ func runUpdate(ctx context.Context, logger *log.Logger, cmd *cobra.Command, opts
 			delete(entry, "access")
 			changed = true
 		}
-	} else if len(opts.accessUsers) > 0 {
+	} else if len(opts.accessUsers) > 0 || len(opts.accessGroups) > 0 {
 		access, _ := entry["access"].(map[string]interface{})
 		if access == nil {
 			access = map[string]interface{}{}
 		}
-		existingUsers, _ := access["users"].([]interface{})
-		merged, err := mergeAccessUserPatches(existingUsers, opts.accessUsers)
-		if err != nil {
-			return err
+		if len(opts.accessUsers) > 0 {
+			existingUsers, _ := access["users"].([]interface{})
+			merged, err := mergeAccessUserPatches(existingUsers, opts.accessUsers)
+			if err != nil {
+				return err
+			}
+			if len(merged) == 0 {
+				delete(access, "users")
+			} else {
+				access["users"] = merged
+			}
 		}
-		if len(merged) == 0 {
-			delete(access, "users")
-		} else {
-			access["users"] = merged
+		if len(opts.accessGroups) > 0 {
+			existingGroups, _ := access["groups"].([]interface{})
+			merged, err := mergeAccessGroupPatches(existingGroups, opts.accessGroups)
+			if err != nil {
+				return err
+			}
+			if len(merged) == 0 {
+				delete(access, "groups")
+			} else {
+				access["groups"] = merged
+			}
 		}
 		if len(access) == 0 {
 			delete(entry, "access")
@@ -421,7 +455,7 @@ func runUpdate(ctx context.Context, logger *log.Logger, cmd *cobra.Command, opts
 	}
 
 	if !changed {
-		return fmt.Errorf("nothing to update: pass --description, --max-clusters, --max-clusters-per-member, --clear-limits, --cluster-default, --clear-cluster-defaults, --access-user, or --clear-access")
+		return fmt.Errorf("nothing to update: pass --description, --max-clusters, --max-clusters-per-member, --clear-limits, --cluster-default, --clear-cluster-defaults, --access-user, --access-group, or --clear-access")
 	}
 
 	envs[idx] = entry
@@ -841,6 +875,119 @@ func splitAccessUserPair(raw string) (string, string, error) {
 		}
 	}
 	return email, role, nil
+}
+
+// parseAccessGroups expands repeatable --access-group name:role or
+// name:role:idp pairs into the TeamAccess.Groups shape. IdentityProvider
+// is optional and written only when the 3rd segment is present so we
+// never stamp an empty string where the CRD expects an absent field.
+func parseAccessGroups(pairs []string) ([]interface{}, error) {
+	if len(pairs) == 0 {
+		return nil, nil
+	}
+	// Track (name, idp) as a composite key: two groups with the same name
+	// but different identityProviders are distinct by the CRD, so the
+	// duplicate check must be scoped to the pair.
+	seen := map[string]struct{}{}
+	out := make([]interface{}, 0, len(pairs))
+	for _, raw := range pairs {
+		name, role, idp, err := splitAccessGroupPair(raw)
+		if err != nil {
+			return nil, err
+		}
+		if role == "" {
+			return nil, fmt.Errorf("--access-group %q: role is required (empty role is only allowed in env update to remove a group)", raw)
+		}
+		key := name + "\x00" + idp
+		if _, dup := seen[key]; dup {
+			return nil, fmt.Errorf("--access-group %s: same name+identityProvider listed more than once", raw)
+		}
+		seen[key] = struct{}{}
+		entry := map[string]interface{}{"name": name, "role": role}
+		if idp != "" {
+			entry["identityProvider"] = idp
+		}
+		out = append(out, entry)
+	}
+	return out, nil
+}
+
+// mergeAccessGroupPatches applies a series of group patches over an
+// existing groups list. Match key is (name, identityProvider) so two
+// groups with the same name from different IdPs remain separate
+// entries. Empty role removes the matched group; missing match appends.
+func mergeAccessGroupPatches(existing []interface{}, pairs []string) ([]interface{}, error) {
+	type key struct{ name, idp string }
+	byKey := map[key]int{}
+	merged := make([]interface{}, 0, len(existing))
+	for _, g := range existing {
+		m, ok := g.(map[string]interface{})
+		if !ok {
+			merged = append(merged, g)
+			continue
+		}
+		name, _ := m["name"].(string)
+		idp, _ := m["identityProvider"].(string)
+		byKey[key{name, idp}] = len(merged)
+		merged = append(merged, m)
+	}
+
+	for _, raw := range pairs {
+		name, role, idp, err := splitAccessGroupPair(raw)
+		if err != nil {
+			return nil, err
+		}
+		k := key{name, idp}
+		if role == "" {
+			if idx, ok := byKey[k]; ok {
+				merged = append(merged[:idx], merged[idx+1:]...)
+				delete(byKey, k)
+				for kk, v := range byKey {
+					if v > idx {
+						byKey[kk] = v - 1
+					}
+				}
+			}
+			continue
+		}
+		entry := map[string]interface{}{"name": name, "role": role}
+		if idp != "" {
+			entry["identityProvider"] = idp
+		}
+		if idx, ok := byKey[k]; ok {
+			merged[idx] = entry
+		} else {
+			byKey[k] = len(merged)
+			merged = append(merged, entry)
+		}
+	}
+	return merged, nil
+}
+
+// splitAccessGroupPair parses name:role or name:role:idp. Using SplitN
+// with n=3 keeps any further colons inside the identityProvider string,
+// which matters for LDAP DN group names that embed colons in attribute
+// values (rare but legal).
+func splitAccessGroupPair(raw string) (string, string, string, error) {
+	parts := strings.SplitN(raw, ":", 3)
+	if len(parts) < 2 {
+		return "", "", "", fmt.Errorf("--access-group %q: expected name:role or name:role:identityProvider", raw)
+	}
+	name := strings.TrimSpace(parts[0])
+	role := strings.TrimSpace(parts[1])
+	idp := ""
+	if len(parts) == 3 {
+		idp = strings.TrimSpace(parts[2])
+	}
+	if name == "" {
+		return "", "", "", fmt.Errorf("--access-group %q: name is required", raw)
+	}
+	if role != "" {
+		if _, ok := validAccessRoles[role]; !ok {
+			return "", "", "", fmt.Errorf("--access-group %q: role %q must be admin, operator, or viewer", raw, role)
+		}
+	}
+	return name, role, idp, nil
 }
 
 // validateEnvName enforces the label-value syntax ADR-009 requires.
