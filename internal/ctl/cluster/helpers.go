@@ -39,6 +39,15 @@ const (
 
 	// EnvButlerNamespace allows overriding the default namespace via environment
 	EnvButlerNamespace = "BUTLER_NAMESPACE"
+
+	// EnvironmentLabel is the label key for ADR-009 Team Environments membership.
+	EnvironmentLabel = "butler.butlerlabs.dev/environment"
+
+	// CreatorEmailAnnotation records the authenticated user who created the
+	// TenantCluster. Required by the admission webhook when the target
+	// environment sets maxClustersPerMember; always audit-useful otherwise.
+	// Mirrors butler-server's API-path behavior for CLI-direct (ADR-002) creates.
+	CreatorEmailAnnotation = "butler.butlerlabs.dev/creator-email"
 )
 
 // NamespaceFlags holds namespace-related flag values
@@ -86,6 +95,7 @@ type TenantClusterInfo struct {
 	TenantNamespace   string
 	ProviderConfig    string
 	CreationTime      string
+	Environment       string
 }
 
 // ExtractTenantClusterInfo extracts display information from an unstructured TenantCluster
@@ -112,6 +122,7 @@ func ExtractTenantClusterInfo(tc *unstructured.Unstructured) TenantClusterInfo {
 		TenantNamespace:   client.GetNestedString(obj, "status", "tenantNamespace"),
 		ProviderConfig:    client.GetNestedString(obj, "spec", "providerConfigRef", "name"),
 		CreationTime:      tc.GetCreationTimestamp().UTC().Format(time.RFC3339),
+		Environment:       tc.GetLabels()[EnvironmentLabel],
 	}
 }
 

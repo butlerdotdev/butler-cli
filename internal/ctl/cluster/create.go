@@ -25,6 +25,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/butlerdotdev/butler/internal/common/auth"
 	"github.com/butlerdotdev/butler/internal/common/client"
 	"github.com/butlerdotdev/butler/internal/common/log"
 	"github.com/butlerdotdev/butler/internal/common/output"
@@ -90,6 +91,15 @@ type CreateOptions struct {
 	CPSchedulerMemReq string
 	CPSchedulerCPULim string
 	CPSchedulerMemLim string
+
+	// Environment label (ADR-009 Team Environments)
+	Environment string
+
+	// CreatorEmail is the authenticated user's email, copied onto the
+	// TenantCluster as the CreatorEmailAnnotation. Populated from the active
+	// device-flow credential by the command runner; empty under raw-kubeconfig
+	// (the webhook will reject env-gated creates without it).
+	CreatorEmail string
 
 	// Behavior flags
 	Wait    bool
@@ -290,6 +300,9 @@ Examples:
 	// Namespace
 	cmd.Flags().StringVarP(&opts.Namespace, "namespace", "n", opts.Namespace, "Namespace for the TenantCluster")
 
+	// Environment (ADR-009)
+	cmd.Flags().StringVar(&opts.Environment, "environment", "", "Team environment to associate the cluster with (sets butler.butlerlabs.dev/environment label)")
+
 	// Behavior
 	cmd.Flags().BoolVar(&opts.Wait, "wait", false, "Wait for cluster to reach Ready status")
 	cmd.Flags().DurationVar(&opts.Timeout, "timeout", opts.Timeout, "Timeout when using --wait")
@@ -365,6 +378,18 @@ func runCreate(ctx context.Context, opts *CreateOptions) error {
 	// Validate options
 	if err := opts.Validate(); err != nil {
 		return err
+	}
+
+	// Populate CreatorEmail from the active device-flow credential. The
+	// CreatorEmailAnnotation mirrors the server's API-path behavior and is
+	// required by the admission webhook when the target environment sets
+	// maxClustersPerMember.
+	if opts.CreatorEmail == "" {
+		if cf, err := auth.LoadCredentials(); err == nil {
+			if cred := cf.ActiveCredential(); cred != nil {
+				opts.CreatorEmail = strings.ToLower(strings.TrimSpace(cred.User.Email))
+			}
+		}
 	}
 
 	// Auto-detect provider if not specified
@@ -467,6 +492,28 @@ func buildTenantCluster(opts *CreateOptions) *unstructured.Unstructured {
 	tc.SetKind("TenantCluster")
 	tc.SetName(opts.Name)
 	tc.SetNamespace(opts.Namespace)
+
+	// Environment label (ADR-009 Team Environments).
+	if opts.Environment != "" {
+		labels := tc.GetLabels()
+		if labels == nil {
+			labels = map[string]string{}
+		}
+		labels[EnvironmentLabel] = opts.Environment
+		tc.SetLabels(labels)
+	}
+
+	// Creator identity annotation (ADR-009, ADR-011). Set when the active
+	// credential carries a Butler email so the admission webhook can match
+	// the impersonated identity on per-member cap enforcement.
+	if opts.CreatorEmail != "" {
+		annotations := tc.GetAnnotations()
+		if annotations == nil {
+			annotations = map[string]string{}
+		}
+		annotations[CreatorEmailAnnotation] = opts.CreatorEmail
+		tc.SetAnnotations(annotations)
+	}
 
 	// Build machineTemplate
 	machineTemplate := map[string]interface{}{
@@ -577,6 +624,9 @@ func buildCPComponentResources(cpuReq, memReq, cpuLim, memLim string) map[string
 func printCreationSummary(opts *CreateOptions) {
 	fmt.Fprintf(opts.Output, "\nCreating TenantCluster %s:\n", output.ColorizePhase(opts.Name))
 	fmt.Fprintf(opts.Output, "  Provider:    %s\n", opts.Provider)
+	if opts.Environment != "" {
+		fmt.Fprintf(opts.Output, "  Environment: %s\n", opts.Environment)
+	}
 	fmt.Fprintf(opts.Output, "  Kubernetes:  %s\n", opts.KubernetesVersion)
 	fmt.Fprintf(opts.Output, "  Workers:     %d × (%d CPU, %s RAM, %s disk)\n",
 		opts.Workers, opts.CPU, formatMemory(opts.MemoryMB), formatDisk(opts.DiskGB))
