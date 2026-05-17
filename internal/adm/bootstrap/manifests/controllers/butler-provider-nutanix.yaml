@@ -86,7 +86,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: manager
-          image: ghcr.io/butlerdotdev/butler-provider-nutanix:latest
+          image: ghcr.io/butlerdotdev/butler-provider-nutanix:v0.2.3
           imagePullPolicy: IfNotPresent
           command:
             - /manager

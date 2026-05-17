@@ -621,7 +621,7 @@ func LoadConfig() (*Config, error) {
 		cfg.Network.ServiceCIDR = "10.96.0.0/12"
 	}
 	if cfg.Talos.Version == "" {
-		cfg.Talos.Version = "v1.12.1"
+		cfg.Talos.Version = "v1.13.2"
 	}
 	if cfg.Addons.CNI.Type == "" {
 		cfg.Addons.CNI.Type = "cilium"
@@ -662,7 +662,7 @@ func LoadConfig() (*Config, error) {
 	// Console defaults
 	if cfg.Addons.Console.Enabled {
 		if cfg.Addons.Console.Version == "" {
-			cfg.Addons.Console.Version = "latest"
+			cfg.Addons.Console.Version = "0.14.1"
 		}
 		// Default ingress host based on cluster name
 		if cfg.Addons.Console.Ingress.Enabled && cfg.Addons.Console.Ingress.Host == "" {
