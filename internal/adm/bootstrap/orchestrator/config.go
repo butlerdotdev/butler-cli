@@ -621,7 +621,7 @@ func LoadConfig() (*Config, error) {
 		cfg.Network.ServiceCIDR = "10.96.0.0/12"
 	}
 	if cfg.Talos.Version == "" {
-		cfg.Talos.Version = "v1.13.2"
+		cfg.Talos.Version = "v1.12.1"
 	}
 	if cfg.Addons.CNI.Type == "" {
 		cfg.Addons.CNI.Type = "cilium"
