@@ -86,7 +86,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: manager
-          image: ghcr.io/butlerdotdev/butler-provider-aws:v0.1.2
+          image: ghcr.io/butlerdotdev/butler-provider-aws:latest
           imagePullPolicy: IfNotPresent
           command:
             - /manager
