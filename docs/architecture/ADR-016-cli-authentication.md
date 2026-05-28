@@ -511,6 +511,185 @@ The refresh call re-resolves team memberships via `TeamResolver.ResolveTeams()`,
   1. `butleradm user revoke-cli EMAIL` for immediate SA deletion
   2. A butler-server background watcher on Team CRD membership changes that patches RoleBindings in real-time when members are added or removed
 
+## Amendment: 2026-05-28: butler-session JWT alongside kubeconfig
+
+**Status**: Accepted. Implemented in `butler-server` commit
+`8726627` (`feat(auth): issue butler-session JWT from cli device flow`)
+on branch `feat/cli-session-jwt`. Verified end-to-end against
+butler-beta on 2026-05-28; see "Local verification: devsign" below.
+
+The original ADR described the device-flow token response as a
+kubeconfig only. When we began building features that talk to
+butler-server's protected HTTP endpoints (certificate rotation,
+GitOps lifecycle, ProviderConfig image and network discovery,
+IdP create), all of which live on the server's HTTP surface
+rather than the Kubernetes API, we hit a contract mismatch the
+original ADR did not foresee. This amendment captures the
+resolution.
+
+### Both credentials, two API surfaces
+
+butler-server's CLI device-flow response now returns **both** a
+kubeconfig and a butler-session JWT:
+
+```
+Response (200, approved):
+  {
+    "user": { ... },
+    "kubeconfig": "<base64-encoded kubeconfig>",
+    "expires_at": "2026-04-10T00:00:00Z",
+    "session_token": "<HS256 JWT>",
+    "session_expires_at": "2026-04-10T00:00:00Z",
+    "refresh_token": "<opaque>",
+    "refresh_expires_at": "..."
+  }
+```
+
+The two credentials authenticate the same identity to two
+different APIs:
+
+- **`kubeconfig`** carries the Kubernetes ServiceAccount token.
+  The CLI uses it for direct Kubernetes API access against Butler
+  CRDs. This is the path established by ADR-002 (CRDs as the API
+  contract) and remains the primary path for the CLI: cluster
+  CRUD, addon CRUD, team/user/provider/network/config admin
+  operations all create and read CRDs directly.
+
+- **`session_token`** is the butler-server session JWT signed
+  with `BUTLER_JWT_SECRET` (HS256). The CLI sends it as a Bearer
+  on `Authorization` when it calls protected butler-server HTTP
+  endpoints. `SessionMiddleware` accepts it identically to a
+  cookie-borne console session.
+
+This is **the CLI joining the HTTP API surface the console has
+always used**, not a replacement of the K8s path. Some operations
+have no CRD: certificate rotation orchestrates Steward-managed
+Secrets through butler-server's `internal/certificates/service.go`;
+GitOps enable/disable/discover/export are server-orchestrated;
+ProviderConfig image/network discovery talks to upstream provider
+APIs from butler-server. Those operations always lived on the
+server side. Until this change the CLI couldn't reach them at
+all. After this change it can, using the same auth path the
+console uses.
+
+ADR-002 is unaffected. The CLI still creates and reads Butler
+CRDs against the Kubernetes API directly with the kubeconfig.
+The session JWT is purely additive: it unlocks the
+server-orchestrated operations that have no CRD equivalent.
+
+### Expiry independence
+
+`session_expires_at` (session JWT lifetime) and `expires_at`
+(ServiceAccount token lifetime) are independent timers:
+
+- The SA token lifetime is set by `BUTLER_CLI_TOKEN_EXPIRY`
+  (default 24h, governed by `saManager.CreateToken`).
+- The session JWT lifetime is set by `BUTLER_SESSION_EXPIRY`
+  (default 24h, governed by `SessionService.Expiry()`).
+
+By default they align at 24h, but the configuration knobs are
+separate and operators can diverge them. **Keep them in sync
+unless there is a specific reason to diverge.** A divergence
+silently degrades the CLI experience: if the SA token expires
+before the session JWT, K8s-API operations fail while
+server-API operations succeed (or vice versa), and the CLI's
+refresh logic, keyed off the credential file's tracked
+expiries, produces correct behavior for one path and stale
+state for the other.
+
+The CLI helper that wraps server-side HTTP calls refreshes
+reactively, not proactively. A 401 response with the
+documented `{"error":"invalid session"}` envelope (see the
+next subsection) triggers a single silent refresh attempt; if
+the refresh succeeds the original request retries once with
+the new tokens, and if the refresh fails the operator is
+prompted to run `butlerctl login`. The refresh endpoint
+(`POST /api/auth/cli/refresh`) re-issues both tokens, so the
+single refresh resyncs them. Operators who configure one
+expiry shorter than the other should expect the shorter-lived
+path to take the 401 first and pay the refresh cost on each
+command; the longer-lived path stays valid until its own
+expiry.
+
+### 401 envelope on invalid or expired session
+
+The butler-server `SessionMiddleware` returns a uniform
+envelope for any failed session validation:
+
+```
+HTTP/1.1 401 Unauthorized
+Content-Type: application/json
+
+{"error":"invalid session"}
+```
+
+This is the documented contract for tampered, expired,
+malformed, or otherwise unverifiable session JWTs. Verified
+on 2026-05-28 with a one-byte tamper of a freshly issued
+session JWT against `/api/auth/me`.
+
+The CLI side **must** recognize this envelope on any protected
+butler-server call and surface a clean re-authentication
+prompt rather than a raw HTTP error. The standard behavior:
+
+1. Try a silent `POST /api/auth/cli/refresh` using the stored
+   refresh token. If the refresh succeeds, retry the original
+   request once.
+2. If the refresh token is also rejected (expired or revoked),
+   prompt the user to run `butlerctl login` again, with a
+   short, plain message, not a stack trace.
+3. Do **not** retry indefinitely or paper over the 401 with a
+   generic "request failed" message. The 401 is a contract
+   signal: the credential is no longer trusted.
+
+The CLI helper that wraps protected butler-server HTTP calls
+centralizes this behavior so individual commands do not each
+re-implement the 401/refresh/retry/re-login sequence.
+
+### Local verification: devsign
+
+End-to-end verification of the device-flow contract requires
+an authenticated session to drive `POST /api/auth/cli/approve`.
+In a local dev server with no IdP wired up, there is no
+browser-driven login path that produces such a session out of
+the box.
+
+To unblock local verification, butler-server ships a small
+dev-only helper at `cmd/devsign/`. devsign signs a
+`UserSession` JWT using the same HS256 algorithm and secret
+that the local butler-server uses, producing a token
+`SessionMiddleware` accepts. The intended use is exactly the
+E2E sequence: device init, mint admin JWT via devsign, approve
+device code with that JWT as Bearer, poll token, inspect the
+response, exercise `/api/auth/me` with the returned
+`session_token`, tamper the JWT and confirm the 401 envelope.
+See `butler-server/cmd/devsign/README.md` for the tool's
+documentation, including the production-risk note.
+
+devsign is dev/test infrastructure. It is not built into any
+production image and should never be deployed where a
+production butler-server is reachable.
+
+### Sections superseded by this amendment
+
+The following parts of the original ADR are updated by the
+above. The original text remains for historical record:
+
+- **Phase 1: butler-server endpoints, POST /api/auth/cli/token**:
+  the `Response (200, approved)` body now carries two
+  additional fields (`session_token`, `session_expires_at`).
+- **Token Lifecycle, Refresh endpoint**: the same two fields
+  appear on the refresh endpoint's `200` response. Both tokens
+  rotate on refresh.
+- **Phase 3: butler-cli changes, Credential storage**: the
+  `~/.butler/credentials.json` shape gains `sessionToken` and
+  `sessionExpiresAt` alongside the existing `kubeconfig` and
+  `expiresAt` fields. The CLI helper for protected
+  butler-server HTTP calls reads these to build authenticated
+  requests.
+
+---
+
 ## Consequences
 
 ### Positive
