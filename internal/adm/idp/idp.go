@@ -42,10 +42,6 @@ func NewIDPCmd(logger *log.Logger) *cobra.Command {
 IdentityProviders configure external authentication providers such as
 Google Workspace, Microsoft Entra ID, Okta, or generic OIDC providers.
 
-Note: idp create is not implemented due to the complexity of OIDC
-configuration (secrets, scopes, claim mappings). Use kubectl apply
-with a YAML manifest instead.
-
 Examples:
   butleradm idp list
   butleradm idp get google-workspace

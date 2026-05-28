@@ -39,9 +39,6 @@ The catalog contains addon metadata including Helm chart coordinates,
 default versions, and categories. Tenant users browse this catalog
 via butlerctl addon catalog.
 
-Note: catalog create and update are not yet implemented (requires
-complex YAML input). Use kubectl apply for now.
-
 Examples:
   butleradm addon catalog list
   butleradm addon catalog get cilium
