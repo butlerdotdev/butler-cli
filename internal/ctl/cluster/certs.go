@@ -92,6 +92,10 @@ Examples:
 	cmd.Flags().StringVarP(&opts.outputFormat, "output", "o", "", "output format (json, yaml)")
 	cmd.Flags().StringVar(&opts.kubeconfigPath, "kubeconfig", "", "path to management cluster kubeconfig")
 
+	// Subcommands. `certs NAME` continues to show certificate status (parent's
+	// RunE); `certs rotate NAME --type=...` rotates via butler-server.
+	cmd.AddCommand(newCertsRotateCmd(logger))
+
 	return cmd
 }
 

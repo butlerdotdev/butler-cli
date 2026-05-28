@@ -36,13 +36,30 @@ type CredentialFile struct {
 }
 
 // ServerCredential holds session state for a single Butler server.
+//
+// Two tokens live here. Kubeconfig embeds a Kubernetes ServiceAccount token
+// for direct K8s API access (ADR-002 path). SessionToken is the butler-server
+// session JWT for protected HTTP endpoints (cert rotation, GitOps lifecycle,
+// provider images/networks, IdP create); see ADR-016's 2026-05-28 amendment.
+// The two expiries default-align at 24h but are independent timers.
 type ServerCredential struct {
 	User             UserInfo  `json:"user"`
-	Kubeconfig       string    `json:"kubeconfig"`       // base64-encoded management cluster kubeconfig
-	ExpiresAt        time.Time `json:"expiresAt"`        // access token expiry
-	RefreshToken     string    `json:"refreshToken"`     // opaque refresh token
-	RefreshExpiresAt time.Time `json:"refreshExpiresAt"` // refresh token expiry
-	ActiveTeam       string    `json:"activeTeam"`       // currently selected team
+	Kubeconfig       string    `json:"kubeconfig"`        // base64-encoded management cluster kubeconfig
+	ExpiresAt        time.Time `json:"expiresAt"`         // SA token expiry
+	SessionToken     string    `json:"sessionToken"`      // butler-server session JWT (HS256)
+	SessionExpiresAt time.Time `json:"sessionExpiresAt"`  // session JWT expiry
+	RefreshToken     string    `json:"refreshToken"`      // opaque refresh token
+	RefreshExpiresAt time.Time `json:"refreshExpiresAt"`  // refresh token expiry
+	ActiveTeam       string    `json:"activeTeam"`        // currently selected team
+}
+
+// SessionTokenExpired reports whether the butler-server session JWT has expired.
+// Independent of IsExpired (which tracks the SA token).
+func (c *ServerCredential) SessionTokenExpired() bool {
+	if c.SessionExpiresAt.IsZero() {
+		return true
+	}
+	return time.Now().After(c.SessionExpiresAt)
 }
 
 // UserInfo describes the authenticated user.

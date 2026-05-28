@@ -306,10 +306,14 @@ func newFromCredentialFile() (*Client, string, error) {
 			return nil, "", fmt.Errorf("refreshing token: %w", err)
 		}
 
-		// Update the stored credential
+		// Update the stored credential. Both tokens rotate on refresh; see
+		// ADR-016 amendment (2026-05-28) on keeping the SA token and session
+		// JWT in sync.
 		sc.User = tr.User
 		sc.Kubeconfig = tr.Kubeconfig
 		sc.ExpiresAt = tr.ExpiresAt
+		sc.SessionToken = tr.SessionToken
+		sc.SessionExpiresAt = tr.SessionExpiresAt
 		sc.RefreshToken = tr.RefreshToken
 		sc.RefreshExpiresAt = tr.RefreshExpiresAt
 
