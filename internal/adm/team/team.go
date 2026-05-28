@@ -36,6 +36,8 @@ import (
 func NewTeamCmd(logger *log.Logger) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "team",
+		Args:  cobra.NoArgs,
+		RunE:  output.ShowHelp,
 		Short: "Manage teams",
 		Long: `Manage Team resources for multi-tenancy.
 

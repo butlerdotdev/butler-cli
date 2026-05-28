@@ -44,6 +44,8 @@ const (
 func NewProviderCmd(logger *log.Logger) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "provider",
+		Args:  cobra.NoArgs,
+		RunE:  output.ShowHelp,
 		Short: "Manage infrastructure provider configurations",
 		Long: `Manage infrastructure provider configurations for Butler.
 

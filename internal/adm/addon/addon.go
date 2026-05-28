@@ -36,6 +36,8 @@ import (
 func NewAddonCmd(logger *log.Logger) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "addon",
+		Args:  cobra.NoArgs,
+		RunE:  output.ShowHelp,
 		Short: "Manage platform addons and the addon catalog",
 		Long: `Manage addons installed on the management cluster and administer
 the addon definition catalog.

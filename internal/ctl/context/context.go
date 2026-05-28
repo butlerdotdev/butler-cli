@@ -33,6 +33,8 @@ import (
 func NewContextCmd(logger *log.Logger) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "context",
+		Args:  cobra.NoArgs,
+		RunE:  output.ShowHelp,
 		Short: "Manage team context for CLI operations",
 		Long: `View and switch the active team context used by Butler CLI commands.
 

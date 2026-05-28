@@ -54,6 +54,8 @@ const MigrationOperationAnnotation = "butler.butlerlabs.dev/migration-operation"
 func NewEnvCmd(logger *log.Logger) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "env",
+		Args:  cobra.NoArgs,
+		RunE:  output.ShowHelp,
 		Short: "Manage Team environments",
 		Long: `Manage Team environments (ADR-009).
 
