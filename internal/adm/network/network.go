@@ -45,9 +45,6 @@ func NewNetworkCmd(logger *log.Logger) *cobra.Command {
 NetworkPools define CIDR ranges that Butler allocates to tenant clusters.
 Each pool tracks total, allocated, and available IP addresses.
 
-Note: network create is not implemented due to the complexity of CIDR
-and range configuration. Use kubectl apply with a YAML manifest instead.
-
 Examples:
   butleradm network list
   butleradm network get node-pool
