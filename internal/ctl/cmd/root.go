@@ -49,6 +49,8 @@ func Execute(logger *log.Logger) error {
 func NewRootCmd(logger *log.Logger) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "butlerctl",
+		Args:  cobra.NoArgs,
+		RunE:  output.ShowHelp,
 		Short: "Butler Kubernetes Cluster Management",
 		Long: `butlerctl is the cluster management CLI for the Butler platform.
 

@@ -44,6 +44,8 @@ const (
 func NewImageCmd(logger *log.Logger) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "image",
+		Args:  cobra.NoArgs,
+		RunE:  output.ShowHelp,
 		Short: "Manage OS images and image sync operations",
 		Long: `Manage OS images synced from the Butler Image Factory to infrastructure providers.
 

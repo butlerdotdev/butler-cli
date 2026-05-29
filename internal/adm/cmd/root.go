@@ -59,6 +59,8 @@ func Execute(logger *log.Logger) error {
 func NewRootCmd(logger *log.Logger) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "butleradm",
+		Args:  cobra.NoArgs,
+		RunE:  output.ShowHelp,
 		Short: "Butler Platform Administration",
 		Long: `butleradm is the administration CLI for the Butler Kubernetes-as-a-Service platform.
 

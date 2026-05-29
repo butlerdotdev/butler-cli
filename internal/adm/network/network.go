@@ -39,6 +39,8 @@ const (
 func NewNetworkCmd(logger *log.Logger) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "network",
+		Args:  cobra.NoArgs,
+		RunE:  output.ShowHelp,
 		Short: "Manage network pools",
 		Long: `Manage NetworkPool resources for IPAM (IP Address Management).
 

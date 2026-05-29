@@ -206,6 +206,16 @@ func colorizeDescription(s string) string {
 	return result.String()
 }
 
+// ShowHelp is a cobra RunE that prints the command's help text. Pair it with
+// Args: cobra.NoArgs on a parent that has subcommands but no own action — bare
+// invocation prints help, and any unknown positional (typically a mistyped
+// subcommand) fails NoArgs validation and cobra emits the standard
+// "unknown command" error. Without a RunE, cobra short-circuits to help via
+// ErrHelp before Args validation runs.
+func ShowHelp(cmd *cobra.Command, _ []string) error {
+	return cmd.Help()
+}
+
 // ConfigureHelp sets up colorized help for a Cobra command and all subcommands
 func ConfigureHelp(cmd *cobra.Command) {
 	// Set custom templates

@@ -37,6 +37,8 @@ import (
 func NewUserCmd(logger *log.Logger) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "user",
+		Args:  cobra.NoArgs,
+		RunE:  output.ShowHelp,
 		Short: "Manage users",
 		Long: `Manage User resources on the platform.
 

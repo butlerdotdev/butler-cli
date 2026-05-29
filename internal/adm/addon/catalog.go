@@ -32,6 +32,8 @@ import (
 func NewCatalogCmd(logger *log.Logger) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "catalog",
+		Args:  cobra.NoArgs,
+		RunE:  output.ShowHelp,
 		Short: "Administer the addon definition catalog",
 		Long: `Administer AddonDefinitions that describe available addons.
 

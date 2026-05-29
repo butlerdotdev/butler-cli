@@ -33,6 +33,8 @@ import (
 func NewClusterCmd(logger *log.Logger) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "cluster",
+		Args:  cobra.NoArgs,
+		RunE:  output.ShowHelp,
 		Short: "Manage tenant Kubernetes clusters",
 		Long: `Manage tenant Kubernetes clusters on the Butler platform.
 

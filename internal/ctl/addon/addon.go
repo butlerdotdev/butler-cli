@@ -33,6 +33,8 @@ import (
 func NewAddonCmd(logger *log.Logger) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "addon",
+		Args:  cobra.NoArgs,
+		RunE:  output.ShowHelp,
 		Short: "Manage tenant cluster addons",
 		Long: `Manage addons installed on tenant Kubernetes clusters.
 

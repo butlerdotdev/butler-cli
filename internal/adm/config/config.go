@@ -43,6 +43,8 @@ const (
 func NewConfigCmd(logger *log.Logger) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "config",
+		Args:  cobra.NoArgs,
+		RunE:  output.ShowHelp,
 		Short: "Manage the Butler platform configuration",
 		Long: `Manage the ButlerConfig singleton that controls platform-wide settings.
 

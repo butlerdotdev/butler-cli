@@ -36,6 +36,8 @@ import (
 func NewIDPCmd(logger *log.Logger) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "idp",
+		Args:  cobra.NoArgs,
+		RunE:  output.ShowHelp,
 		Short: "Manage identity providers",
 		Long: `Manage IdentityProvider resources for SSO/OIDC authentication.
 
