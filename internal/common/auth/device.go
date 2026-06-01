@@ -39,11 +39,18 @@ type DeviceFlowResponse struct {
 }
 
 // TokenResponse is the server's response when a device flow completes
-// successfully, or when a refresh token is exchanged.
+// successfully, or when a refresh token is exchanged. SessionToken and
+// SessionExpiresAt were added by the ADR-016 amendment (2026-05-28); the
+// CLI uses session_token as a Bearer on protected butler-server HTTP
+// endpoints (cert rotation etc.). Pre-amendment servers omit these fields,
+// in which case the credential persists empty strings and the serverhttp
+// helper surfaces a clear "re-run login" error on first protected call.
 type TokenResponse struct {
 	User             UserInfo  `json:"user"`
 	Kubeconfig       string    `json:"kubeconfig"`
 	ExpiresAt        time.Time `json:"expires_at"`
+	SessionToken     string    `json:"session_token"`
+	SessionExpiresAt time.Time `json:"session_expires_at"`
 	RefreshToken     string    `json:"refresh_token"`
 	RefreshExpiresAt time.Time `json:"refresh_expires_at"`
 }
