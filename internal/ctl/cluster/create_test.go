@@ -235,13 +235,13 @@ func TestCreateOptionsValidate(t *testing.T) {
 			name:      "workers below minimum",
 			modify:    func(o *CreateOptions) { o.Workers = 0 },
 			wantErr:   true,
-			errSubstr: "workers must be between 1 and 10",
+			errSubstr: "workers must be between 1 and 100",
 		},
 		{
 			name:      "workers above maximum",
-			modify:    func(o *CreateOptions) { o.Workers = 11 },
+			modify:    func(o *CreateOptions) { o.Workers = 101 },
 			wantErr:   true,
-			errSubstr: "workers must be between 1 and 10",
+			errSubstr: "workers must be between 1 and 100",
 		},
 		{
 			name:    "workers at minimum boundary",
@@ -250,7 +250,7 @@ func TestCreateOptionsValidate(t *testing.T) {
 		},
 		{
 			name:    "workers at maximum boundary",
-			modify:  func(o *CreateOptions) { o.Workers = 10 },
+			modify:  func(o *CreateOptions) { o.Workers = 100 },
 			wantErr: false,
 		},
 		{
