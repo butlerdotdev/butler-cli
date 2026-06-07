@@ -27,6 +27,7 @@ import (
 	butlercontext "github.com/butlerdotdev/butler/internal/adm/context"
 	"github.com/butlerdotdev/butler/internal/adm/doctor"
 	"github.com/butlerdotdev/butler/internal/adm/env"
+	"github.com/butlerdotdev/butler/internal/adm/gitops"
 	"github.com/butlerdotdev/butler/internal/adm/idp"
 	"github.com/butlerdotdev/butler/internal/adm/login"
 	"github.com/butlerdotdev/butler/internal/adm/logout"
@@ -116,6 +117,7 @@ Examples:
 	cmd.AddCommand(butlerconfig.NewConfigCmd(logger))
 	cmd.AddCommand(doctor.NewDoctorCmd(logger))
 	cmd.AddCommand(env.NewEnvCmd(logger))
+	cmd.AddCommand(gitops.NewGitopsCmd(logger))
 	cmd.AddCommand(idp.NewIDPCmd(logger))
 	cmd.AddCommand(network.NewNetworkCmd(logger))
 	cmd.AddCommand(status.NewStatusCmd(logger))
