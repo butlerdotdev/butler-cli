@@ -84,6 +84,7 @@ Examples:
 	cmd.PersistentFlags().StringP("output", "o", "", "output format (json, yaml)")
 
 	cmd.AddCommand(newGitopsStatusCmd(logger))
+	cmd.AddCommand(newGitopsEnableCmd(logger))
 
 	return cmd
 }
