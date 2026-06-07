@@ -87,6 +87,7 @@ Examples:
 	cmd.AddCommand(newGitopsEnableCmd(logger))
 	cmd.AddCommand(newGitopsDisableCmd(logger))
 	cmd.AddCommand(newGitopsDiscoverCmd(logger))
+	cmd.AddCommand(newGitopsPreviewCmd(logger))
 
 	return cmd
 }
