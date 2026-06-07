@@ -150,8 +150,11 @@ func (o *CreateOptions) Validate() error {
 		return fmt.Errorf("invalid cluster name %q: must be lowercase alphanumeric, may contain '-', max 63 chars", o.Name)
 	}
 
-	if o.Workers < 1 || o.Workers > 10 {
-		return fmt.Errorf("workers must be between 1 and 10, got %d", o.Workers)
+	// Upper bound is a client-side sanity guard against fat-finger input,
+	// not a platform limit. Real node caps are enforced server-side via
+	// Team.spec.resourceLimits. 100 sits well above any realistic tenant cluster.
+	if o.Workers < 1 || o.Workers > 100 {
+		return fmt.Errorf("workers must be between 1 and 100, got %d", o.Workers)
 	}
 
 	if o.CPU < 1 || o.CPU > 128 {
