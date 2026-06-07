@@ -38,16 +38,22 @@ func NewGitopsCmd(logger *log.Logger) *cobra.Command {
 		Long: `Manage the platform Git provider and GitOps lifecycle.
 
 The config subcommand group manages the Git provider used for GitOps
-operations. It is a prerequisite for enabling GitOps on clusters.
+operations. It is a prerequisite for enabling GitOps on clusters. The
+repositories and branches subcommands list what the configured provider
+credential can reach.
 
 Examples:
-  butleradm gitops config get`,
+  butleradm gitops config get
+  butleradm gitops repositories list
+  butleradm gitops branches list --repo owner/repo`,
 		PersistentPreRun: func(cmd *cobra.Command, args []string) {
 			auth.WarnIfUnauthenticated()
 		},
 	}
 
 	cmd.AddCommand(newConfigCmd(logger))
+	cmd.AddCommand(newRepositoriesCmd(logger))
+	cmd.AddCommand(newBranchesCmd(logger))
 
 	return cmd
 }
