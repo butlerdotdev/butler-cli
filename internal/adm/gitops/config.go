@@ -62,6 +62,7 @@ Examples:
 
 	cmd.AddCommand(newConfigGetCmd(logger))
 	cmd.AddCommand(newConfigSetCmd(logger))
+	cmd.AddCommand(newConfigClearCmd(logger))
 
 	return cmd
 }
