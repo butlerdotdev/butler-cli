@@ -282,7 +282,7 @@ func runConfigGet(ctx context.Context, out io.Writer, outputFormat string) error
 func printConfigTable(out io.Writer, cfg gitProviderConfig) error {
 	if !cfg.Configured {
 		fmt.Fprintln(out, "No Git provider configured. Configure one with:")
-		fmt.Fprintln(out, "  butleradm gitops config set --type github|gitlab --url <url> --organization <org> --token-from-file <path>")
+		fmt.Fprintln(out, "  butleradm gitops config set --type github|gitlab|bitbucket --url <url> --organization <org> --token-from-file <path>")
 		return nil
 	}
 

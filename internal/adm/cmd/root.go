@@ -22,7 +22,6 @@ import (
 
 	"github.com/butlerdotdev/butler/internal/adm/addon"
 	"github.com/butlerdotdev/butler/internal/adm/bootstrap"
-	"github.com/butlerdotdev/butler/internal/tui"
 	butlerconfig "github.com/butlerdotdev/butler/internal/adm/config"
 	butlercontext "github.com/butlerdotdev/butler/internal/adm/context"
 	"github.com/butlerdotdev/butler/internal/adm/doctor"
@@ -40,6 +39,7 @@ import (
 	"github.com/butlerdotdev/butler/internal/common/log"
 	"github.com/butlerdotdev/butler/internal/common/output"
 	"github.com/butlerdotdev/butler/internal/common/version"
+	"github.com/butlerdotdev/butler/internal/tui"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
