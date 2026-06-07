@@ -142,6 +142,13 @@ func (c *Client) Post(ctx context.Context, path string, body, out any) error {
 	return c.do(ctx, http.MethodPost, path, body, out)
 }
 
+// Delete issues an authenticated DELETE against path. If out is non-nil and
+// the response carries a JSON body, that body is unmarshaled into out. See
+// Get for response and error semantics.
+func (c *Client) Delete(ctx context.Context, path string, out any) error {
+	return c.do(ctx, http.MethodDelete, path, nil, out)
+}
+
 func (c *Client) do(ctx context.Context, method, path string, body, out any) error {
 	statusCode, raw, err := c.sendAndRead(ctx, method, path, body)
 	if err != nil {

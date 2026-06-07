@@ -130,6 +130,29 @@ func TestClient_Post_Success_WithBody(t *testing.T) {
 	}
 }
 
+func TestClient_Delete_Success(t *testing.T) {
+	var gotBearer string
+	c, _ := setupClient(t, func(w http.ResponseWriter, r *http.Request) {
+		gotBearer = r.Header.Get("Authorization")
+		if r.Method != http.MethodDelete {
+			t.Errorf("method = %s, want DELETE", r.Method)
+		}
+		w.WriteHeader(http.StatusOK)
+		_ = json.NewEncoder(w).Encode(map[string]any{"success": true, "message": "removed"})
+	}, nil)
+
+	var out map[string]any
+	if err := c.Delete(context.Background(), "/api/example", &out); err != nil {
+		t.Fatalf("Delete: %v", err)
+	}
+	if out["success"] != true {
+		t.Errorf("response = %v, want {success:true}", out)
+	}
+	if gotBearer != "Bearer initial-session-token" {
+		t.Errorf("authorization header = %q, want Bearer initial-session-token", gotBearer)
+	}
+}
+
 func TestServerError_StatusAccessors(t *testing.T) {
 	cases := []struct {
 		name           string
