@@ -17,96 +17,79 @@ limitations under the License.
 package cluster
 
 import (
+	"bytes"
+	"errors"
+	"net/http"
+	"strings"
 	"testing"
 
-	"github.com/butlerdotdev/butler/internal/common/client"
+	"github.com/butlerdotdev/butler/internal/common/serverhttp"
 )
 
-func TestGitopsConfigExtraction(t *testing.T) {
+func TestPrintGitopsStatus(t *testing.T) {
+	t.Run("not enabled", func(t *testing.T) {
+		var buf bytes.Buffer
+		if err := printGitopsStatus(&buf, gitOpsStatus{Enabled: false}); err != nil {
+			t.Fatalf("printGitopsStatus: %v", err)
+		}
+		out := buf.String()
+		if !strings.Contains(out, "not enabled") {
+			t.Fatalf("expected not-enabled message, got %q", out)
+		}
+		if !strings.Contains(out, "gitops enable") {
+			t.Fatalf("expected enable hint, got %q", out)
+		}
+	})
+
+	t.Run("enabled", func(t *testing.T) {
+		var buf bytes.Buffer
+		st := gitOpsStatus{
+			Enabled:    true,
+			Provider:   "fluxcd",
+			Repository: "https://github.com/acme/clusters",
+			Branch:     "main",
+			Path:       "clusters/prod",
+			Status:     "Ready",
+			Version:    "v2.4.0",
+		}
+		if err := printGitopsStatus(&buf, st); err != nil {
+			t.Fatalf("printGitopsStatus: %v", err)
+		}
+		out := buf.String()
+		for _, want := range []string{"fluxcd", "https://github.com/acme/clusters", "main", "clusters/prod", "Ready", "v2.4.0"} {
+			if !strings.Contains(out, want) {
+				t.Fatalf("expected output to contain %q, got %q", want, out)
+			}
+		}
+	})
+}
+
+func TestTranslateGitopsError(t *testing.T) {
 	tests := []struct {
 		name       string
-		obj        map[string]interface{}
-		wantConfig gitopsConfig
-		wantEmpty  bool
+		in         error
+		wantIsExp  bool
+		wantSubstr string
 	}{
-		{
-			name: "full gitops config",
-			obj: map[string]interface{}{
-				"spec": map[string]interface{}{
-					"addons": map[string]interface{}{
-						"gitops": map[string]interface{}{
-							"provider": "fluxcd",
-							"version":  "v2.7.5",
-							"repository": map[string]interface{}{
-								"url":    "https://github.com/acme/clusters",
-								"branch": "main",
-								"path":   "clusters/prod",
-							},
-						},
-					},
-				},
-			},
-			wantConfig: gitopsConfig{
-				Provider:   "fluxcd",
-				Version:    "v2.7.5",
-				Repository: "https://github.com/acme/clusters",
-				Branch:     "main",
-				Path:       "clusters/prod",
-			},
-		},
-		{
-			name: "no gitops config",
-			obj: map[string]interface{}{
-				"spec": map[string]interface{}{
-					"addons": map[string]interface{}{},
-				},
-			},
-			wantEmpty: true,
-		},
-		{
-			name: "no addons at all",
-			obj: map[string]interface{}{
-				"spec": map[string]interface{}{},
-			},
-			wantEmpty: true,
-		},
-		{
-			name: "partial config with provider only",
-			obj: map[string]interface{}{
-				"spec": map[string]interface{}{
-					"addons": map[string]interface{}{
-						"gitops": map[string]interface{}{
-							"provider": "argocd",
-						},
-					},
-				},
-			},
-			wantConfig: gitopsConfig{
-				Provider: "argocd",
-			},
-		},
+		{name: "session expired", in: serverhttp.ErrSessionExpired, wantIsExp: true},
+		{name: "forbidden", in: &serverhttp.ServerError{StatusCode: http.StatusForbidden, Message: "not a team operator"}, wantSubstr: "forbidden: not a team operator"},
+		{name: "not found", in: &serverhttp.ServerError{StatusCode: http.StatusNotFound, Message: "cluster not found"}, wantSubstr: "not found: cluster not found"},
+		{name: "conflict", in: &serverhttp.ServerError{StatusCode: http.StatusConflict, Message: "already enabled"}, wantSubstr: "conflict: already enabled"},
+		{name: "bad request", in: &serverhttp.ServerError{StatusCode: http.StatusBadRequest, Message: "repository required"}, wantSubstr: "invalid request: repository required"},
+		{name: "passthrough", in: errors.New("connection refused"), wantSubstr: "connection refused"},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			cfg := gitopsConfig{
-				Provider:   client.GetNestedString(tt.obj, "spec", "addons", "gitops", "provider"),
-				Version:    client.GetNestedString(tt.obj, "spec", "addons", "gitops", "version"),
-				Repository: client.GetNestedString(tt.obj, "spec", "addons", "gitops", "repository", "url"),
-				Branch:     client.GetNestedString(tt.obj, "spec", "addons", "gitops", "repository", "branch"),
-				Path:       client.GetNestedString(tt.obj, "spec", "addons", "gitops", "repository", "path"),
+			got := translateGitopsError(tt.in)
+			if tt.wantIsExp {
+				if !errors.Is(got, serverhttp.ErrSessionExpired) {
+					t.Fatalf("expected ErrSessionExpired, got %v", got)
+				}
+				return
 			}
-
-			isEmpty := cfg.Provider == "" && cfg.Version == "" && cfg.Repository == ""
-
-			if tt.wantEmpty && !isEmpty {
-				t.Errorf("expected empty config, got %+v", cfg)
-			}
-			if !tt.wantEmpty && isEmpty {
-				t.Errorf("expected non-empty config, got empty")
-			}
-			if !tt.wantEmpty && cfg != tt.wantConfig {
-				t.Errorf("config = %+v, want %+v", cfg, tt.wantConfig)
+			if got == nil || !strings.Contains(got.Error(), tt.wantSubstr) {
+				t.Fatalf("expected error containing %q, got %v", tt.wantSubstr, got)
 			}
 		})
 	}

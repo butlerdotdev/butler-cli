@@ -18,122 +18,175 @@ package cluster
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 
-	"github.com/butlerdotdev/butler/internal/common/client"
 	"github.com/butlerdotdev/butler/internal/common/log"
 	"github.com/butlerdotdev/butler/internal/common/output"
+	"github.com/butlerdotdev/butler/internal/common/serverhttp"
 	"github.com/spf13/cobra"
 )
 
-// gitopsConfig holds GitOps configuration extracted from a TenantCluster.
-type gitopsConfig struct {
-	Provider   string `json:"provider,omitempty"`
-	Version    string `json:"version,omitempty"`
-	Repository string `json:"repository,omitempty"`
-	Branch     string `json:"branch,omitempty"`
-	Path       string `json:"path,omitempty"`
+// gitOpsStatus mirrors butler-server's gitops.GitOpsStatusResponse JSON shape
+// (GET /api/clusters/{ns}/{name}/gitops/status). We do not import butler-server
+// types; the HTTP contract is the boundary. providerStatus is kept as raw JSON
+// so -o json round-trips the nested object without modeling its internals.
+type gitOpsStatus struct {
+	Enabled        bool            `json:"enabled"`
+	Provider       string          `json:"provider,omitempty"`
+	Repository     string          `json:"repository,omitempty"`
+	Branch         string          `json:"branch,omitempty"`
+	Path           string          `json:"path,omitempty"`
+	Status         string          `json:"status,omitempty"`
+	Version        string          `json:"version,omitempty"`
+	ProviderStatus json.RawMessage `json:"providerStatus,omitempty"`
 }
 
-type gitopsOptions struct {
-	namespace      string
-	outputFormat   string
-	kubeconfigPath string
-	kubeContext    string
-}
-
-// newGitopsCmd creates the cluster gitops command.
+// newGitopsCmd creates the `cluster gitops` command group. The bare-noun form
+// (`cluster gitops NAME`) defaults to the status subcommand so the historical
+// invocation keeps working, now showing live status from butler-server rather
+// than the declared spec.
 func newGitopsCmd(logger *log.Logger) *cobra.Command {
-	opts := &gitopsOptions{}
-
 	cmd := &cobra.Command{
-		Use:   "gitops NAME",
-		Short: "Show GitOps configuration for a tenant cluster",
-		Long: `Display the GitOps configuration for a tenant cluster.
+		Use:   "gitops [NAME]",
+		Short: "Manage GitOps lifecycle for a tenant cluster",
+		Long: `Manage the GitOps lifecycle for a tenant cluster.
 
-Reads the gitops section from the TenantCluster spec.addons and
-shows the configured provider, version, repository, branch, and path.
+Subcommands cover the full lifecycle: status, enable, disable, discover,
+preview, and export. These are server-orchestrated: the CLI calls butler-server
+over HTTP using the active login credential, and butler-server drives the
+tenant cluster.
 
-If no GitOps provider is configured on the cluster, a message is
-printed indicating that GitOps is not set up.
+Running ` + "`cluster gitops NAME`" + ` with no subcommand is equivalent to
+` + "`cluster gitops status NAME`" + `.
 
 Examples:
-  # Show GitOps config
+  butlerctl cluster gitops status my-cluster
   butlerctl cluster gitops my-cluster
-
-  # Show GitOps config for a cluster in a specific namespace
-  butlerctl cluster gitops my-cluster -n team-payments
-
-  # Output as JSON
-  butlerctl cluster gitops my-cluster -o json`,
-		Args:              cobra.ExactArgs(1),
+  butlerctl cluster gitops enable my-cluster --repo https://github.com/acme/clusters`,
+		Args:              cobra.MaximumNArgs(1),
 		ValidArgsFunction: completeClusterNames,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			opts.kubeContext, _ = cmd.Flags().GetString("context")
-			return runGitops(cmd.Context(), logger, args[0], opts)
+			if len(args) == 0 {
+				return cmd.Help()
+			}
+			ns, _ := cmd.Flags().GetString("namespace")
+			outputFormat, _ := cmd.Flags().GetString("output")
+			return runGitopsStatus(cmd.Context(), os.Stdout, args[0], ns, outputFormat)
 		},
 	}
 
-	cmd.Flags().StringVarP(&opts.namespace, "namespace", "n", DefaultTenantNamespace, "namespace of the TenantCluster")
-	cmd.Flags().StringVarP(&opts.outputFormat, "output", "o", "", "output format (json, yaml)")
-	cmd.Flags().StringVar(&opts.kubeconfigPath, "kubeconfig", "", "path to management cluster kubeconfig")
+	// Shared across the bare-noun form and every subcommand.
+	cmd.PersistentFlags().StringP("namespace", "n", DefaultTenantNamespace, "namespace of the TenantCluster")
+	cmd.PersistentFlags().StringP("output", "o", "", "output format (json, yaml)")
+
+	cmd.AddCommand(newGitopsStatusCmd(logger))
 
 	return cmd
 }
 
-func runGitops(ctx context.Context, logger *log.Logger, clusterName string, opts *gitopsOptions) error {
-	// Connect to management cluster
-	c, err := client.New(opts.kubeconfigPath, opts.kubeContext)
+// newGitopsStatusCmd creates `cluster gitops status`.
+func newGitopsStatusCmd(_ *log.Logger) *cobra.Command {
+	return &cobra.Command{
+		Use:   "status NAME",
+		Short: "Show live GitOps status for a tenant cluster",
+		Long: `Show the live GitOps status for a tenant cluster.
+
+Queries butler-server for the cluster's current GitOps state: whether GitOps
+is enabled, the provider, repository, branch, path, and sync status. This
+reflects the live Flux/Argo state, not only the declared spec.
+
+Exit codes:
+  0  status retrieved
+  1  client-side error or unexpected server error
+
+Examples:
+  butlerctl cluster gitops status my-cluster
+  butlerctl cluster gitops status my-cluster -n team-payments -o json`,
+		Args:              cobra.ExactArgs(1),
+		ValidArgsFunction: completeClusterNames,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			ns, _ := cmd.Flags().GetString("namespace")
+			outputFormat, _ := cmd.Flags().GetString("output")
+			return runGitopsStatus(cmd.Context(), os.Stdout, args[0], ns, outputFormat)
+		},
+	}
+}
+
+func runGitopsStatus(ctx context.Context, out io.Writer, name, namespace, outputFormat string) error {
+	sh, err := serverhttp.New()
 	if err != nil {
-		return fmt.Errorf("connecting to management cluster: %w", err)
+		return err
 	}
 
-	// Get the TenantCluster
-	tc, err := c.GetTenantCluster(ctx, opts.namespace, clusterName)
-	if err != nil {
-		return fmt.Errorf("getting TenantCluster %s/%s: %w", opts.namespace, clusterName, err)
+	var st gitOpsStatus
+	path := fmt.Sprintf("/api/clusters/%s/%s/gitops/status", namespace, name)
+	if err := sh.Get(ctx, path, &st); err != nil {
+		return translateGitopsError(err)
 	}
 
-	// Extract GitOps configuration from spec.addons.gitops
-	obj := tc.Object
-	cfg := gitopsConfig{
-		Provider:   client.GetNestedString(obj, "spec", "addons", "gitops", "provider"),
-		Version:    client.GetNestedString(obj, "spec", "addons", "gitops", "version"),
-		Repository: client.GetNestedString(obj, "spec", "addons", "gitops", "repository", "url"),
-		Branch:     client.GetNestedString(obj, "spec", "addons", "gitops", "repository", "branch"),
-		Path:       client.GetNestedString(obj, "spec", "addons", "gitops", "repository", "path"),
+	switch outputFormat {
+	case "json":
+		return output.PrintJSON(out, st)
+	case "yaml":
+		return output.PrintYAML(out, st)
+	case "", "table":
+		return printGitopsStatus(out, st)
+	default:
+		return fmt.Errorf("unsupported output format %q (use json or yaml)", outputFormat)
 	}
+}
 
-	// Check whether any GitOps config is present
-	notConfigured := cfg.Provider == "" && cfg.Version == "" && cfg.Repository == ""
-
-	// Handle structured output
-	if opts.outputFormat == "json" {
-		if notConfigured {
-			return output.PrintJSON(os.Stdout, nil)
-		}
-		return output.PrintJSON(os.Stdout, cfg)
-	}
-	if opts.outputFormat == "yaml" {
-		if notConfigured {
-			return output.PrintYAML(os.Stdout, nil)
-		}
-		return output.PrintYAML(os.Stdout, cfg)
-	}
-
-	if notConfigured {
-		fmt.Println("GitOps is not configured on this cluster.")
+// printGitopsStatus renders the status as a human-readable field/value table.
+func printGitopsStatus(out io.Writer, st gitOpsStatus) error {
+	if !st.Enabled {
+		fmt.Fprintln(out, "GitOps is not enabled on this cluster.")
+		fmt.Fprintln(out, "Enable it with: butlerctl cluster gitops enable <cluster> --repo <url>")
 		return nil
 	}
 
-	// Human-readable output
-	fmt.Println("GitOps Configuration:")
-	fmt.Printf("  Provider:   %s\n", orDefault(cfg.Provider, "<not set>"))
-	fmt.Printf("  Version:    %s\n", orDefault(cfg.Version, "<not set>"))
-	fmt.Printf("  Repository: %s\n", orDefault(cfg.Repository, "<not set>"))
-	fmt.Printf("  Branch:     %s\n", orDefault(cfg.Branch, "<not set>"))
-	fmt.Printf("  Path:       %s\n", orDefault(cfg.Path, "<not set>"))
+	t := output.NewTable(out, "FIELD", "VALUE")
+	t.AddRow("Enabled", "true")
+	t.AddRow("Provider", st.Provider)
+	t.AddRow("Repository", st.Repository)
+	t.AddRow("Branch", st.Branch)
+	if st.Path != "" {
+		t.AddRow("Path", st.Path)
+	}
+	if st.Status != "" {
+		t.AddRow("Status", st.Status)
+	}
+	if st.Version != "" {
+		t.AddRow("Version", st.Version)
+	}
+	return t.Flush()
+}
 
-	return nil
+// translateGitopsError maps butler-server responses to actionable text for the
+// cluster gitops commands. Mirrors the cert-rotate command's translation but
+// with GitOps-generic wording (the package already has a rotation-specific
+// translateServerError). Per-verb special cases (such as disable mapping 404
+// to success) are handled in the individual command before this is called.
+func translateGitopsError(err error) error {
+	if errors.Is(err, serverhttp.ErrSessionExpired) {
+		fmt.Fprintln(os.Stderr, "Butler session expired. Run 'butlerctl login' to re-authenticate.")
+		return err
+	}
+	var se *serverhttp.ServerError
+	if errors.As(err, &se) {
+		switch {
+		case se.IsForbidden():
+			return fmt.Errorf("forbidden: %s", se.Message)
+		case se.IsNotFound():
+			return fmt.Errorf("not found: %s", se.Message)
+		case se.IsConflict():
+			return fmt.Errorf("conflict: %s", se.Message)
+		case se.IsBadRequest():
+			return fmt.Errorf("invalid request: %s", se.Message)
+		}
+	}
+	return err
 }
