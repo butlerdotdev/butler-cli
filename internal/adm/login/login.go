@@ -140,6 +140,8 @@ func runLogin(ctx context.Context, logger *log.Logger, serverURL string, noBrows
 		User:             tr.User,
 		Kubeconfig:       tr.Kubeconfig,
 		ExpiresAt:        tr.ExpiresAt,
+		SessionToken:     tr.SessionToken,
+		SessionExpiresAt: tr.SessionExpiresAt,
 		RefreshToken:     tr.RefreshToken,
 		RefreshExpiresAt: tr.RefreshExpiresAt,
 	}

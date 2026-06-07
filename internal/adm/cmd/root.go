@@ -22,11 +22,11 @@ import (
 
 	"github.com/butlerdotdev/butler/internal/adm/addon"
 	"github.com/butlerdotdev/butler/internal/adm/bootstrap"
-	"github.com/butlerdotdev/butler/internal/tui"
 	butlerconfig "github.com/butlerdotdev/butler/internal/adm/config"
 	butlercontext "github.com/butlerdotdev/butler/internal/adm/context"
 	"github.com/butlerdotdev/butler/internal/adm/doctor"
 	"github.com/butlerdotdev/butler/internal/adm/env"
+	"github.com/butlerdotdev/butler/internal/adm/gitops"
 	"github.com/butlerdotdev/butler/internal/adm/idp"
 	"github.com/butlerdotdev/butler/internal/adm/login"
 	"github.com/butlerdotdev/butler/internal/adm/logout"
@@ -39,6 +39,7 @@ import (
 	"github.com/butlerdotdev/butler/internal/common/log"
 	"github.com/butlerdotdev/butler/internal/common/output"
 	"github.com/butlerdotdev/butler/internal/common/version"
+	"github.com/butlerdotdev/butler/internal/tui"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
@@ -116,6 +117,7 @@ Examples:
 	cmd.AddCommand(butlerconfig.NewConfigCmd(logger))
 	cmd.AddCommand(doctor.NewDoctorCmd(logger))
 	cmd.AddCommand(env.NewEnvCmd(logger))
+	cmd.AddCommand(gitops.NewGitopsCmd(logger))
 	cmd.AddCommand(idp.NewIDPCmd(logger))
 	cmd.AddCommand(network.NewNetworkCmd(logger))
 	cmd.AddCommand(status.NewStatusCmd(logger))
