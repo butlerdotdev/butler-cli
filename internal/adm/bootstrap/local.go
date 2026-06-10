@@ -91,17 +91,31 @@ func localConfig(name string) *orchestrator.Config {
 	return &orchestrator.Config{
 		Provider: "local",
 		Cluster: orchestrator.ClusterConfig{
-			Name:         name,
-			Topology:     "single-node",
-			ControlPlane: orchestrator.NodePoolConfig{Replicas: 1},
+			Name:     name,
+			Topology: "single-node",
+			// CPU/MemoryMB/DiskGB are schema-required VM specs. They are unused for
+			// the local provider (the KIND node is the control plane, not a VM), but
+			// must satisfy the ClusterBootstrap CRD minimums.
+			ControlPlane: orchestrator.NodePoolConfig{
+				Replicas: 1,
+				CPU:      2,
+				MemoryMB: 2048,
+				DiskGB:   20,
+			},
 		},
 		Network: orchestrator.NetworkConfig{
 			PodCIDR:     "10.244.0.0/16",
 			ServiceCIDR: "10.96.0.0/12",
 			// LoadBalancerPool is derived from the kind docker network at runtime.
 		},
+		// Talos.Version is unused for local (no Talos nodes) but the CRD requires a
+		// valid vX.Y.Z value.
+		Talos: orchestrator.TalosConfig{Version: "v1.9.3"},
 		Addons: orchestrator.AddonsConfig{
-			CNI:          orchestrator.CNIConfig{Type: "cilium"},
+			// The management cluster keeps KIND's default CNI (kindnet); installing
+			// Cilium here would conflict. Tenant clusters get Cilium separately.
+			CNI:          orchestrator.CNIConfig{Type: "none"},
+			Storage:      orchestrator.StorageConfig{Type: "none"},
 			LoadBalancer: orchestrator.LoadBalancerConfig{Type: "metallb"},
 			CAPI:         orchestrator.CAPIConfig{Version: "v1.9.4"},
 			ButlerController: orchestrator.ButlerControllerConfig{
