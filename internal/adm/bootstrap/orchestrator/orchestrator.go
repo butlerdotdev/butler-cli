@@ -1128,7 +1128,10 @@ func (o *Orchestrator) deployControllers(ctx context.Context, clientset *kuberne
 	// the deployment at that local image so the IsLocal install path runs (otherwise
 	// the published controller treats local as a VM provider and provisions machines).
 	if o.isLocal {
-		patch := []byte(`{"spec":{"template":{"spec":{"containers":[{"name":"manager","image":"ghcr.io/butlerdotdev/butler-bootstrap:latest","imagePullPolicy":"IfNotPresent"}]}}}}`)
+		// Recreate strategy: the controller binds a host port, so a rolling update
+		// would leave the new pod Pending on a port conflict while the old (published)
+		// pod keeps reconciling. Recreate deletes the old pod first.
+		patch := []byte(`{"spec":{"strategy":{"$retainKeys":["type"],"type":"Recreate"},"template":{"spec":{"containers":[{"name":"manager","image":"ghcr.io/butlerdotdev/butler-bootstrap:latest","imagePullPolicy":"IfNotPresent"}]}}}}`)
 		if _, err := clientset.AppsV1().Deployments(butlerNamespace).Patch(
 			ctx, "butler-bootstrap-controller", types.StrategicMergePatchType, patch, metav1.PatchOptions{}); err != nil {
 			return fmt.Errorf("patching bootstrap controller to local image: %w", err)
