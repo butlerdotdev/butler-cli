@@ -487,8 +487,10 @@ func runMgmtExport(ctx context.Context, out io.Writer, outputFormat string, opts
 		return output.PrintJSON(out, res)
 	case "yaml":
 		return output.PrintYAML(out, res)
-	default:
+	case "", "table":
 		return printExportResult(out, res)
+	default:
+		return fmt.Errorf("unsupported output format %q (use json or yaml)", outputFormat)
 	}
 }
 
