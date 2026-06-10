@@ -1136,6 +1136,12 @@ func (o *Orchestrator) deployControllers(ctx context.Context, clientset *kuberne
 	}
 	o.logger.Success("butler-bootstrap-controller is ready")
 
+	// The local provider has no Butler provider controller (CAPD handles tenant
+	// workers), so there is nothing further to wait for.
+	if o.isLocal {
+		return nil
+	}
+
 	// Wait for provider controller
 	providerDeployment := fmt.Sprintf("butler-provider-%s", cfg.Provider)
 	if err := deployer.WaitForDeployment(waitCtx, butlerNamespace, providerDeployment); err != nil {
