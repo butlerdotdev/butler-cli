@@ -47,6 +47,8 @@ Google Workspace, Microsoft Entra ID, Okta, or generic OIDC providers.
 Examples:
   butleradm idp list
   butleradm idp get google-workspace
+  butleradm idp create okta --from-file okta.yaml
+  butleradm idp test --issuer-url https://accounts.google.com
   butleradm idp delete old-provider`,
 		PersistentPreRun: func(cmd *cobra.Command, args []string) {
 			auth.WarnIfUnauthenticated()
@@ -55,7 +57,13 @@ Examples:
 
 	cmd.AddCommand(newListCmd(logger))
 	cmd.AddCommand(newGetCmd(logger))
+	cmd.AddCommand(newCreateCmd(logger))
+	cmd.AddCommand(newUpdateCmd(logger))
 	cmd.AddCommand(newDeleteCmd(logger))
+
+	// OIDC discovery probes (P1 #6): non-mutating pre-create and existing-IdP checks.
+	cmd.AddCommand(newTestCmd(logger))
+	cmd.AddCommand(newValidateCmd(logger))
 
 	return cmd
 }
