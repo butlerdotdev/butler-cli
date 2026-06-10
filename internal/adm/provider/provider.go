@@ -54,31 +54,45 @@ providers like Nutanix, Harvester, Proxmox, or cloud platforms.
 
 Commands:
   list      List all provider configurations
+  get       Show a provider configuration
   create    Create a new provider configuration
+  update    Update a provider configuration from a YAML file
   delete    Delete a provider configuration
   validate  Test connectivity to a provider
+  images    List images available to a provider (harvester, nutanix)
+  networks  List networks available to a provider (harvester, nutanix)
 
 Examples:
   # List all providers
   butleradm provider list
 
+  # Show one provider
+  butleradm provider get nutanix
+
   # Create a provider from file
   butleradm provider create --from-file provider-harvester.yaml
 
-  # Delete a provider
-  butleradm provider delete harvester-prod
+  # Update a provider's spec from file
+  butleradm provider update nutanix --from-file nutanix-updated.yaml
 
-  # Validate a provider configuration
-  butleradm provider validate nutanix`,
+  # Discover image and network IDs for cluster create
+  butleradm provider images nutanix
+  butleradm provider networks nutanix`,
 		PersistentPreRun: func(cmd *cobra.Command, args []string) {
 			auth.WarnIfUnauthenticated()
 		},
 	}
 
 	cmd.AddCommand(newListCmd(logger))
+	cmd.AddCommand(newGetCmd(logger))
 	cmd.AddCommand(newCreateCmd(logger))
+	cmd.AddCommand(newUpdateCmd(logger))
 	cmd.AddCommand(newDeleteCmd(logger))
 	cmd.AddCommand(newValidateCmd(logger))
+
+	// Provider resource discovery (P1 #5): image/network IDs for cluster create.
+	cmd.AddCommand(newImagesCmd(logger))
+	cmd.AddCommand(newNetworksCmd(logger))
 
 	return cmd
 }
