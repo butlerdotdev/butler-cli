@@ -121,7 +121,7 @@ func runList(ctx context.Context, logger *log.Logger, kubeconfigPath, kubeContex
 	for _, idp := range list.Items {
 		name := idp.GetName()
 		idpType := client.GetNestedString(idp.Object, "spec", "type")
-		issuer := client.GetNestedString(idp.Object, "spec", "issuerURL")
+		issuer := client.GetNestedString(idp.Object, "spec", "oidc", "issuerURL")
 		phase := client.GetNestedString(idp.Object, "status", "phase")
 		age := output.FormatAge(idp.GetCreationTimestamp().Time)
 
@@ -195,14 +195,14 @@ func runGet(ctx context.Context, logger *log.Logger, name, kubeconfigPath, kubeC
 
 	// Human-readable detail view
 	idpType := client.GetNestedString(idp.Object, "spec", "type")
-	issuer := client.GetNestedString(idp.Object, "spec", "issuerURL")
-	clientID := client.GetNestedString(idp.Object, "spec", "clientID")
+	issuer := client.GetNestedString(idp.Object, "spec", "oidc", "issuerURL")
+	clientID := client.GetNestedString(idp.Object, "spec", "oidc", "clientID")
 	phase := client.GetNestedString(idp.Object, "status", "phase")
 	message := client.GetNestedString(idp.Object, "status", "message")
 	age := output.FormatAge(idp.GetCreationTimestamp().Time)
 
 	// Extract scopes
-	scopesRaw, _, _ := unstructuredNestedSlice(idp.Object, "spec", "scopes")
+	scopesRaw, _, _ := unstructuredNestedSlice(idp.Object, "spec", "oidc", "scopes")
 	var scopes []string
 	for _, s := range scopesRaw {
 		if str, ok := s.(string); ok {
@@ -211,8 +211,8 @@ func runGet(ctx context.Context, logger *log.Logger, name, kubeconfigPath, kubeC
 	}
 
 	// Extract claim mappings
-	emailClaim := client.GetNestedString(idp.Object, "spec", "claims", "email")
-	groupsClaim := client.GetNestedString(idp.Object, "spec", "claims", "groups")
+	emailClaim := client.GetNestedString(idp.Object, "spec", "oidc", "emailClaim")
+	groupsClaim := client.GetNestedString(idp.Object, "spec", "oidc", "groupsClaim")
 
 	fmt.Printf("Name:         %s\n", idp.GetName())
 	fmt.Printf("Type:         %s\n", idpType)
