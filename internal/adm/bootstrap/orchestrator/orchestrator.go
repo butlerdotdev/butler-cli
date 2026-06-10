@@ -1123,6 +1123,19 @@ func (o *Orchestrator) deployControllers(ctx context.Context, clientset *kuberne
 		return fmt.Errorf("deploying controllers: %w", err)
 	}
 
+	// The embedded manifest pins a published bootstrap image tag, but for the local
+	// provider we just built and loaded the controller from source as :latest. Point
+	// the deployment at that local image so the IsLocal install path runs (otherwise
+	// the published controller treats local as a VM provider and provisions machines).
+	if o.isLocal {
+		patch := []byte(`{"spec":{"template":{"spec":{"containers":[{"name":"manager","image":"ghcr.io/butlerdotdev/butler-bootstrap:latest","imagePullPolicy":"IfNotPresent"}]}}}}`)
+		if _, err := clientset.AppsV1().Deployments(butlerNamespace).Patch(
+			ctx, "butler-bootstrap-controller", types.StrategicMergePatchType, patch, metav1.PatchOptions{}); err != nil {
+			return fmt.Errorf("patching bootstrap controller to local image: %w", err)
+		}
+		o.logger.Info("patched bootstrap controller to local image", "image", "ghcr.io/butlerdotdev/butler-bootstrap:latest")
+	}
+
 	// Wait for controllers to be ready
 	o.logger.Debug("waiting for controllers to be ready")
 
