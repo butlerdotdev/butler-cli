@@ -215,6 +215,17 @@ butlerctl cluster kubeconfig my-app             # Download kubeconfig
 butlerctl cluster delete my-app                 # Delete cluster
 ```
 
+### GitOps Operations
+
+```sh
+butlerctl cluster gitops status my-app                           # Live GitOps status
+butlerctl cluster gitops enable my-app --repo <url>              # Enable GitOps (Flux)
+butlerctl cluster gitops discover my-app                         # Discover Helm releases
+butlerctl cluster gitops preview my-app                          # Preview cluster export (dry-run)
+butlerctl cluster gitops export my-app --repo <url> --create-pr  # Export inventory to git
+butlerctl cluster gitops disable my-app                          # Disable GitOps
+```
+
 ### Addon Operations
 
 ```sh

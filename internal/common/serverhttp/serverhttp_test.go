@@ -365,3 +365,38 @@ func TestNew_MissingSessionToken_Errors(t *testing.T) {
 		t.Fatal("New() succeeded with empty SessionToken; want error")
 	}
 }
+
+func TestNewWithTimeout_SetsTimeout(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	cf := &auth.CredentialFile{
+		ActiveServer: "http://test",
+		Servers: map[string]*auth.ServerCredential{
+			"http://test": {
+				User:         auth.UserInfo{Email: "test@example.com"},
+				ExpiresAt:    time.Now().Add(time.Hour),
+				SessionToken: "tok",
+				RefreshToken: "x",
+			},
+		},
+	}
+	if err := cf.Save(); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+
+	c, err := NewWithTimeout(90 * time.Second)
+	if err != nil {
+		t.Fatalf("NewWithTimeout: %v", err)
+	}
+	if c.http.Timeout != 90*time.Second {
+		t.Fatalf("timeout = %v, want 90s", c.http.Timeout)
+	}
+
+	// New keeps the default.
+	d, err := New()
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	if d.http.Timeout != DefaultTimeout {
+		t.Fatalf("New timeout = %v, want %v", d.http.Timeout, DefaultTimeout)
+	}
+}

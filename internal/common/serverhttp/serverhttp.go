@@ -99,10 +99,23 @@ type Client struct {
 	http      *http.Client
 }
 
-// New constructs a Client from the active butler credential. Errors if no
-// active credential exists, the credential is missing a session token
-// (e.g., issued by a pre-amendment server), or the server URL is empty.
+// DefaultTimeout is the HTTP client timeout used by New. It suits the common
+// case of quick request/response calls.
+const DefaultTimeout = 30 * time.Second
+
+// New constructs a Client from the active butler credential with the default
+// timeout. Errors if no active credential exists, the credential is missing a
+// session token (e.g., issued by a pre-amendment server), or the server URL is
+// empty.
 func New() (*Client, error) {
+	return NewWithTimeout(DefaultTimeout)
+}
+
+// NewWithTimeout is New with a caller-chosen HTTP client timeout. Long-running
+// server-orchestrated operations (e.g. GitOps enable, which runs flux
+// bootstrap, or a cluster export that pushes to git) exceed the default and
+// should pass a larger timeout.
+func NewWithTimeout(timeout time.Duration) (*Client, error) {
 	creds, err := auth.LoadCredentials()
 	if err != nil {
 		return nil, fmt.Errorf("loading credentials: %w", err)
@@ -120,7 +133,7 @@ func New() (*Client, error) {
 	return &Client{
 		serverURL: creds.ActiveServer,
 		creds:     creds,
-		http:      &http.Client{Timeout: 30 * time.Second},
+		http:      &http.Client{Timeout: timeout},
 	}, nil
 }
 
