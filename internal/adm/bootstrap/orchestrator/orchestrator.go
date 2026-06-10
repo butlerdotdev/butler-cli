@@ -34,6 +34,7 @@ import (
 	"github.com/butlerdotdev/butler/internal/adm/bootstrap/manifests"
 	"github.com/butlerdotdev/butler/internal/common/log"
 	corev1 "k8s.io/api/core/v1"
+	rbacv1 "k8s.io/api/rbac/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -1137,6 +1138,23 @@ func (o *Orchestrator) deployControllers(ctx context.Context, clientset *kuberne
 			return fmt.Errorf("patching bootstrap controller to local image: %w", err)
 		}
 		o.logger.Info("patched bootstrap controller to local image", "image", "ghcr.io/butlerdotdev/butler-bootstrap:latest")
+
+		// For local the controller installs addons onto its own cluster using its
+		// in-cluster credentials. Its default RBAC is scoped for remote installs via a
+		// provisioned kubeconfig, so grant it cluster-admin on this (local) cluster.
+		crb := &rbacv1.ClusterRoleBinding{
+			ObjectMeta: metav1.ObjectMeta{Name: "butler-local-bootstrap-admin"},
+			RoleRef:    rbacv1.RoleRef{APIGroup: "rbac.authorization.k8s.io", Kind: "ClusterRole", Name: "cluster-admin"},
+			Subjects: []rbacv1.Subject{{
+				Kind:      "ServiceAccount",
+				Name:      "butler-bootstrap-controller",
+				Namespace: butlerNamespace,
+			}},
+		}
+		if _, err := clientset.RbacV1().ClusterRoleBindings().Create(ctx, crb, metav1.CreateOptions{}); err != nil && !strings.Contains(err.Error(), "already exists") {
+			return fmt.Errorf("granting bootstrap controller cluster-admin for local: %w", err)
+		}
+		o.logger.Info("granted bootstrap controller cluster-admin for local install")
 	}
 
 	// Wait for controllers to be ready
