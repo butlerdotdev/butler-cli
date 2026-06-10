@@ -60,6 +60,13 @@ func (d *Deployer) DeployControllers(ctx context.Context, provider string) error
 		return fmt.Errorf("deploying butler-bootstrap: %w", err)
 	}
 
+	// The local provider uses the Cluster API Docker provider (CAPD) for tenant
+	// workers, installed during the addon phase. There is no Butler provider
+	// controller to deploy.
+	if provider == "local" {
+		return nil
+	}
+
 	// Deploy provider-specific controller
 	providerFile := fmt.Sprintf("controllers/butler-provider-%s.yaml", provider)
 	if err := d.deployFile(ctx, Controllers, providerFile); err != nil {
