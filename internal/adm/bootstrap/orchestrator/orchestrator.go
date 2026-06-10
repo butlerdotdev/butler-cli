@@ -110,6 +110,13 @@ type Orchestrator struct {
 	logger    *log.Logger
 	options   Options
 	eventSink EventSink
+
+	// isLocal is true for the local provider, which installs Butler onto the KIND
+	// cluster itself (no provisioned cluster, no pivot, no teardown).
+	isLocal bool
+	// kindKubeconfigPath is the path to the KIND cluster's kubeconfig. For the local
+	// provider this kubeconfig is also the management cluster kubeconfig.
+	kindKubeconfigPath string
 }
 
 // New creates a new orchestrator
@@ -151,6 +158,8 @@ func (o *Orchestrator) Run(ctx context.Context, cfg *Config) error {
 	o.logger.Phase("Initializing bootstrap")
 	o.emit(Event{Type: EventPhaseChange, Phase: "Initializing", Message: "Initializing bootstrap"})
 
+	o.isLocal = cfg.Provider == "local"
+
 	// Create context with timeout
 	ctx, cancel := context.WithTimeout(ctx, o.options.Timeout)
 	defer cancel()
@@ -164,6 +173,20 @@ func (o *Orchestrator) Run(ctx context.Context, cfg *Config) error {
 	if err != nil {
 		return fmt.Errorf("creating KIND cluster: %w", err)
 	}
+	o.kindKubeconfigPath = kubeconfigPath
+
+	// The local provider's MetalLB pool must live in the kind docker network so CAPD
+	// worker containers (on the same network) can reach tenant LoadBalancer IPs. Derive
+	// it now that the network exists.
+	if o.isLocal && cfg.Network.LoadBalancerPool == nil {
+		if pool, derr := deriveKindLBPool(ctx); derr != nil {
+			o.logger.Warn("Failed to derive MetalLB pool from kind network, using default", "error", derr)
+			cfg.Network.LoadBalancerPool = &LBPoolConfig{Start: "172.18.255.200", End: "172.18.255.250"}
+		} else {
+			o.logger.Info("Derived MetalLB pool from kind docker network", "start", pool.Start, "end", pool.End)
+			cfg.Network.LoadBalancerPool = pool
+		}
+	}
 	// Tell the TUI where the KIND kubeconfig lives so it can start streaming
 	// butler-bootstrap-controller and butler-provider-* pod logs into the
 	// debug panel.
@@ -174,7 +197,9 @@ func (o *Orchestrator) Run(ctx context.Context, cfg *Config) error {
 		KINDKubeconfig: kubeconfigPath,
 	})
 	defer func() {
-		if !o.options.SkipCleanup {
+		// The local provider keeps the KIND cluster: it is the management cluster,
+		// not throwaway scaffolding, so the demo needs it to persist.
+		if !o.options.SkipCleanup && !o.isLocal {
 			o.logger.Phase("Cleaning up KIND cluster")
 			o.emit(Event{Type: EventPhaseChange, Phase: "CleaningUp", Message: "Cleaning up KIND cluster"})
 			if err := kindProvider.Delete(kindClusterName, ""); err != nil {
@@ -494,18 +519,37 @@ func (o *Orchestrator) scanCertDirectory(dir string) []string {
 	return certs
 }
 
-// buildKINDConfig generates a KIND cluster configuration with CA certificate mounts
-func (o *Orchestrator) buildKINDConfig(caCerts []string) string {
-	if len(caCerts) == 0 {
-		// No custom certs, use minimal config
-		return `kind: Cluster
-apiVersion: kind.x-k8s.io/v1alpha4
-nodes:
-  - role: control-plane
-`
+// deriveKindLBPool inspects the kind docker network and returns a MetalLB pool high in
+// its IPv4 subnet, so LoadBalancer IPs are reachable by CAPD worker containers on the
+// same network.
+func deriveKindLBPool(ctx context.Context) (*LBPoolConfig, error) {
+	out, err := exec.CommandContext(ctx, "docker", "network", "inspect", "kind",
+		"-f", "{{range .IPAM.Config}}{{.Subnet}} {{end}}").Output()
+	if err != nil {
+		return nil, fmt.Errorf("docker network inspect kind: %w", err)
 	}
+	for _, field := range strings.Fields(string(out)) {
+		ip, _, perr := net.ParseCIDR(field)
+		if perr != nil {
+			continue
+		}
+		ip4 := ip.To4()
+		if ip4 == nil {
+			continue // skip IPv6 subnets
+		}
+		return &LBPoolConfig{
+			Start: fmt.Sprintf("%d.%d.255.200", ip4[0], ip4[1]),
+			End:   fmt.Sprintf("%d.%d.255.250", ip4[0], ip4[1]),
+		}, nil
+	}
+	return nil, fmt.Errorf("no IPv4 subnet found on kind network")
+}
 
-	// Build extraMounts for each certificate
+// buildKINDConfig generates a KIND cluster configuration with CA certificate mounts.
+// For the local provider it also mounts the host Docker socket so the in-cluster CAPD
+// controller can create sibling node containers, and maps the console NodePort to the host.
+func (o *Orchestrator) buildKINDConfig(caCerts []string) string {
+	// Build extraMounts for each certificate.
 	var mounts strings.Builder
 	for i, certPath := range caCerts {
 		containerPath := fmt.Sprintf("/usr/local/share/ca-certificates/butler-custom-%d.crt", i)
@@ -515,12 +559,34 @@ nodes:
 `, certPath, containerPath))
 	}
 
-	return fmt.Sprintf(`kind: Cluster
+	if o.isLocal {
+		// Mount the host Docker socket so the CAPD (Cluster API Docker) controller
+		// running inside this cluster can create sibling node containers. Without
+		// this mount, DockerMachines never provision and the tenant hangs.
+		mounts.WriteString(`      - hostPath: /var/run/docker.sock
+        containerPath: /var/run/docker.sock
+`)
+	}
+
+	var b strings.Builder
+	b.WriteString(`kind: Cluster
 apiVersion: kind.x-k8s.io/v1alpha4
 nodes:
   - role: control-plane
-    extraMounts:
-%s`, mounts.String())
+`)
+	if mounts.Len() > 0 {
+		b.WriteString("    extraMounts:\n")
+		b.WriteString(mounts.String())
+	}
+	if o.isLocal {
+		// Expose the Butler console NodePort on the host for the laptop demo.
+		b.WriteString(`    extraPortMappings:
+      - containerPort: 30080
+        hostPort: 8080
+        protocol: TCP
+`)
+	}
+	return b.String()
 }
 
 // installCACertificates runs update-ca-certificates in the KIND node
@@ -1335,6 +1401,14 @@ func (o *Orchestrator) buildProviderConfigUnstructured(cfg *Config) *unstructure
 	case "proxmox":
 		// TODO: Proxmox ProviderConfig not yet implemented
 
+	case "local":
+		// The local provider needs no credentials. It is platform-scoped so tenant
+		// clusters can reference it, and uses cloud network mode to skip IPAM
+		// (CAPD manages container networking).
+		spec["scope"] = map[string]interface{}{"type": "platform"}
+		spec["network"] = map[string]interface{}{"mode": "cloud"}
+		spec["local"] = map[string]interface{}{}
+
 	case "gcp":
 		spec["credentialsRef"] = map[string]interface{}{
 			"name":      cfg.Cluster.Name + "-gcp-credentials",
@@ -1516,7 +1590,7 @@ func (o *Orchestrator) buildClusterBootstrapUnstructured(cfg *Config) *unstructu
 					}
 					return n
 				}(),
-				"talos": buildTalosSpec(cfg),
+				"talos":  buildTalosSpec(cfg),
 				"addons": buildAddonsConfig(cfg),
 			},
 		},
@@ -1649,18 +1723,31 @@ func (o *Orchestrator) watchBootstrap(ctx context.Context, client dynamic.Interf
 			case "Ready":
 				o.logger.Success("Cluster is ready!")
 
-				// Decode kubeconfig
-				kubeconfig, _ := status["kubeconfig"].(string)
-				kubeconfigBytes, err := base64.StdEncoding.DecodeString(kubeconfig)
-				if err != nil {
-					return nil, fmt.Errorf("decoding kubeconfig: %w", err)
-				}
+				var kubeconfigBytes, talosconfigBytes []byte
+				if o.isLocal {
+					// The KIND cluster IS the management cluster, so its kubeconfig is the
+					// management kubeconfig. There is no Talos config for a local cluster.
+					kc, readErr := os.ReadFile(o.kindKubeconfigPath)
+					if readErr != nil {
+						return nil, fmt.Errorf("reading KIND kubeconfig: %w", readErr)
+					}
+					kubeconfigBytes = kc
+				} else {
+					// Decode kubeconfig
+					kubeconfig, _ := status["kubeconfig"].(string)
+					kc, decErr := base64.StdEncoding.DecodeString(kubeconfig)
+					if decErr != nil {
+						return nil, fmt.Errorf("decoding kubeconfig: %w", decErr)
+					}
+					kubeconfigBytes = kc
 
-				// Decode talosconfig - NOTE: JSON field is lowercase "talosconfig"
-				talosconfig, _ := status["talosconfig"].(string)
-				talosconfigBytes, err := base64.StdEncoding.DecodeString(talosconfig)
-				if err != nil {
-					return nil, fmt.Errorf("decoding talosconfig: %w", err)
+					// Decode talosconfig - NOTE: JSON field is lowercase "talosconfig"
+					talosconfig, _ := status["talosconfig"].(string)
+					tc, decErr := base64.StdEncoding.DecodeString(talosconfig)
+					if decErr != nil {
+						return nil, fmt.Errorf("decoding talosconfig: %w", decErr)
+					}
+					talosconfigBytes = tc
 				}
 
 				creds := &clusterCredentials{
@@ -1787,24 +1874,37 @@ func (o *Orchestrator) buildAndLoadImages(ctx context.Context, provider string) 
 	// pointing to a sibling repo (e.g., replace ../butler-api). In that case
 	// the Docker build context must be the parent directory so the sibling
 	// is accessible, and -f points to the repo's Dockerfile.
-	images := []struct {
+	type buildImage struct {
 		name             string
 		repoDir          string
 		image            string
 		useParentContext bool
-	}{
+	}
+	images := []buildImage{
 		{
 			name:             "butler-bootstrap",
 			repoDir:          filepath.Join(o.options.RepoRoot, "butler-bootstrap"),
 			image:            "ghcr.io/butlerdotdev/butler-bootstrap:latest",
 			useParentContext: true,
 		},
-		{
+	}
+	if o.isLocal {
+		// The local provider uses CAPD for tenant workers (there is no
+		// butler-provider-local), and it needs butler-controller built from source
+		// so the CAPD resource builder is present.
+		images = append(images, buildImage{
+			name:             "butler-controller",
+			repoDir:          filepath.Join(o.options.RepoRoot, "butler-controller"),
+			image:            "ghcr.io/butlerdotdev/butler-controller:latest",
+			useParentContext: true,
+		})
+	} else {
+		images = append(images, buildImage{
 			name:             fmt.Sprintf("butler-provider-%s", provider),
 			repoDir:          filepath.Join(o.options.RepoRoot, fmt.Sprintf("butler-provider-%s", provider)),
 			image:            fmt.Sprintf("ghcr.io/butlerdotdev/butler-provider-%s:latest", provider),
 			useParentContext: true,
-		},
+		})
 	}
 
 	for _, img := range images {
