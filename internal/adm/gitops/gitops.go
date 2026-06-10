@@ -55,5 +55,13 @@ Examples:
 	cmd.AddCommand(newRepositoriesCmd(logger))
 	cmd.AddCommand(newBranchesCmd(logger))
 
+	// Management cluster GitOps lifecycle (Feature 2.3).
+	cmd.AddCommand(newGitopsStatusCmd(logger))
+	cmd.AddCommand(newGitopsDiscoverCmd(logger))
+	cmd.AddCommand(newGitopsPreviewCmd(logger))
+	cmd.AddCommand(newGitopsExportCmd(logger))
+	cmd.AddCommand(newGitopsEnableCmd(logger))
+	cmd.AddCommand(newGitopsDisableCmd(logger))
+
 	return cmd
 }
