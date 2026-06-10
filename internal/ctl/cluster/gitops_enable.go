@@ -78,9 +78,12 @@ Exit codes:
   0  GitOps enabled
   1  client-side error or server error
 
+The --repo value is the repository in owner/repo form (for example acme/clusters),
+not a URL.
+
 Examples:
-  butlerctl cluster gitops enable my-cluster --repo https://github.com/acme/clusters
-  butlerctl cluster gitops enable my-cluster --repo https://github.com/acme/clusters --branch main --path clusters/my-cluster`,
+  butlerctl cluster gitops enable my-cluster --repo acme/clusters
+  butlerctl cluster gitops enable my-cluster --repo acme/clusters --branch main --path clusters/my-cluster`,
 		Args:              cobra.ExactArgs(1),
 		ValidArgsFunction: completeClusterNames,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -90,7 +93,7 @@ Examples:
 		},
 	}
 
-	cmd.Flags().StringVar(&opts.repository, "repo", "", "GitOps repository URL (required)")
+	cmd.Flags().StringVar(&opts.repository, "repo", "", "GitOps repository in owner/repo form, e.g. acme/clusters (required)")
 	cmd.Flags().StringVar(&opts.branch, "branch", "main", "repository branch")
 	cmd.Flags().StringVar(&opts.path, "path", "", "path within the repository (defaults server-side to clusters/<name>)")
 	cmd.Flags().StringVar(&opts.provider, "provider", "github", "git provider (github, gitlab)")
@@ -111,6 +114,10 @@ func buildEnableRequest(opts *enableOptions) enableRequest {
 }
 
 func runGitopsEnable(ctx context.Context, out io.Writer, name, namespace, outputFormat string, opts *enableOptions) error {
+	if err := validateRepoFullName(opts.repository); err != nil {
+		return err
+	}
+
 	sh, err := serverhttp.NewWithTimeout(gitopsEnableTimeout)
 	if err != nil {
 		return err

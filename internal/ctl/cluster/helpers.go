@@ -321,3 +321,19 @@ func getCurrentContext() string {
 
 	return "(unknown)"
 }
+
+// validateRepoFullName checks that a --repo value is in owner/repo form, which
+// is what butler-server's gitops enable/export expect (it parses owner and repo
+// from the last "/"). A full URL is the common mistake, so it gets a specific
+// hint. GitLab subgroup paths (group/subgroup/repo) are allowed: only the last
+// segment is the repo, matching the server's parsing.
+func validateRepoFullName(repo string) error {
+	if strings.Contains(repo, "://") || strings.HasPrefix(repo, "git@") {
+		return fmt.Errorf("--repo must be in owner/repo form (for example acme/clusters), not a URL: %q", repo)
+	}
+	idx := strings.LastIndex(repo, "/")
+	if idx <= 0 || idx == len(repo)-1 {
+		return fmt.Errorf("--repo must be in owner/repo form (for example acme/clusters): %q", repo)
+	}
+	return nil
+}

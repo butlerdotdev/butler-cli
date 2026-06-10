@@ -89,9 +89,12 @@ Exit codes:
   0  export completed
   1  client-side error or server error
 
+The --repo value is the repository in owner/repo form (for example acme/clusters),
+not a URL.
+
 Examples:
-  butlerctl cluster gitops export my-cluster --repo https://github.com/acme/clusters
-  butlerctl cluster gitops export my-cluster --repo https://github.com/acme/clusters --create-pr --pr-title "GitOps export"`,
+  butlerctl cluster gitops export my-cluster --repo acme/clusters
+  butlerctl cluster gitops export my-cluster --repo acme/clusters --create-pr --pr-title "GitOps export"`,
 		Args:              cobra.ExactArgs(1),
 		ValidArgsFunction: completeClusterNames,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -101,7 +104,7 @@ Examples:
 		},
 	}
 
-	cmd.Flags().StringVar(&opts.repository, "repo", "", "target GitOps repository URL (required)")
+	cmd.Flags().StringVar(&opts.repository, "repo", "", "target GitOps repository in owner/repo form, e.g. acme/clusters (required)")
 	cmd.Flags().StringVar(&opts.branch, "branch", "main", "repository branch")
 	cmd.Flags().BoolVar(&opts.createPR, "create-pr", false, "open a pull request instead of pushing directly")
 	cmd.Flags().StringVar(&opts.prTitle, "pr-title", "", "pull request title (with --create-pr)")
@@ -128,6 +131,10 @@ func buildExportRequest(opts *exportOptions) exportRequest {
 }
 
 func runGitopsExport(ctx context.Context, out io.Writer, name, namespace, outputFormat string, opts *exportOptions) error {
+	if err := validateRepoFullName(opts.repository); err != nil {
+		return err
+	}
+
 	sh, err := serverhttp.NewWithTimeout(gitopsExportTimeout)
 	if err != nil {
 		return err
