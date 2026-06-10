@@ -1893,10 +1893,12 @@ func (o *Orchestrator) buildAndLoadImages(ctx context.Context, provider string) 
 		// butler-provider-local), and it needs butler-controller built from source
 		// so the CAPD resource builder is present.
 		images = append(images, buildImage{
-			name:             "butler-controller",
-			repoDir:          filepath.Join(o.options.RepoRoot, "butler-controller"),
-			image:            "ghcr.io/butlerdotdev/butler-controller:latest",
-			useParentContext: true,
+			name:    "butler-controller",
+			repoDir: filepath.Join(o.options.RepoRoot, "butler-controller"),
+			image:   "ghcr.io/butlerdotdev/butler-controller:latest",
+			// butler-controller fetches butler-api as a normal module (no sibling
+			// replace), so it builds with its own repo as the context.
+			useParentContext: false,
 		})
 	} else {
 		images = append(images, buildImage{
