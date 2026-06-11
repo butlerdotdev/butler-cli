@@ -563,6 +563,16 @@ func (o *Orchestrator) configureLocalProfile(ctx context.Context, kubeconfigPath
 		}
 	}
 
+	// Expose the console on the kind node's mapped host port so it is reachable at
+	// http://localhost:8080 with no port-forward. The KIND config maps host 8080 to
+	// container NodePort 30080 (see buildKINDConfig); flip the frontend Service to it.
+	consolePatch := []byte(`{"spec":{"type":"NodePort","ports":[{"port":80,"nodePort":30080}]}}`)
+	if _, err := clientset.CoreV1().Services(butlerNamespace).Patch(ctx, "butler-console-frontend", types.StrategicMergePatchType, consolePatch, metav1.PatchOptions{}); err != nil {
+		o.logger.Warn("Failed to expose console on host port 8080", "error", err)
+	} else {
+		o.logger.Info("Console reachable at http://localhost:8080")
+	}
+
 	o.logger.Success("Local stability profile applied")
 	return nil
 }
