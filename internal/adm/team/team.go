@@ -64,6 +64,11 @@ Examples:
 	cmd.AddCommand(newAddMemberCmd(logger))
 	cmd.AddCommand(newRemoveMemberCmd(logger))
 
+	cmd.AddCommand(newUpdateMemberRoleCmd(logger))
+	cmd.AddCommand(newAddGroupCmd(logger))
+	cmd.AddCommand(newUpdateGroupRoleCmd(logger))
+	cmd.AddCommand(newRemoveGroupCmd(logger))
+
 	return cmd
 }
 
