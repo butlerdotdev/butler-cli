@@ -564,15 +564,20 @@ func (o *Orchestrator) configureLocalProfile(ctx context.Context, kubeconfigPath
 	}
 
 	// The console impersonates the logged-in admin user when writing platform resources
-	// (teams, users). The default admin login identity is admin@butler.local, which has
-	// no RBAC binding out of the box, so grant it cluster-admin for the local demo.
-	adminCRB := &rbacv1.ClusterRoleBinding{
-		ObjectMeta: metav1.ObjectMeta{Name: "butler-local-admin-user"},
-		RoleRef:    rbacv1.RoleRef{APIGroup: "rbac.authorization.k8s.io", Kind: "ClusterRole", Name: "cluster-admin"},
-		Subjects:   []rbacv1.Subject{{APIGroup: "rbac.authorization.k8s.io", Kind: "User", Name: "admin@butler.local"}},
-	}
-	if _, err := clientset.RbacV1().ClusterRoleBindings().Create(ctx, adminCRB, metav1.CreateOptions{}); err != nil && !strings.Contains(err.Error(), "already exists") {
-		o.logger.Warn("Failed to grant admin user cluster-admin", "error", err)
+	// (teams, users), but the seeded admin User has no RBAC binding out of the box.
+	// Grant cluster-admin to both possible login identities so local works whether the
+	// running butler-server uses the legacy admin@butler.local identity or the corrected
+	// admin@localhost one. Once the butler-server and butler-addons fixes ship, the
+	// chart-seeded binding covers this and the grant is redundant.
+	for _, email := range []string{"admin@localhost", "admin@butler.local"} {
+		adminCRB := &rbacv1.ClusterRoleBinding{
+			ObjectMeta: metav1.ObjectMeta{Name: "butler-local-admin-" + strings.ReplaceAll(email, "@", "-at-")},
+			RoleRef:    rbacv1.RoleRef{APIGroup: "rbac.authorization.k8s.io", Kind: "ClusterRole", Name: "cluster-admin"},
+			Subjects:   []rbacv1.Subject{{APIGroup: "rbac.authorization.k8s.io", Kind: "User", Name: email}},
+		}
+		if _, err := clientset.RbacV1().ClusterRoleBindings().Create(ctx, adminCRB, metav1.CreateOptions{}); err != nil && !strings.Contains(err.Error(), "already exists") {
+			o.logger.Warn("Failed to grant admin user cluster-admin", "user", email, "error", err)
+		}
 	}
 
 	// Expose the console on the kind node's mapped host port so it is reachable at
