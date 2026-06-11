@@ -73,6 +73,8 @@ type ClusterCredentials struct {
 	Talosconfig     []byte
 	ControlPlaneIPs []string
 	ConsoleURL      string
+	ConsoleUser     string
+	ConsolePassword string
 }
 
 // EventSink receives events from the orchestrator. Implementations must be

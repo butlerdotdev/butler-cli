@@ -18,6 +18,7 @@ limitations under the License.
 package orchestrator
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
@@ -35,6 +36,7 @@ import (
 	"github.com/butlerdotdev/butler/internal/common/log"
 	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -86,6 +88,11 @@ var (
 		Version:  butlerAPIVersion,
 		Resource: "butlerconfigs",
 	}
+	tenantClusterGVR = schema.GroupVersionResource{
+		Group:    butlerAPIGroup,
+		Version:  butlerAPIVersion,
+		Resource: "tenantclusters",
+	}
 )
 
 // Options configures the orchestrator
@@ -118,6 +125,9 @@ type Orchestrator struct {
 	// kindKubeconfigPath is the path to the KIND cluster's kubeconfig. For the local
 	// provider this kubeconfig is also the management cluster kubeconfig.
 	kindKubeconfigPath string
+	// consolePassword caches the console admin password once fetched, so the
+	// EventComplete emission and the end-of-run summary share one lookup.
+	consolePassword string
 }
 
 // New creates a new orchestrator
@@ -358,12 +368,17 @@ func (o *Orchestrator) Run(ctx context.Context, cfg *Config) error {
 	home, _ := os.UserHomeDir()
 	mgmtKubeconfig := filepath.Join(home, ".butler", cfg.Cluster.Name+"-kubeconfig")
 
-	var consolePassword string
 	if o.isLocal {
 		o.logger.Phase("Applying local stability profile")
 		if err := o.configureLocalProfile(ctx, mgmtKubeconfig); err != nil {
 			o.logger.Warn("Failed to apply local stability profile", "error", err)
 		}
+	}
+
+	// The password was fetched at completion time; fall back to a path-based
+	// read here if that lookup came up empty.
+	consolePassword := o.consolePassword
+	if consolePassword == "" {
 		consolePassword = o.getConsoleAdminPassword(ctx, mgmtKubeconfig)
 	}
 
@@ -401,8 +416,12 @@ func (o *Orchestrator) Run(ctx context.Context, cfg *Config) error {
 			o.logger.Info("  URL: " + creds.consoleURL)
 		}
 		o.logger.Info("  Username: admin")
-		o.logger.Info("  Password: Run the following command to retrieve:")
-		o.logger.Info("    kubectl get secret butler-console-admin -n butler-system -o jsonpath='{.data.admin-password}' | base64 -d && echo")
+		if consolePassword != "" {
+			o.logger.Info("  Password: " + consolePassword)
+		} else {
+			o.logger.Info("  Password: Run the following command to retrieve:")
+			o.logger.Info("    kubectl get secret butler-console-admin -n butler-system -o jsonpath='{.data.admin-password}' | base64 -d && echo")
+		}
 		o.logger.Info("")
 	}
 
@@ -420,6 +439,29 @@ func (o *Orchestrator) Run(ctx context.Context, cfg *Config) error {
 // butler-console-admin Secret. Returns "" if it cannot be read.
 func (o *Orchestrator) getConsoleAdminPassword(ctx context.Context, kubeconfigPath string) string {
 	clientset, _, err := o.createClients(kubeconfigPath)
+	if err != nil {
+		return ""
+	}
+	secret, err := clientset.CoreV1().Secrets(butlerNamespace).Get(ctx, "butler-console-admin", metav1.GetOptions{})
+	if err != nil {
+		return ""
+	}
+	if pw, ok := secret.Data["admin-password"]; ok {
+		return string(pw)
+	}
+	return ""
+}
+
+// consoleAdminPasswordFromBytes reads the bootstrap admin password from the
+// butler-console-admin Secret using in-memory kubeconfig bytes (the management
+// kubeconfig file may not be written to ~/.butler yet at emit time). Returns ""
+// if it cannot be read.
+func (o *Orchestrator) consoleAdminPasswordFromBytes(ctx context.Context, kubeconfig []byte) string {
+	cfg, err := clientcmd.RESTConfigFromKubeConfig(kubeconfig)
+	if err != nil {
+		return ""
+	}
+	clientset, err := kubernetes.NewForConfig(cfg)
 	if err != nil {
 		return ""
 	}
@@ -811,6 +853,78 @@ func (o *Orchestrator) injectHostAliases(ctx context.Context, hostAliases []stri
 }
 
 // createKINDCluster creates a KIND cluster with the specified configuration
+// teardownLocalEnvironment removes a prior local environment so a fresh bootstrap
+// starts from a known-good state. It deletes the management KIND cluster and every
+// tenant cluster the management cluster created (each local tenant runs as its own
+// KIND cluster via CAPD). Tenant names are read from the management cluster while it
+// is still up, so only Butler-created clusters are removed; unrelated KIND clusters
+// on the machine are left untouched and surfaced as a warning.
+func (o *Orchestrator) teardownLocalEnvironment(ctx context.Context, provider *cluster.Provider, existing []string) error {
+	existingSet := make(map[string]bool, len(existing))
+	for _, c := range existing {
+		existingSet[c] = true
+	}
+
+	// Discover tenant clusters from the management cluster before deleting it.
+	for _, name := range o.listLocalTenantClusters(ctx, provider) {
+		if name == "" || name == kindClusterName || !existingSet[name] {
+			continue
+		}
+		o.logger.Info("Deleting tenant cluster", "name", name)
+		if err := provider.Delete(name, ""); err != nil {
+			o.logger.Warn("Failed to delete tenant cluster", "name", name, "error", err)
+		}
+		delete(existingSet, name)
+	}
+
+	// Delete the management cluster.
+	o.logger.Info("Deleting management cluster", "name", kindClusterName)
+	if err := provider.Delete(kindClusterName, ""); err != nil {
+		return fmt.Errorf("deleting existing KIND cluster: %w", err)
+	}
+	delete(existingSet, kindClusterName)
+
+	// Surface any KIND clusters that were not recognized as Butler tenants (for
+	// example orphans from an interrupted prior run). They are not deleted because
+	// they cannot be confirmed as Butler-created.
+	if len(existingSet) > 0 {
+		leftover := make([]string, 0, len(existingSet))
+		for c := range existingSet {
+			leftover = append(leftover, c)
+		}
+		o.logger.Warn("Other KIND clusters remain and were left untouched", "clusters", strings.Join(leftover, ", "))
+		o.logger.Info("If any are leftover Butler tenants, remove with: kind delete cluster --name <name>")
+	}
+
+	return nil
+}
+
+// listLocalTenantClusters returns the names of TenantClusters registered on the
+// existing management KIND cluster. Each local tenant runs as a KIND cluster with
+// the same name. Best-effort: returns nil if the management cluster is unreachable.
+func (o *Orchestrator) listLocalTenantClusters(ctx context.Context, provider *cluster.Provider) []string {
+	kubeconfigPath, err := o.getKINDKubeconfig(provider)
+	if err != nil {
+		o.logger.Debug("Could not read management kubeconfig for tenant discovery", "error", err)
+		return nil
+	}
+	_, dyn, err := o.createClients(kubeconfigPath)
+	if err != nil {
+		o.logger.Debug("Could not build client for tenant discovery", "error", err)
+		return nil
+	}
+	list, err := dyn.Resource(tenantClusterGVR).Namespace("").List(ctx, metav1.ListOptions{})
+	if err != nil {
+		o.logger.Debug("Could not list tenant clusters for cleanup", "error", err)
+		return nil
+	}
+	names := make([]string, 0, len(list.Items))
+	for _, item := range list.Items {
+		names = append(names, item.GetName())
+	}
+	return names
+}
+
 func (o *Orchestrator) createKINDCluster(ctx context.Context, provider *cluster.Provider) (string, error) {
 	// Check if cluster already exists
 	clusters, err := provider.List()
@@ -819,6 +933,17 @@ func (o *Orchestrator) createKINDCluster(ctx context.Context, provider *cluster.
 	}
 	for _, c := range clusters {
 		if c == kindClusterName {
+			// The local provider's KIND cluster is permanent (no pivot), so a
+			// leftover from a prior run carries stale controller images and
+			// CRs. Tear it down and recreate clean rather than reuse, so a
+			// fresh bootstrap is always from a known-good state.
+			if o.isLocal {
+				o.logger.Warn("Existing local environment found, tearing it down for a clean bootstrap")
+				if err := o.teardownLocalEnvironment(ctx, provider, clusters); err != nil {
+					return "", err
+				}
+				break
+			}
 			o.logger.Warn("KIND cluster already exists, reusing")
 			kubeconfigPath, err := o.getKINDKubeconfig(provider)
 			if err != nil {
@@ -1234,20 +1359,26 @@ func (o *Orchestrator) deployControllers(ctx context.Context, clientset *kuberne
 		return fmt.Errorf("deploying controllers: %w", err)
 	}
 
-	// The embedded manifest pins a published bootstrap image tag, but for the local
-	// provider we just built and loaded the controller from source as :latest. Point
-	// the deployment at that local image so the IsLocal install path runs (otherwise
-	// the published controller treats local as a VM provider and provisions machines).
+	// Point the bootstrap deployment at the local-capable butler-bootstrap image so
+	// the IsLocal install path runs (otherwise the controller treats local as a VM
+	// provider and provisions machines). In the default pull mode the image is
+	// fetched from ghcr (Always, so a stranger gets the current published build); in
+	// --from-source mode it is the :latest image just built and loaded into KIND
+	// (IfNotPresent, so the local build is used rather than re-pulled).
 	if o.isLocal {
+		pullPolicy := "Always"
+		if o.options.LocalDev {
+			pullPolicy = "IfNotPresent"
+		}
 		// Recreate strategy: the controller binds a host port, so a rolling update
-		// would leave the new pod Pending on a port conflict while the old (published)
-		// pod keeps reconciling. Recreate deletes the old pod first.
-		patch := []byte(`{"spec":{"strategy":{"$retainKeys":["type"],"type":"Recreate"},"template":{"spec":{"containers":[{"name":"manager","image":"ghcr.io/butlerdotdev/butler-bootstrap:latest","imagePullPolicy":"IfNotPresent"}]}}}}`)
+		// would leave the new pod Pending on a port conflict while the old pod keeps
+		// reconciling. Recreate deletes the old pod first.
+		patch := []byte(fmt.Sprintf(`{"spec":{"strategy":{"$retainKeys":["type"],"type":"Recreate"},"template":{"spec":{"containers":[{"name":"manager","image":"ghcr.io/butlerdotdev/butler-bootstrap:latest","imagePullPolicy":%q}]}}}}`, pullPolicy))
 		if _, err := clientset.AppsV1().Deployments(butlerNamespace).Patch(
 			ctx, "butler-bootstrap-controller", types.StrategicMergePatchType, patch, metav1.PatchOptions{}); err != nil {
 			return fmt.Errorf("patching bootstrap controller to local image: %w", err)
 		}
-		o.logger.Info("patched bootstrap controller to local image", "image", "ghcr.io/butlerdotdev/butler-bootstrap:latest")
+		o.logger.Info("patched bootstrap controller image", "image", "ghcr.io/butlerdotdev/butler-bootstrap:latest", "pullPolicy", pullPolicy)
 
 		// For local the controller installs addons onto its own cluster using its
 		// in-cluster credentials. Its default RBAC is scoped for remote installs via a
@@ -1303,6 +1434,10 @@ func (o *Orchestrator) createProviderConfig(ctx context.Context, client dynamic.
 	_, err := client.Resource(providerConfigGVR).Namespace(butlerNamespace).Create(
 		ctx, pc, metav1.CreateOptions{})
 	if err != nil {
+		if apierrors.IsAlreadyExists(err) {
+			o.logger.Info("ProviderConfig already exists, reusing", "name", pc.GetName())
+			return nil
+		}
 		return fmt.Errorf("creating ProviderConfig: %w", err)
 	}
 
@@ -1900,6 +2035,19 @@ func (o *Orchestrator) watchBootstrap(ctx context.Context, client dynamic.Interf
 					talosconfigBytes = tc
 				}
 
+				// The local console is exposed on the host via the KIND NodePort
+				// mapping, so report the reachable host URL rather than the
+				// in-cluster Service or a port-forward command.
+				if o.isLocal {
+					consoleURL = "http://localhost:8080"
+				}
+
+				// Surface the sign-in details on the completion screen so the
+				// operator does not have to go hunting for the password. The
+				// management kubeconfig file is not written yet, so read from the
+				// in-memory bytes.
+				o.consolePassword = o.consoleAdminPasswordFromBytes(ctx, kubeconfigBytes)
+
 				creds := &clusterCredentials{
 					kubeconfig:      kubeconfigBytes,
 					talosconfig:     talosconfigBytes,
@@ -1915,6 +2063,8 @@ func (o *Orchestrator) watchBootstrap(ctx context.Context, client dynamic.Interf
 						Talosconfig:     talosconfigBytes,
 						ControlPlaneIPs: controlPlaneIPs,
 						ConsoleURL:      consoleURL,
+						ConsoleUser:     "admin",
+						ConsolePassword: o.consolePassword,
 					},
 				})
 				return creds, nil
@@ -2103,27 +2253,46 @@ func (o *Orchestrator) buildAndLoadImages(ctx context.Context, provider string) 
 			buildCmd = exec.CommandContext(ctx, "docker", "build", "-t", img.image, ".")
 			buildCmd.Dir = img.repoDir
 		}
-		buildCmd.Stdout = os.Stdout
-		buildCmd.Stderr = os.Stderr
+		// Capture build output to a buffer instead of the terminal. Docker's
+		// buildx progress writes TTY control sequences that corrupt the
+		// bootstrap TUI's alt-screen. Surface the tail only if the build fails.
+		var buildOut bytes.Buffer
+		buildCmd.Stdout = &buildOut
+		buildCmd.Stderr = &buildOut
+
+		// Force plain progress so a fallback to non-buffered output (or the
+		// error tail) is line-oriented rather than ANSI cursor movement.
+		buildCmd.Env = append(os.Environ(), "BUILDKIT_PROGRESS=plain", "DOCKER_BUILDKIT=1")
 
 		if err := buildCmd.Run(); err != nil {
-			return fmt.Errorf("building %s: %w", img.name, err)
+			return fmt.Errorf("building %s: %w\n%s", img.name, err, tailLines(buildOut.String(), 30))
 		}
 		o.logger.Success("built image", "image", img.image)
 
 		// Load into KIND
 		o.logger.Info("loading image into KIND", "image", img.image)
 		loadCmd := exec.CommandContext(ctx, "kind", "load", "docker-image", img.image, "--name", kindClusterName)
-		loadCmd.Stdout = os.Stdout
-		loadCmd.Stderr = os.Stderr
+		var loadOut bytes.Buffer
+		loadCmd.Stdout = &loadOut
+		loadCmd.Stderr = &loadOut
 
 		if err := loadCmd.Run(); err != nil {
-			return fmt.Errorf("loading %s into KIND: %w", img.name, err)
+			return fmt.Errorf("loading %s into KIND: %w\n%s", img.name, err, tailLines(loadOut.String(), 30))
 		}
 		o.logger.Success("loaded image into KIND", "image", img.image)
 	}
 
 	return nil
+}
+
+// tailLines returns the last n lines of s, for surfacing the relevant tail of
+// captured command output in an error without dumping the entire build log.
+func tailLines(s string, n int) string {
+	lines := strings.Split(strings.TrimRight(s, "\n"), "\n")
+	if len(lines) > n {
+		lines = lines[len(lines)-n:]
+	}
+	return strings.Join(lines, "\n")
 }
 
 // buildTalosSpec builds the talos section of the ClusterBootstrap spec.

@@ -33,6 +33,7 @@ func NewLocalCmd(logger *log.Logger) *cobra.Command {
 		clusterName string
 		repoRoot    string
 		skipCleanup bool
+		fromSource  bool
 	)
 
 	cmd := &cobra.Command{
@@ -45,18 +46,25 @@ worker nodes run as containers via the Cluster API Docker provider (CAPD), so no
 hypervisor or cloud account is required. The KIND cluster is kept after bootstrap so
 you can create tenant clusters against it.
 
+By default the published component images are pulled from ghcr.io, so nothing needs
+to be built and no source checkout is required.
+
 Prerequisites:
-  • Docker running locally
-  • kind and kubectl installed
-  • The butlerdotdev repos checked out as siblings (for building images from source)
+  • Docker running locally (at least 4 CPUs and 6 GB of memory)
+  • kubectl installed
 
 Example:
-  butleradm bootstrap local`,
+  butleradm bootstrap local
+
+Development:
+  --from-source builds butler-controller, butler-bootstrap, and steward from the
+  sibling butlerdotdev repos instead of pulling published images. Use it when
+  iterating on those components locally.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx, cancel := setupSignalHandler(cmd, logger)
 			defer cancel()
 
-			if repoRoot == "" {
+			if fromSource && repoRoot == "" {
 				home, _ := os.UserHomeDir()
 				repoRoot = home + "/code/github.com/butlerdotdev"
 			}
@@ -66,7 +74,7 @@ Example:
 			orch := orchestrator.New(logger, orchestrator.Options{
 				SkipCleanup: skipCleanup,
 				Timeout:     30 * time.Minute,
-				LocalDev:    true,
+				LocalDev:    fromSource,
 				RepoRoot:    repoRoot,
 			})
 			return orch.Run(ctx, cfg)
@@ -74,7 +82,8 @@ Example:
 	}
 
 	cmd.Flags().StringVar(&clusterName, "name", "butler-local", "management cluster name")
-	cmd.Flags().StringVar(&repoRoot, "repo-root", "", "path to butlerdotdev repos (default: ~/code/github.com/butlerdotdev)")
+	cmd.Flags().BoolVar(&fromSource, "from-source", false, "build component images from the sibling butlerdotdev repos instead of pulling published images (for development)")
+	cmd.Flags().StringVar(&repoRoot, "repo-root", "", "path to butlerdotdev repos when using --from-source (default: ~/code/github.com/butlerdotdev)")
 	cmd.Flags().BoolVar(&skipCleanup, "skip-cleanup", false, "no-op for local (the KIND cluster is always kept); accepted for parity")
 
 	return cmd
