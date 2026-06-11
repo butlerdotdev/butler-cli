@@ -164,14 +164,23 @@ func runBootstrap(cfg *orchestrator.Config, skipCleanup bool) error {
 
 	logger := log.New("butleradm")
 
+	orcOpts := orchestrator.Options{
+		Timeout:     30 * time.Minute,
+		SkipCleanup: skipCleanup,
+	}
+	// The local provider builds the controller, bootstrap, and steward images from
+	// the sibling butlerdotdev repos, so it runs in local-dev mode.
+	if cfg.Provider == "local" {
+		orcOpts.LocalDev = true
+		home, _ := os.UserHomeDir()
+		orcOpts.RepoRoot = filepath.Join(home, "code", "github.com", "butlerdotdev")
+	}
+
 	return bootstrap.Run(bootstrap.RunConfig{
-		Ctx:    ctx,
-		Cancel: cancel,
-		Cfg:    cfg,
-		OrcOptions: orchestrator.Options{
-			Timeout:     30 * time.Minute,
-			SkipCleanup: skipCleanup,
-		},
+		Ctx:        ctx,
+		Cancel:     cancel,
+		Cfg:        cfg,
+		OrcOptions: orcOpts,
 		LoggerName: logger.Name(),
 		LogLevel:   logger.Level(),
 	})

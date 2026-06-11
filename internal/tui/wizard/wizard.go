@@ -73,6 +73,13 @@ func Run() (*orchestrator.Config, error) {
 			return nil, fmt.Errorf("wizard cancelled by user")
 		}
 
+		// The local provider needs no infrastructure configuration: no
+		// credentials, discovery, sizing, or networking. Skip straight to the
+		// laptop defaults.
+		if s.Provider == "local" {
+			return buildConfig(s)
+		}
+
 		// Build the discovery client from wizard state and connect to the
 		// provider, fetching root resources concurrently.
 		creds := &stateCredentials{s: s}
@@ -166,6 +173,32 @@ func Run() (*orchestrator.Config, error) {
 // the current main schema. Field-by-field drift from the feat branch wizard
 // lives here — keep this function in sync with orchestrator/config.go.
 func buildConfig(s *wizardState) (*orchestrator.Config, error) {
+	// Local provider: laptop defaults, mirrors the `bootstrap local` subcommand.
+	// Single control-plane node, Cilium on tenants (not the mgmt cluster), MetalLB,
+	// CAPI/CAPD; no Longhorn or kube-vip. Unused VM fields satisfy schema minimums.
+	if s.Provider == "local" {
+		name := s.ClusterName
+		if name == "" {
+			name = "butler-local"
+		}
+		return &orchestrator.Config{
+			Provider: "local",
+			Cluster: orchestrator.ClusterConfig{
+				Name:         name,
+				Topology:     "single-node",
+				ControlPlane: orchestrator.NodePoolConfig{Replicas: 1, CPU: 2, MemoryMB: 2048, DiskGB: 20},
+			},
+			Network: orchestrator.NetworkConfig{PodCIDR: "10.244.0.0/16", ServiceCIDR: "10.96.0.0/12"},
+			Talos:   orchestrator.TalosConfig{Version: "v1.9.3"},
+			Addons: orchestrator.AddonsConfig{
+				CNI:          orchestrator.CNIConfig{Type: "none"},
+				Storage:      orchestrator.StorageConfig{Type: "none"},
+				LoadBalancer: orchestrator.LoadBalancerConfig{Type: "metallb"},
+				CAPI:         orchestrator.CAPIConfig{Version: "v1.9.4"},
+			},
+		}, nil
+	}
+
 	cpReplicas, err := parseInt32(s.CPReplicas)
 	if err != nil {
 		return nil, fmt.Errorf("control plane replicas: %w", err)
@@ -207,8 +240,8 @@ func buildConfig(s *wizardState) (*orchestrator.Config, error) {
 			TimeServers: splitCSV(s.NTPServers),
 		},
 		Addons: orchestrator.AddonsConfig{
-			CNI:     orchestrator.CNIConfig{Type: "cilium"},
-			Storage: orchestrator.StorageConfig{Type: "longhorn"},
+			CNI:              orchestrator.CNIConfig{Type: "cilium"},
+			Storage:          orchestrator.StorageConfig{Type: "longhorn"},
 			GitOps:           orchestrator.GitOpsConfig{Type: "flux"},
 			CAPI:             orchestrator.CAPIConfig{Enabled: true},
 			ButlerController: orchestrator.ButlerControllerConfig{Enabled: true},
@@ -390,7 +423,7 @@ func buildConfig(s *wizardState) (*orchestrator.Config, error) {
 	case "aws":
 		cfg.ProviderConfig.AWS = &orchestrator.AWSProviderConfig{
 			AccessKeyID:     s.AWSAccessKey,
-			SecretAccessKey:  s.AWSSecretKey,
+			SecretAccessKey: s.AWSSecretKey,
 			Region:          s.AWSRegion,
 			VPCID:           s.AWSVPCID,
 			SubnetID:        s.AWSSubnetID,
