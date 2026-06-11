@@ -118,9 +118,10 @@ func localConfig(name string) *orchestrator.Config {
 			Storage:      orchestrator.StorageConfig{Type: "none"},
 			LoadBalancer: orchestrator.LoadBalancerConfig{Type: "metallb"},
 			CAPI:         orchestrator.CAPIConfig{Version: "v1.9.4"},
-			ButlerController: orchestrator.ButlerControllerConfig{
-				Image: "ghcr.io/butlerdotdev/butler-controller:latest",
-			},
+			// ButlerController image is left at its default (ghcr...butler-controller:latest),
+			// which matches the image buildAndLoadImages builds and loads for local.
+			// GetButlerControllerImage appends the version, so setting an image with a tag
+			// here would produce a doubled :latest:latest reference.
 		},
 	}
 }
