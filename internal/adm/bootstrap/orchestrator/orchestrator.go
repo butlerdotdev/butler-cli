@@ -355,13 +355,16 @@ func (o *Orchestrator) Run(ctx context.Context, cfg *Config) error {
 	// tenant apiserver is not CPU-starved) and grant the console and controller the
 	// broader access the in-cluster local flow needs (console impersonates users for
 	// team creation; the controller lists cluster-scoped nodes/users). Best-effort.
+	home, _ := os.UserHomeDir()
+	mgmtKubeconfig := filepath.Join(home, ".butler", cfg.Cluster.Name+"-kubeconfig")
+
+	var consolePassword string
 	if o.isLocal {
 		o.logger.Phase("Applying local stability profile")
-		home, _ := os.UserHomeDir()
-		mgmtKubeconfig := filepath.Join(home, ".butler", cfg.Cluster.Name+"-kubeconfig")
 		if err := o.configureLocalProfile(ctx, mgmtKubeconfig); err != nil {
 			o.logger.Warn("Failed to apply local stability profile", "error", err)
 		}
+		consolePassword = o.getConsoleAdminPassword(ctx, mgmtKubeconfig)
 	}
 
 	o.logger.Success("Bootstrap complete!")
@@ -371,6 +374,24 @@ func (o *Orchestrator) Run(ctx context.Context, cfg *Config) error {
 	o.logger.Info("  Kubeconfig:   ~/.butler/" + cfg.Cluster.Name + "-kubeconfig")
 	o.logger.Info("  Talosconfig:  ~/.butler/" + cfg.Cluster.Name + "-talosconfig")
 	o.logger.Info("")
+
+	// For local, the console is exposed on the host and we print the full sign-in
+	// details so the operator does not have to go looking for the password.
+	if o.isLocal {
+		o.logger.Info("Butler Console:")
+		o.logger.Info("  URL:      http://localhost:8080")
+		o.logger.Info("  Username: admin")
+		if consolePassword != "" {
+			o.logger.Info("  Password: " + consolePassword)
+		} else {
+			o.logger.Info("  Password: kubectl get secret butler-console-admin -n butler-system -o jsonpath='{.data.admin-password}' | base64 -d")
+		}
+		o.logger.Info("")
+		o.logger.Info("Usage:")
+		o.logger.Info("  export KUBECONFIG=~/.butler/" + cfg.Cluster.Name + "-kubeconfig")
+		o.logger.Info("  kubectl get nodes")
+		return nil
+	}
 
 	if creds.consoleURL != "" {
 		o.logger.Info("Butler Console:")
@@ -393,6 +414,23 @@ func (o *Orchestrator) Run(ctx context.Context, cfg *Config) error {
 	o.logger.Info("  talosctl health --nodes <CONTROL_PLANE_IP>")
 
 	return nil
+}
+
+// getConsoleAdminPassword reads the bootstrap admin password from the
+// butler-console-admin Secret. Returns "" if it cannot be read.
+func (o *Orchestrator) getConsoleAdminPassword(ctx context.Context, kubeconfigPath string) string {
+	clientset, _, err := o.createClients(kubeconfigPath)
+	if err != nil {
+		return ""
+	}
+	secret, err := clientset.CoreV1().Secrets(butlerNamespace).Get(ctx, "butler-console-admin", metav1.GetOptions{})
+	if err != nil {
+		return ""
+	}
+	if pw, ok := secret.Data["admin-password"]; ok {
+		return string(pw)
+	}
+	return ""
 }
 
 // dryRun shows what would be created
