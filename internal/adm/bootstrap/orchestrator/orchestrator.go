@@ -351,6 +351,19 @@ func (o *Orchestrator) Run(ctx context.Context, cfg *Config) error {
 		}
 	}
 
+	// Local stability profile: set guaranteed hosted control plane resources (so the
+	// tenant apiserver is not CPU-starved) and grant the console and controller the
+	// broader access the in-cluster local flow needs (console impersonates users for
+	// team creation; the controller lists cluster-scoped nodes/users). Best-effort.
+	if o.isLocal {
+		o.logger.Phase("Applying local stability profile")
+		home, _ := os.UserHomeDir()
+		mgmtKubeconfig := filepath.Join(home, ".butler", cfg.Cluster.Name+"-kubeconfig")
+		if err := o.configureLocalProfile(ctx, mgmtKubeconfig); err != nil {
+			o.logger.Warn("Failed to apply local stability profile", "error", err)
+		}
+	}
+
 	o.logger.Success("Bootstrap complete!")
 	o.emit(Event{Type: EventSuccess, Phase: "Complete", Message: "Bootstrap complete"})
 	o.logger.Info("")
@@ -518,6 +531,40 @@ func (o *Orchestrator) scanCertDirectory(dir string) []string {
 	}
 
 	return certs
+}
+
+// configureLocalProfile applies the local stability profile to the management cluster:
+// guaranteed hosted control plane resources (so the tenant apiserver is not CPU-starved)
+// and cluster-admin for the console and controller service accounts (the console
+// impersonates users for team creation, the controller lists cluster-scoped nodes/users).
+// Best-effort: individual failures are logged, not fatal.
+func (o *Orchestrator) configureLocalProfile(ctx context.Context, kubeconfigPath string) error {
+	clientset, dynamicClient, err := o.createClients(kubeconfigPath)
+	if err != nil {
+		return fmt.Errorf("creating clients: %w", err)
+	}
+
+	resPatch := []byte(`{"spec":{"defaultControlPlaneResources":{` +
+		`"apiServer":{"requests":{"cpu":"250m","memory":"512Mi"},"limits":{"cpu":"2","memory":"1Gi"}},` +
+		`"controllerManager":{"requests":{"cpu":"100m","memory":"128Mi"}},` +
+		`"scheduler":{"requests":{"cpu":"50m","memory":"64Mi"}}}}}`)
+	if _, err := dynamicClient.Resource(butlerConfigGVR).Patch(ctx, "butler", types.MergePatchType, resPatch, metav1.PatchOptions{}); err != nil {
+		o.logger.Warn("Failed to set control plane resources on ButlerConfig", "error", err)
+	}
+
+	for _, sa := range []string{"butler-console", "butler-controller"} {
+		crb := &rbacv1.ClusterRoleBinding{
+			ObjectMeta: metav1.ObjectMeta{Name: "butler-local-" + sa + "-admin"},
+			RoleRef:    rbacv1.RoleRef{APIGroup: "rbac.authorization.k8s.io", Kind: "ClusterRole", Name: "cluster-admin"},
+			Subjects:   []rbacv1.Subject{{Kind: "ServiceAccount", Name: sa, Namespace: butlerNamespace}},
+		}
+		if _, err := clientset.RbacV1().ClusterRoleBindings().Create(ctx, crb, metav1.CreateOptions{}); err != nil && !strings.Contains(err.Error(), "already exists") {
+			o.logger.Warn("Failed to grant cluster-admin", "serviceAccount", sa, "error", err)
+		}
+	}
+
+	o.logger.Success("Local stability profile applied")
+	return nil
 }
 
 // deriveKindLBPool inspects the kind docker network and returns a MetalLB pool high in
@@ -1938,6 +1985,14 @@ func (o *Orchestrator) buildAndLoadImages(ctx context.Context, provider string) 
 			image:   "ghcr.io/butlerdotdev/butler-controller:latest",
 			// butler-controller fetches butler-api as a normal module (no sibling
 			// replace), so it builds with its own repo as the context.
+			useParentContext: false,
+		})
+		// Steward carries local-only fixes not yet in a published release (the hosted
+		// control plane admin RBAC binding). InstallSteward uses :latest for local.
+		images = append(images, buildImage{
+			name:             "steward",
+			repoDir:          filepath.Join(o.options.RepoRoot, "steward"),
+			image:            "ghcr.io/butlerdotdev/steward:latest",
 			useParentContext: false,
 		})
 	} else {
