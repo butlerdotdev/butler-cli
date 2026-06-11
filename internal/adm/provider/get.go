@@ -109,7 +109,7 @@ func printProviderDetail(out io.Writer, pc *unstructured.Unstructured) error {
 		t.AddRow("Endpoint", info.Endpoint)
 	}
 
-	scope := client.GetNestedString(pc.Object, "spec", "scope")
+	scope := client.GetNestedString(pc.Object, "spec", "scope", "type")
 	if scope == "" {
 		scope = "platform"
 	}

@@ -48,6 +48,62 @@ func TestPrintProviderDetail(t *testing.T) {
 	}
 }
 
+// TestPrintProviderDetailScope guards the scope display. The CRD stores scope as
+// an object (spec.scope.type), so a team-scoped provider must render "team", not
+// the "platform" fallback. An absent scope falls back to "platform".
+func TestPrintProviderDetailScope(t *testing.T) {
+	teamScoped := &unstructured.Unstructured{Object: map[string]interface{}{
+		"metadata": map[string]interface{}{"name": "p", "namespace": "butler-system"},
+		"spec": map[string]interface{}{
+			"provider": "harvester",
+			"scope":    map[string]interface{}{"type": "team", "teamRef": map[string]interface{}{"name": "eng"}},
+		},
+	}}
+	var out bytes.Buffer
+	if err := printProviderDetail(&out, teamScoped); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "team") {
+		t.Errorf("team-scoped provider should render scope 'team':\n%s", out.String())
+	}
+
+	unscoped := &unstructured.Unstructured{Object: map[string]interface{}{
+		"metadata": map[string]interface{}{"name": "p", "namespace": "butler-system"},
+		"spec":     map[string]interface{}{"provider": "harvester"},
+	}}
+	var out2 bytes.Buffer
+	_ = printProviderDetail(&out2, unscoped)
+	if !strings.Contains(out2.String(), "platform") {
+		t.Errorf("unscoped provider should fall back to scope 'platform':\n%s", out2.String())
+	}
+}
+
+// TestProviderValidationError guards reading the validation error from the Ready
+// condition (the status has no validationError field).
+func TestProviderValidationError(t *testing.T) {
+	failed := &unstructured.Unstructured{Object: map[string]interface{}{
+		"status": map[string]interface{}{"conditions": []interface{}{
+			map[string]interface{}{"type": "Ready", "status": "False", "message": "auth failed"},
+		}},
+	}}
+	if got := providerValidationError(failed); got != "auth failed" {
+		t.Errorf("validation error = %q, want %q", got, "auth failed")
+	}
+
+	ok := &unstructured.Unstructured{Object: map[string]interface{}{
+		"status": map[string]interface{}{"conditions": []interface{}{
+			map[string]interface{}{"type": "Ready", "status": "True", "message": "ok"},
+		}},
+	}}
+	if got := providerValidationError(ok); got != "" {
+		t.Errorf("Ready=True must yield no error, got %q", got)
+	}
+
+	if got := providerValidationError(&unstructured.Unstructured{Object: map[string]interface{}{}}); got != "" {
+		t.Errorf("no conditions must yield no error, got %q", got)
+	}
+}
+
 // TestMergeProviderSpec is the load-bearing update correctness test. A spec
 // update must replace spec but PRESERVE the existing status and
 // resourceVersion, so it never clobbers validation status and the Update

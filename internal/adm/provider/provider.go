@@ -190,7 +190,7 @@ func runList(ctx context.Context, logger *log.Logger, opts *listOptions) error {
 		row := []string{name, provider, validatedStr, endpoint, age}
 		if wide {
 			ns := pc.GetNamespace()
-			scope := client.GetNestedString(pc.Object, "spec", "scope")
+			scope := client.GetNestedString(pc.Object, "spec", "scope", "type")
 			if scope == "" {
 				scope = "platform"
 			}
@@ -673,6 +673,24 @@ type ProviderInfo struct {
 	LastValidatedAt string `json:"lastValidatedAt,omitempty"`
 }
 
+// providerValidationError returns the message of the Ready condition when it
+// is not True. The ProviderConfig status has no validationError field; a failed
+// validation is recorded as the Ready condition's message (see
+// updateProviderConfigStatus), so that is where the error must be read from.
+func providerValidationError(pc *unstructured.Unstructured) string {
+	conditions, _, _ := unstructured.NestedSlice(pc.Object, "status", "conditions")
+	for _, c := range conditions {
+		cond, ok := c.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		if client.GetNestedString(cond, "type") == "Ready" && client.GetNestedString(cond, "status") != "True" {
+			return client.GetNestedString(cond, "message")
+		}
+	}
+	return ""
+}
+
 func extractProviderInfo(pc *unstructured.Unstructured) ProviderInfo {
 	provider := client.GetNestedString(pc.Object, "spec", "provider")
 
@@ -699,8 +717,8 @@ func extractProviderInfo(pc *unstructured.Unstructured) ProviderInfo {
 		Provider:        provider,
 		Validated:       client.GetNestedBool(pc.Object, "status", "validated"),
 		Endpoint:        endpoint,
-		ValidationError: client.GetNestedString(pc.Object, "status", "validationError"),
-		LastValidatedAt: client.GetNestedString(pc.Object, "status", "lastValidatedAt"),
+		ValidationError: providerValidationError(pc),
+		LastValidatedAt: client.GetNestedString(pc.Object, "status", "lastValidationTime"),
 	}
 }
 
