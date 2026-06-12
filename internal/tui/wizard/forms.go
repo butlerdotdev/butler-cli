@@ -722,7 +722,7 @@ func ipamStep(s *wizardState) *huh.Group {
 					"tenant creation fails at IP allocation and you have to build the\n"+
 					"NetworkPool and ProviderConfig.spec.network by hand later.\n\n"+
 					"Enabling IPAM here makes the bootstrap emit the NetworkPool and\n"+
-					"wire the ProviderConfig to use it — the management cluster is\n"+
+					"wire the ProviderConfig to use it -- the management cluster is\n"+
 					"tenant-ready the moment bootstrap completes.\n\n"+
 					"Cloud providers (AWS, Azure, GCP) use native networking and\n"+
 					"should leave this disabled."),
@@ -746,7 +746,7 @@ func networkPoolStep(s *wizardState) *huh.Group {
 					"Reserved Range: IPs outside DHCP that the management cluster\n"+
 					"uses for static assignments (VIP, MetalLB pool, node IPs).\n"+
 					"The IPAM allocator will never hand these to tenants. Use\n"+
-					"start/end IPs — doesn't need to be a power-of-2 block.\n\n"+
+					"start/end IPs -- doesn't need to be a power-of-2 block.\n\n"+
 					"Example: subnet 10.92.90.0/23, IPs .1 through .10 are\n"+
 					"outside DHCP for static use:\n"+
 					"  Reserved: 10.92.90.1 - 10.92.90.10\n"+
@@ -822,7 +822,7 @@ func providerNetworkStep(s *wizardState) *huh.Group {
 				"These settings go into ProviderConfig.spec.network and control\n"+
 					"how aggressively the platform allocates LoadBalancer IPs to each\n"+
 					"tenant cluster, plus the hard caps on per-tenant IP usage.\n\n"+
-					"Defaults match butler-beta's production values — safe starting\n"+
+					"Defaults match butler-beta's production values -- safe starting\n"+
 					"point that you can tune later via kubectl edit providerconfig."),
 
 		huh.NewSelect[string]().
