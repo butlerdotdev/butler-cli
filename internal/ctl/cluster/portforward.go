@@ -185,9 +185,10 @@ func ensureLocalForward(clusterName, tenantNS, service, mgmtKubeconfigPath, mgmt
 		cmd.Stdout = logFile
 		cmd.Stderr = logFile
 	}
-	// Detach into a new session so the forward survives the CLI exiting; the
-	// follow-up `kubectl get nodes` runs as a separate process.
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	// Detach the forward so it survives the CLI exiting; the follow-up
+	// `kubectl get nodes` runs as a separate process. The detach mechanism is
+	// platform-specific (see detach_unix.go / detach_windows.go).
+	cmd.SysProcAttr = detachSysProcAttr()
 	if err := cmd.Start(); err != nil {
 		return 0, fmt.Errorf("starting tunnel (kubectl is required to use local clusters): %w", err)
 	}
