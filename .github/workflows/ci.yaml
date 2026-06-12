@@ -21,6 +21,18 @@ jobs:
       - name: Test
         run: go test ./... -v
 
+      # The release builds for every OS/arch; the host-only build above can miss
+      # platform-specific code (e.g. syscall fields). Cross-compile the same
+      # targets goreleaser does so a release-breaking compile error fails CI first.
+      - name: Cross-compile release targets
+        run: |
+          for os in linux windows darwin; do
+            for arch in amd64 arm64; do
+              echo "build $os/$arch"
+              CGO_ENABLED=0 GOOS=$os GOARCH=$arch go build ./... || exit 1
+            done
+          done
+
   crd-drift:
     name: Embedded CRDs in sync with butler-api
     runs-on: ubuntu-latest
