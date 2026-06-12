@@ -1,0 +1,279 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.19.0
+  name: clustercreationpolicies.butler.butlerlabs.dev
+spec:
+  group: butler.butlerlabs.dev
+  names:
+    kind: ClusterCreationPolicy
+    listKind: ClusterCreationPolicyList
+    plural: clustercreationpolicies
+    shortNames:
+    - ccp
+    singular: clustercreationpolicy
+  scope: Cluster
+  versions:
+  - additionalPrinterColumns:
+    - description: Team this policy targets (team scope)
+      jsonPath: .spec.scope.team.teamRef.name
+      name: Team
+      type: string
+    - description: Environment this policy targets (teamAndEnvironment scope)
+      jsonPath: .spec.scope.teamAndEnvironment.environmentName
+      name: Env
+      type: string
+    - description: Providers this policy filters (empty means all)
+      jsonPath: .spec.targetProviders
+      name: Providers
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: |-
+          ClusterCreationPolicy is the Schema for admin-curated defaults, pins,
+          allow-lists, and recommendations applied to the create-cluster
+          option lists (subnets, images, storage containers, clusters).
+          Enforced at both butler-server option-list time and at TenantCluster
+          admission. See ADR-018 for the full design.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: |-
+              ClusterCreationPolicySpec declares admin-curated constraints over the
+              create-cluster option lists. Scalar soft defaults remain on
+              Team.spec.clusterDefaults (see ADR-009); this CRD owns option-list
+              curation only. See ADR-018 Decision section 1.
+            properties:
+              options:
+                additionalProperties:
+                  description: |-
+                    OptionRule defines the curation behavior for one option type. See
+                    ADR-018 Decision section 5 for mode semantics. Cross-field validation
+                    (pin and allowList require non-empty Values; default requires
+                    non-empty Default; recommended requires non-empty Values) is enforced
+                    by the policy admission webhook in butler-controller, not by CRD
+                    schema; the webhook produces better operator-facing error messages.
+                  properties:
+                    default:
+                      description: |-
+                        Default is the pre-selected entry ID. Required when Mode is
+                        default; optional for allowList (pre-selects within the allowed
+                        set); ignored for recommended; auto-resolves to the single Values
+                        entry for pin when Values has length 1.
+                      type: string
+                    mode:
+                      description: Mode selects the curation behavior.
+                      enum:
+                      - pin
+                      - allowList
+                      - default
+                      - recommended
+                      type: string
+                    recommendedReason:
+                      description: |-
+                        RecommendedReason is the short string shown alongside the
+                        recommended badge in the console. Used only when Mode is
+                        recommended.
+                      maxLength: 120
+                      type: string
+                    values:
+                      description: |-
+                        Values lists the affected provider entry IDs. Semantics depend on
+                        Mode (see ADR-018 Decision section 5). Validated by the policy
+                        admission webhook against the mode-specific requirements.
+                      items:
+                        type: string
+                      type: array
+                  required:
+                  - mode
+                  type: object
+                description: |-
+                  Options maps option-type name to its curation rule. Each
+                  ClusterCreationPolicy contains zero or more OptionRule entries
+                  within Options, one rule per option type. A policy is the unit of
+                  authorship and RBAC; a rule is the unit of resolution.
+                type: object
+              scope:
+                description: |-
+                  Scope selects which TenantCluster create requests this policy
+                  applies to.
+                properties:
+                  platformWide:
+                    description: |-
+                      PlatformWide applies the policy to every team and every
+                      environment on this Butler platform.
+                    type: object
+                  team:
+                    description: Team applies the policy to one team across all of
+                      its environments.
+                    properties:
+                      teamRef:
+                        description: TeamRef names the Team this policy applies to.
+                        properties:
+                          name:
+                            description: Name is the name of the resource.
+                            minLength: 1
+                            type: string
+                        required:
+                        - name
+                        type: object
+                    required:
+                    - teamRef
+                    type: object
+                  teamAndEnvironment:
+                    description: |-
+                      TeamAndEnvironment applies the policy to one team's named
+                      environment.
+                    properties:
+                      environmentName:
+                        description: |-
+                          EnvironmentName must match a Team.spec.environments[].name on the
+                          referenced Team.
+                        maxLength: 63
+                        minLength: 1
+                        type: string
+                      teamRef:
+                        description: TeamRef names the Team this policy applies to.
+                        properties:
+                          name:
+                            description: Name is the name of the resource.
+                            minLength: 1
+                            type: string
+                        required:
+                        - name
+                        type: object
+                    required:
+                    - environmentName
+                    - teamRef
+                    type: object
+                type: object
+                x-kubernetes-validations:
+                - message: exactly one of platformWide, team, or teamAndEnvironment
+                    must be set
+                  rule: (has(self.platformWide)?1:0) + (has(self.team)?1:0) + (has(self.teamAndEnvironment)?1:0)
+                    == 1
+              targetProviders:
+                description: |-
+                  TargetProviders names the ProviderType values this policy filters.
+                  Empty list means all providers.
+                items:
+                  description: ProviderType defines the supported infrastructure providers.
+                  enum:
+                  - harvester
+                  - nutanix
+                  - proxmox
+                  - azure
+                  - aws
+                  - gcp
+                  - local
+                  type: string
+                type: array
+            required:
+            - scope
+            type: object
+          status:
+            description: |-
+              ClusterCreationPolicyStatus captures observed conditions on the
+              policy. v1 admission webhooks do not populate any fields here; the
+              fields are reserved for the deferred status reconciler that surfaces
+              stale references and policy health (per ADR-018 Deferred).
+            properties:
+              conditions:
+                description: |-
+                  Conditions records observed conditions on the policy. Reserved
+                  for the deferred status reconciler; not populated by v1 admission
+                  webhooks.
+                items:
+                  description: Condition contains details for one aspect of the current
+                    state of this API Resource.
+                  properties:
+                    lastTransitionTime:
+                      description: |-
+                        lastTransitionTime is the last time the condition transitioned from one status to another.
+                        This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
+                      format: date-time
+                      type: string
+                    message:
+                      description: |-
+                        message is a human readable message indicating details about the transition.
+                        This may be an empty string.
+                      maxLength: 32768
+                      type: string
+                    observedGeneration:
+                      description: |-
+                        observedGeneration represents the .metadata.generation that the condition was set based upon.
+                        For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date
+                        with respect to the current state of the instance.
+                      format: int64
+                      minimum: 0
+                      type: integer
+                    reason:
+                      description: |-
+                        reason contains a programmatic identifier indicating the reason for the condition's last transition.
+                        Producers of specific condition types may define expected values and meanings for this field,
+                        and whether the values are considered a guaranteed API.
+                        The value should be a CamelCase string.
+                        This field may not be empty.
+                      maxLength: 1024
+                      minLength: 1
+                      pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                      type: string
+                    status:
+                      description: status of the condition, one of True, False, Unknown.
+                      enum:
+                      - "True"
+                      - "False"
+                      - Unknown
+                      type: string
+                    type:
+                      description: type of condition in CamelCase or in foo.example.com/CamelCase.
+                      maxLength: 316
+                      pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                      type: string
+                  required:
+                  - lastTransitionTime
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+                x-kubernetes-list-map-keys:
+                - type
+                x-kubernetes-list-type: map
+              staleReferences:
+                description: |-
+                  StaleReferences names policy entry IDs that no longer exist in
+                  the current provider option list. Reserved for the deferred
+                  status reconciler.
+                items:
+                  type: string
+                type: array
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

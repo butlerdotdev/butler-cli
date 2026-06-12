@@ -123,6 +123,13 @@ tidy:
 generate:
 	go generate ./...
 
+# Sync the embedded bootstrap CRDs from butler-api (the single source of truth).
+# Override the source with BUTLER_API_PATH=/path/to/butler-api. The crd-drift CI job
+# fails if the committed copies differ from a fresh sync.
+.PHONY: sync-crds
+sync-crds:
+	./hack/sync-crds.sh
+
 # Documentation
 .PHONY: docs
 docs: build
