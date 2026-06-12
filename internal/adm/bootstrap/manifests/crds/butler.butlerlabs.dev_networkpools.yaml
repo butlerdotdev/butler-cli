@@ -106,14 +106,46 @@ spec:
                         type: integer
                     type: object
                   end:
-                    description: End is the last allocatable IP address.
+                    description: |-
+                      End is the last allocatable IP address.
+                      Deprecated: Use Ranges for multi-range support. When Ranges is
+                      specified, Start and End are ignored. Removal targeted after all
+                      deployments migrate to Ranges.
                     type: string
+                  ranges:
+                    description: |-
+                      Ranges defines one or more allocatable IP ranges within the pool's
+                      CIDR. When specified, Start and End are ignored. Each range must fall
+                      within the pool's CIDR, ranges must not overlap, and must be sorted
+                      by start IP ascending. Validated by the admission webhook.
+                    items:
+                      description: |-
+                        AllocationRange defines a contiguous block of allocatable IPs.
+                        Maximum 16 ranges per pool. This is sufficient for all expected
+                        topologies; if more are needed, reconsider whether the pool should
+                        be split into multiple NetworkPools.
+                      properties:
+                        end:
+                          description: End is the last allocatable IP address in this
+                            range.
+                          type: string
+                        start:
+                          description: Start is the first allocatable IP address in
+                            this range.
+                          type: string
+                      required:
+                      - end
+                      - start
+                      type: object
+                    maxItems: 16
+                    type: array
                   start:
-                    description: Start is the first allocatable IP address.
+                    description: |-
+                      Start is the first allocatable IP address.
+                      Deprecated: Use Ranges for multi-range support. When Ranges is
+                      specified, Start and End are ignored. Removal targeted after all
+                      deployments migrate to Ranges.
                     type: string
-                required:
-                - end
-                - start
                 type: object
             required:
             - cidr
@@ -201,6 +233,89 @@ spec:
                 maximum: 100
                 minimum: 0
                 type: integer
+              infrastructureAllocations:
+                description: |-
+                  InfrastructureAllocations lists IPs within the pool CIDR that are
+                  consumed by management-plane infrastructure (LoadBalancer Services, Nodes).
+                  Populated by the infrastructure-allocation reconciler. May be absent
+                  on clusters running older CRD versions.
+                items:
+                  description: |-
+                    InfrastructureAllocation represents a single infrastructure IP observed
+                    within the pool CIDR by a management-cluster resource (e.g., a
+                    LoadBalancer Service or a Node's InternalIP).
+                  properties:
+                    ip:
+                      description: IP is the individual IP address allocated to infrastructure.
+                      pattern: ^(\d{1,3}\.){3}\d{1,3}$
+                      type: string
+                    machineRef:
+                      description: |-
+                        MachineRef references a cluster infrastructure Machine resource whose VM uses this IP.
+                        Populated when Source is "machine". The Machine's spec.clusterName
+                        identifies which tenant cluster the VM belongs to.
+                      properties:
+                        name:
+                          description: Name is the name of the resource.
+                          minLength: 1
+                          type: string
+                        namespace:
+                          description: Namespace is the namespace of the resource.
+                          minLength: 1
+                          type: string
+                      required:
+                      - name
+                      - namespace
+                      type: object
+                    nodeRef:
+                      description: |-
+                        NodeRef references the Kubernetes Node using this IP as its InternalIP.
+                        Populated when Source is "node" or when a Node's InternalIP matches
+                        a Service's LoadBalancer IP.
+                      properties:
+                        name:
+                          description: Name is the name of the resource.
+                          minLength: 1
+                          type: string
+                      required:
+                      - name
+                      type: object
+                    serviceRef:
+                      description: |-
+                        ServiceRef references the Kubernetes Service consuming this IP.
+                        Populated when a LoadBalancer Service uses this IP.
+                      properties:
+                        name:
+                          description: Name is the name of the resource.
+                          minLength: 1
+                          type: string
+                        namespace:
+                          description: Namespace is the namespace of the resource.
+                          minLength: 1
+                          type: string
+                      required:
+                      - name
+                      - namespace
+                      type: object
+                    source:
+                      description: |-
+                        Source identifies the infrastructure system that owns this IP.
+                        Examples: "metallb", "node", "static".
+                      type: string
+                  required:
+                  - ip
+                  - source
+                  type: object
+                type: array
+                x-kubernetes-list-map-keys:
+                - ip
+                x-kubernetes-list-type: map
+              infrastructureConsumedIPs:
+                description: |-
+                  InfrastructureConsumedIPs is the count of unique IPs tracked in
+                  InfrastructureAllocations.
+                format: int32
+                type: integer
               largestFreeBlock:
                 description: LargestFreeBlock is the size of the largest contiguous
                   free block.
@@ -210,9 +325,55 @@ spec:
                 description: ObservedGeneration is the last observed generation.
                 format: int64
                 type: integer
+              poolSizeIPs:
+                description: |-
+                  PoolSizeIPs is the total number of IPs in the pool CIDR
+                  (including gateway, reserved, tenant, and unmanaged space).
+                format: int32
+                type: integer
+              reservedIPs:
+                description: ReservedIPs is the total number of IPs across all declared
+                  reserved CIDRs.
+                format: int32
+                type: integer
               totalIPs:
                 description: TotalIPs is the total number of usable IPs (excluding
                   reserved).
+                format: int32
+                type: integer
+              unmanagedRanges:
+                description: |-
+                  UnmanagedRanges lists the contiguous IP ranges within the pool CIDR
+                  that are not covered by reserved ranges or tenant allocation ranges.
+                  Computed by the controller from the spec. Consumers use this to
+                  understand the pool's unmanaged address space without performing
+                  CIDR arithmetic.
+                items:
+                  description: |-
+                    AllocationRange defines a contiguous block of allocatable IPs.
+                    Maximum 16 ranges per pool. This is sufficient for all expected
+                    topologies; if more are needed, reconsider whether the pool should
+                    be split into multiple NetworkPools.
+                  properties:
+                    end:
+                      description: End is the last allocatable IP address in this
+                        range.
+                      type: string
+                    start:
+                      description: Start is the first allocatable IP address in this
+                        range.
+                      type: string
+                  required:
+                  - end
+                  - start
+                  type: object
+                type: array
+              unmanagedScopeIPs:
+                description: |-
+                  UnmanagedScopeIPs is the number of IPs in the pool CIDR that are not
+                  covered by reserved ranges or tenant allocation ranges (excluding the
+                  network and broadcast addresses). These IPs are within the pool CIDR
+                  but not managed by Butler's IPAM allocation logic.
                 format: int32
                 type: integer
             type: object

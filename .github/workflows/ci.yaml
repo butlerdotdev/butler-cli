@@ -20,3 +20,34 @@ jobs:
 
       - name: Test
         run: go test ./... -v
+
+  crd-drift:
+    name: Embedded CRDs in sync with butler-api
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout butler-cli
+        uses: actions/checkout@v4
+        with:
+          path: butler-cli
+
+      # butler-api is the single source of truth for the CRD schemas. butler-api is
+      # public, so the default token can read it.
+      - name: Checkout butler-api
+        uses: actions/checkout@v4
+        with:
+          repository: butlerdotdev/butler-api
+          path: butler-api
+
+      - name: Re-sync embedded CRDs from butler-api
+        working-directory: butler-cli
+        run: BUTLER_API_PATH="$GITHUB_WORKSPACE/butler-api" ./hack/sync-crds.sh
+
+      - name: Fail if the committed copies drifted
+        working-directory: butler-cli
+        run: |
+          if ! git diff --exit-code internal/adm/bootstrap/manifests/crds/; then
+            echo "::error::Embedded bootstrap CRDs are out of sync with butler-api." \
+                 "Run 'make sync-crds' against an up-to-date butler-api checkout and commit the result." >&2
+            exit 1
+          fi
+          echo "Embedded CRDs match butler-api."

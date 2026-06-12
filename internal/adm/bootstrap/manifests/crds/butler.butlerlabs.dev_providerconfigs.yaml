@@ -131,7 +131,8 @@ spec:
                   - proxmox: "username", "password" or "token"
                   - gcp: "serviceAccountKey" (JSON service account key)
                   Required for all providers except "local", which needs no credentials.
-                  The per-provider requirement is enforced by the ProviderConfig admission webhook.
+                  The local-exempt, non-local-required split is enforced by the CEL validation
+                  rule on this spec (see the XValidation marker on ProviderConfigSpec).
                 properties:
                   key:
                     description: |-
@@ -499,6 +500,11 @@ spec:
             required:
             - provider
             type: object
+            x-kubernetes-validations:
+            - message: credentialsRef with a non-empty name is required for all providers
+                except local
+              rule: self.provider == 'local' || (has(self.credentialsRef) && self.credentialsRef.name
+                != '')
           status:
             description: ProviderConfigStatus defines the observed state of ProviderConfig.
             properties:

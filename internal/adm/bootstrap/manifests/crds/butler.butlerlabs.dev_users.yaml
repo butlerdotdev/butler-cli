@@ -58,9 +58,13 @@ spec:
           5. Password is hashed (bcrypt) and stored in a Secret
           6. User status changes from Pending to Active
 
-          Platform Admin:
-          Users with spec.isPlatformAdmin=true have full platform access,
-          bypassing team-based RBAC. This should be used sparingly.
+          Platform Roles:
+          Users with spec.platformRole="admin" (or the deprecated
+          spec.isPlatformAdmin=true) have full platform access, bypassing
+          team-based RBAC. Users with spec.platformRole="viewer" have
+          read-only access across all teams and clusters. Platform roles
+          can also be assigned via IdP group mapping on the IdentityProvider
+          CRD (spec.platformRoleGroups).
         properties:
           apiVersion:
             description: |-
@@ -113,12 +117,24 @@ spec:
                 default: false
                 description: |-
                   IsPlatformAdmin grants full platform access, bypassing team-based RBAC.
-                  Platform admins can:
-                  - Manage all teams, users, clusters, and providers
-                  - Access all resources regardless of team membership
-                  - Configure platform-wide settings
-                  Use sparingly - most users should use team-based access control.
+                  Deprecated: use PlatformRole instead. When true, treated as
+                  PlatformRole "admin" internally. Both fields are honored; the
+                  effective role is the higher of the two. Removal targeted for
+                  v1.0.0 after butler-console and butler-cli migrate to PlatformRole.
+                  Tracked in butler-console#56, butler-cli#37, butler-server#56.
                 type: boolean
+              platformRole:
+                description: |-
+                  PlatformRole is the platform-wide role assigned to this user.
+                  "admin" grants full platform access (equivalent to isPlatformAdmin).
+                  "viewer" grants read-only access across all teams and clusters.
+                  Empty string means no platform role; the user has only their
+                  team-scoped permissions.
+                enum:
+                - admin
+                - viewer
+                - ""
+                type: string
               sshKeys:
                 description: |-
                   SSHKeys are the user's saved SSH public keys for workspace access.
@@ -256,6 +272,20 @@ spec:
                   in.
                 format: date-time
                 type: string
+              lastSeenGroups:
+                description: |-
+                  LastSeenGroups contains the IdP group identifiers from the user's most
+                  recent OIDC token. Written by butler-server at login. Used by the
+                  butler-controller User reconciler to resolve group-based Team membership
+                  without requiring the user to be actively logged in.
+
+                  Group identifiers are IdP-specific: UUIDs for Microsoft Entra, email-style
+                  for Google Workspace, plain names for others. Values are stored exactly as
+                  received from the IdP (no normalization). The Team resolution logic
+                  normalizes at match time.
+                items:
+                  type: string
+                type: array
               lockedUntil:
                 description: |-
                   LockedUntil is set when the account is temporarily locked due to failed attempts.
@@ -328,6 +358,20 @@ spec:
                   - role
                   type: object
                 type: array
+              teamsResolvedAt:
+                description: |-
+                  TeamsResolvedAt is when status.teams was last successfully resolved
+                  by the butler-controller User reconciler. Updated atomically with
+                  status.teams on conditional writes (only when resolved teams differ
+                  from current status.teams). Used by the butler_user_status_stale_age_seconds
+                  metric to surface silent degradation in team resolution.
+
+                  When nil (pre-upgrade User CRDs or never-resolved Users), stale_age
+                  computation falls back to the User's creationTimestamp. This produces
+                  the worst-case stale_age value, ensuring unresolved users are visible
+                  in monitoring alerts.
+                format: date-time
+                type: string
             type: object
         type: object
     served: true

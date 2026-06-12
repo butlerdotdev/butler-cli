@@ -201,6 +201,35 @@ spec:
                 - issuerURL
                 - redirectURL
                 type: object
+              platformRoleGroups:
+                description: |-
+                  PlatformRoleGroups maps IdP groups to platform-wide roles.
+                  Group names are matched using the same normalization as
+                  Team.spec.access.groups (LDAP DN, email-style, and plain
+                  names are all supported). When a user belongs to multiple
+                  matching groups, the highest role wins.
+                items:
+                  description: PlatformRoleGroupEntry maps an IdP group to a platform-wide
+                    role.
+                  properties:
+                    name:
+                      description: |-
+                        Name is the group identifier as it appears in the OIDC token's
+                        groups claim.
+                      minLength: 1
+                      type: string
+                    role:
+                      description: Role is the platform role to grant members of this
+                        group.
+                      enum:
+                      - admin
+                      - viewer
+                      type: string
+                  required:
+                  - name
+                  - role
+                  type: object
+                type: array
               type:
                 description: |-
                   Type specifies the identity provider type.
