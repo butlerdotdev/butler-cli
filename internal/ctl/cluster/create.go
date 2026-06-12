@@ -378,6 +378,27 @@ func runCreate(ctx context.Context, opts *CreateOptions) error {
 		return createFromFile(ctx, c, opts)
 	}
 
+	// For the local provider, derive the LoadBalancer pool from the kind docker
+	// network when the user did not specify one, so `cluster create` works without
+	// a machine-specific --lb-pool flag (mirrors what `bootstrap local` configures).
+	if opts.LBPoolStart == "" && opts.LBPoolEnd == "" {
+		providerName := opts.Provider
+		if providerName == "" {
+			if p, derr := autoDetectProvider(ctx, c, opts.Logger); derr == nil {
+				providerName = p
+				opts.Provider = p
+			}
+		}
+		if providerName != "" && providerIsLocal(ctx, c, providerName) {
+			start, end, derr := deriveLocalLBPool(ctx)
+			if derr != nil {
+				return fmt.Errorf("deriving the local LoadBalancer pool (is the kind network present?): %w", derr)
+			}
+			opts.LBPoolStart, opts.LBPoolEnd = start, end
+			opts.Logger.Info("derived LoadBalancer pool from the local kind network", "start", start, "end", end)
+		}
+	}
+
 	// Validate options
 	if err := opts.Validate(); err != nil {
 		return err

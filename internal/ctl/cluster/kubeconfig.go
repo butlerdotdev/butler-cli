@@ -129,6 +129,19 @@ func runKubeconfig(ctx context.Context, logger *log.Logger, clusterName string, 
 		}
 	}
 
+	// For local-provider tenants on macOS/Windows, the stored kubeconfig points at a
+	// docker-bridge LoadBalancer IP that the host cannot route to. Rewrite it to a
+	// host-reachable endpoint backed by a background port-forward so the documented
+	// `kubectl get nodes` works with no manual steps. (On Linux the bridge IP is
+	// directly reachable, so the kubeconfig is emitted verbatim.)
+	if localAccessNeeded() && isLocalTenant(ctx, c, tc) {
+		rewritten, err := rewriteKubeconfigForLocalAccess(clusterName, tenantNS, opts.kubeconfigPath, opts.kubeContext, kubeconfigData)
+		if err != nil {
+			return fmt.Errorf("preparing host-reachable kubeconfig for local cluster: %w", err)
+		}
+		kubeconfigData = rewritten
+	}
+
 	// Handle merge mode
 	if opts.merge {
 		return mergeKubeconfig(logger, clusterName, kubeconfigData, opts.setContext)

@@ -664,6 +664,7 @@ func (v *ClusterDetailView) viewOverview() string {
 					{Label: "Provider", Value: valueOr(v.info.ProviderConfig, "-")},
 					{Label: "Tenant NS", Value: valueOr(v.info.TenantNamespace, "-")},
 					{Label: "Created", Value: v.info.CreationTime},
+					{Label: "Access", Value: "butlerctl cluster kubeconfig " + v.info.Name},
 				},
 			},
 		},
