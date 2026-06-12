@@ -40,6 +40,7 @@ import (
 func NewTUICmd(admin bool) *cobra.Command {
 	var kubeconfig string
 	var skipCleanup bool
+	var fromSource bool
 
 	cmd := &cobra.Command{
 		Use:   "tui",
@@ -71,12 +72,13 @@ Examples:
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			kubeContext, _ := cmd.Flags().GetString("context")
-			return runDashboardLoop(kubeconfig, kubeContext, admin, skipCleanup)
+			return runDashboardLoop(kubeconfig, kubeContext, admin, skipCleanup, fromSource)
 		},
 	}
 
 	cmd.Flags().StringVar(&kubeconfig, "kubeconfig", "", "path to kubeconfig file")
 	cmd.Flags().BoolVar(&skipCleanup, "skip-cleanup", false, "don't delete KIND cluster on bootstrap failure (for debugging)")
+	cmd.Flags().BoolVar(&fromSource, "from-source", false, "for a local bootstrap, build component images from the sibling butlerdotdev repos instead of pulling published images (for development)")
 
 	return cmd
 }
@@ -88,7 +90,7 @@ Examples:
 // cluster's kubeconfig. This nested-TUI pattern works around Bubbletea's
 // exclusive grab on stdin — huh forms and bootstrap's own tea.Program can't
 // literally nest inside the dashboard tea.Program.
-func runDashboardLoop(kubeconfig, kubeContext string, admin bool, skipCleanup bool) error {
+func runDashboardLoop(kubeconfig, kubeContext string, admin bool, skipCleanup bool, fromSource bool) error {
 	for {
 		// 1. Try to build a Kubernetes client. A missing or invalid
 		//    kubeconfig is not a fatal error in admin mode — the app
@@ -140,7 +142,7 @@ func runDashboardLoop(kubeconfig, kubeContext string, admin bool, skipCleanup bo
 			continue
 		}
 
-		if err := runBootstrap(cfg, skipCleanup); err != nil {
+		if err := runBootstrap(cfg, skipCleanup, fromSource); err != nil {
 			fmt.Fprintf(os.Stderr, "\nbootstrap error: %v\n", err)
 			fmt.Fprintf(os.Stderr, "Press Enter to return to the dashboard...\n")
 			fmt.Scanln()
@@ -158,20 +160,31 @@ func runDashboardLoop(kubeconfig, kubeContext string, admin bool, skipCleanup bo
 
 // runBootstrap hands a wizard-assembled Config to the bootstrap TUI.
 // Signal handling and orchestrator cleanup are delegated to bootstrap.Run.
-func runBootstrap(cfg *orchestrator.Config, skipCleanup bool) error {
+func runBootstrap(cfg *orchestrator.Config, skipCleanup bool, fromSource bool) error {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
 	logger := log.New("butleradm")
 
+	orcOpts := orchestrator.Options{
+		Timeout:     30 * time.Minute,
+		SkipCleanup: skipCleanup,
+	}
+	// The local provider pulls published component images from ghcr by default, so
+	// the wizard flow needs no source checkout. With --from-source it builds the
+	// controller, bootstrap, and steward images from the sibling butlerdotdev repos
+	// instead (for iterating on those components before they are published).
+	if cfg.Provider == "local" && fromSource {
+		orcOpts.LocalDev = true
+		home, _ := os.UserHomeDir()
+		orcOpts.RepoRoot = filepath.Join(home, "code", "github.com", "butlerdotdev")
+	}
+
 	return bootstrap.Run(bootstrap.RunConfig{
-		Ctx:    ctx,
-		Cancel: cancel,
-		Cfg:    cfg,
-		OrcOptions: orchestrator.Options{
-			Timeout:     30 * time.Minute,
-			SkipCleanup: skipCleanup,
-		},
+		Ctx:        ctx,
+		Cancel:     cancel,
+		Cfg:        cfg,
+		OrcOptions: orcOpts,
 		LoggerName: logger.Name(),
 		LogLevel:   logger.Level(),
 	})

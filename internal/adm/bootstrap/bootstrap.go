@@ -66,6 +66,7 @@ Example:
 	}
 
 	// Register provider subcommands
+	cmd.AddCommand(NewLocalCmd(logger))
 	cmd.AddCommand(NewHarvesterCmd(logger))
 	cmd.AddCommand(NewNutanixCmd(logger))
 	cmd.AddCommand(NewGCPCmd(logger))

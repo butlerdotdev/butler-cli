@@ -18,6 +18,7 @@ limitations under the License.
 package orchestrator
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
@@ -34,6 +35,8 @@ import (
 	"github.com/butlerdotdev/butler/internal/adm/bootstrap/manifests"
 	"github.com/butlerdotdev/butler/internal/common/log"
 	corev1 "k8s.io/api/core/v1"
+	rbacv1 "k8s.io/api/rbac/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -85,6 +88,11 @@ var (
 		Version:  butlerAPIVersion,
 		Resource: "butlerconfigs",
 	}
+	tenantClusterGVR = schema.GroupVersionResource{
+		Group:    butlerAPIGroup,
+		Version:  butlerAPIVersion,
+		Resource: "tenantclusters",
+	}
 )
 
 // Options configures the orchestrator
@@ -110,6 +118,16 @@ type Orchestrator struct {
 	logger    *log.Logger
 	options   Options
 	eventSink EventSink
+
+	// isLocal is true for the local provider, which installs Butler onto the KIND
+	// cluster itself (no provisioned cluster, no pivot, no teardown).
+	isLocal bool
+	// kindKubeconfigPath is the path to the KIND cluster's kubeconfig. For the local
+	// provider this kubeconfig is also the management cluster kubeconfig.
+	kindKubeconfigPath string
+	// consolePassword caches the console admin password once fetched, so the
+	// EventComplete emission and the end-of-run summary share one lookup.
+	consolePassword string
 }
 
 // New creates a new orchestrator
@@ -151,6 +169,8 @@ func (o *Orchestrator) Run(ctx context.Context, cfg *Config) error {
 	o.logger.Phase("Initializing bootstrap")
 	o.emit(Event{Type: EventPhaseChange, Phase: "Initializing", Message: "Initializing bootstrap"})
 
+	o.isLocal = cfg.Provider == "local"
+
 	// Create context with timeout
 	ctx, cancel := context.WithTimeout(ctx, o.options.Timeout)
 	defer cancel()
@@ -164,6 +184,20 @@ func (o *Orchestrator) Run(ctx context.Context, cfg *Config) error {
 	if err != nil {
 		return fmt.Errorf("creating KIND cluster: %w", err)
 	}
+	o.kindKubeconfigPath = kubeconfigPath
+
+	// The local provider's MetalLB pool must live in the kind docker network so CAPD
+	// worker containers (on the same network) can reach tenant LoadBalancer IPs. Derive
+	// it now that the network exists.
+	if o.isLocal && cfg.Network.LoadBalancerPool == nil {
+		if pool, derr := deriveKindLBPool(ctx); derr != nil {
+			o.logger.Warn("Failed to derive MetalLB pool from kind network, using default", "error", derr)
+			cfg.Network.LoadBalancerPool = &LBPoolConfig{Start: "172.18.255.200", End: "172.18.255.250"}
+		} else {
+			o.logger.Info("Derived MetalLB pool from kind docker network", "start", pool.Start, "end", pool.End)
+			cfg.Network.LoadBalancerPool = pool
+		}
+	}
 	// Tell the TUI where the KIND kubeconfig lives so it can start streaming
 	// butler-bootstrap-controller and butler-provider-* pod logs into the
 	// debug panel.
@@ -174,7 +208,9 @@ func (o *Orchestrator) Run(ctx context.Context, cfg *Config) error {
 		KINDKubeconfig: kubeconfigPath,
 	})
 	defer func() {
-		if !o.options.SkipCleanup {
+		// The local provider keeps the KIND cluster: it is the management cluster,
+		// not throwaway scaffolding, so the demo needs it to persist.
+		if !o.options.SkipCleanup && !o.isLocal {
 			o.logger.Phase("Cleaning up KIND cluster")
 			o.emit(Event{Type: EventPhaseChange, Phase: "CleaningUp", Message: "Cleaning up KIND cluster"})
 			if err := kindProvider.Delete(kindClusterName, ""); err != nil {
@@ -325,6 +361,27 @@ func (o *Orchestrator) Run(ctx context.Context, cfg *Config) error {
 		}
 	}
 
+	// Local stability profile: set guaranteed hosted control plane resources (so the
+	// tenant apiserver is not CPU-starved) and grant the console and controller the
+	// broader access the in-cluster local flow needs (console impersonates users for
+	// team creation; the controller lists cluster-scoped nodes/users). Best-effort.
+	home, _ := os.UserHomeDir()
+	mgmtKubeconfig := filepath.Join(home, ".butler", cfg.Cluster.Name+"-kubeconfig")
+
+	if o.isLocal {
+		o.logger.Phase("Applying local stability profile")
+		if err := o.configureLocalProfile(ctx, mgmtKubeconfig); err != nil {
+			o.logger.Warn("Failed to apply local stability profile", "error", err)
+		}
+	}
+
+	// The password was fetched at completion time; fall back to a path-based
+	// read here if that lookup came up empty.
+	consolePassword := o.consolePassword
+	if consolePassword == "" {
+		consolePassword = o.getConsoleAdminPassword(ctx, mgmtKubeconfig)
+	}
+
 	o.logger.Success("Bootstrap complete!")
 	o.emit(Event{Type: EventSuccess, Phase: "Complete", Message: "Bootstrap complete"})
 	o.logger.Info("")
@@ -332,6 +389,24 @@ func (o *Orchestrator) Run(ctx context.Context, cfg *Config) error {
 	o.logger.Info("  Kubeconfig:   ~/.butler/" + cfg.Cluster.Name + "-kubeconfig")
 	o.logger.Info("  Talosconfig:  ~/.butler/" + cfg.Cluster.Name + "-talosconfig")
 	o.logger.Info("")
+
+	// For local, the console is exposed on the host and we print the full sign-in
+	// details so the operator does not have to go looking for the password.
+	if o.isLocal {
+		o.logger.Info("Butler Console:")
+		o.logger.Info("  URL:      http://localhost:8080")
+		o.logger.Info("  Username: admin")
+		if consolePassword != "" {
+			o.logger.Info("  Password: " + consolePassword)
+		} else {
+			o.logger.Info("  Password: kubectl get secret butler-console-admin -n butler-system -o jsonpath='{.data.admin-password}' | base64 -d")
+		}
+		o.logger.Info("")
+		o.logger.Info("Usage:")
+		o.logger.Info("  export KUBECONFIG=~/.butler/" + cfg.Cluster.Name + "-kubeconfig")
+		o.logger.Info("  kubectl get nodes")
+		return nil
+	}
 
 	if creds.consoleURL != "" {
 		o.logger.Info("Butler Console:")
@@ -341,8 +416,12 @@ func (o *Orchestrator) Run(ctx context.Context, cfg *Config) error {
 			o.logger.Info("  URL: " + creds.consoleURL)
 		}
 		o.logger.Info("  Username: admin")
-		o.logger.Info("  Password: Run the following command to retrieve:")
-		o.logger.Info("    kubectl get secret butler-console-admin -n butler-system -o jsonpath='{.data.admin-password}' | base64 -d && echo")
+		if consolePassword != "" {
+			o.logger.Info("  Password: " + consolePassword)
+		} else {
+			o.logger.Info("  Password: Run the following command to retrieve:")
+			o.logger.Info("    kubectl get secret butler-console-admin -n butler-system -o jsonpath='{.data.admin-password}' | base64 -d && echo")
+		}
 		o.logger.Info("")
 	}
 
@@ -354,6 +433,46 @@ func (o *Orchestrator) Run(ctx context.Context, cfg *Config) error {
 	o.logger.Info("  talosctl health --nodes <CONTROL_PLANE_IP>")
 
 	return nil
+}
+
+// getConsoleAdminPassword reads the bootstrap admin password from the
+// butler-console-admin Secret. Returns "" if it cannot be read.
+func (o *Orchestrator) getConsoleAdminPassword(ctx context.Context, kubeconfigPath string) string {
+	clientset, _, err := o.createClients(kubeconfigPath)
+	if err != nil {
+		return ""
+	}
+	secret, err := clientset.CoreV1().Secrets(butlerNamespace).Get(ctx, "butler-console-admin", metav1.GetOptions{})
+	if err != nil {
+		return ""
+	}
+	if pw, ok := secret.Data["admin-password"]; ok {
+		return string(pw)
+	}
+	return ""
+}
+
+// consoleAdminPasswordFromBytes reads the bootstrap admin password from the
+// butler-console-admin Secret using in-memory kubeconfig bytes (the management
+// kubeconfig file may not be written to ~/.butler yet at emit time). Returns ""
+// if it cannot be read.
+func (o *Orchestrator) consoleAdminPasswordFromBytes(ctx context.Context, kubeconfig []byte) string {
+	cfg, err := clientcmd.RESTConfigFromKubeConfig(kubeconfig)
+	if err != nil {
+		return ""
+	}
+	clientset, err := kubernetes.NewForConfig(cfg)
+	if err != nil {
+		return ""
+	}
+	secret, err := clientset.CoreV1().Secrets(butlerNamespace).Get(ctx, "butler-console-admin", metav1.GetOptions{})
+	if err != nil {
+		return ""
+	}
+	if pw, ok := secret.Data["admin-password"]; ok {
+		return string(pw)
+	}
+	return ""
 }
 
 // dryRun shows what would be created
@@ -494,18 +613,96 @@ func (o *Orchestrator) scanCertDirectory(dir string) []string {
 	return certs
 }
 
-// buildKINDConfig generates a KIND cluster configuration with CA certificate mounts
-func (o *Orchestrator) buildKINDConfig(caCerts []string) string {
-	if len(caCerts) == 0 {
-		// No custom certs, use minimal config
-		return `kind: Cluster
-apiVersion: kind.x-k8s.io/v1alpha4
-nodes:
-  - role: control-plane
-`
+// configureLocalProfile applies the local stability profile to the management cluster:
+// guaranteed hosted control plane resources (so the tenant apiserver is not CPU-starved)
+// and cluster-admin for the console and controller service accounts (the console
+// impersonates users for team creation, the controller lists cluster-scoped nodes/users).
+// Best-effort: individual failures are logged, not fatal.
+func (o *Orchestrator) configureLocalProfile(ctx context.Context, kubeconfigPath string) error {
+	clientset, dynamicClient, err := o.createClients(kubeconfigPath)
+	if err != nil {
+		return fmt.Errorf("creating clients: %w", err)
 	}
 
-	// Build extraMounts for each certificate
+	resPatch := []byte(`{"spec":{"defaultControlPlaneResources":{` +
+		`"apiServer":{"requests":{"cpu":"250m","memory":"512Mi"},"limits":{"cpu":"2","memory":"1Gi"}},` +
+		`"controllerManager":{"requests":{"cpu":"100m","memory":"128Mi"}},` +
+		`"scheduler":{"requests":{"cpu":"50m","memory":"64Mi"}}}}}`)
+	if _, err := dynamicClient.Resource(butlerConfigGVR).Patch(ctx, "butler", types.MergePatchType, resPatch, metav1.PatchOptions{}); err != nil {
+		o.logger.Warn("Failed to set control plane resources on ButlerConfig", "error", err)
+	}
+
+	for _, sa := range []string{"butler-console", "butler-controller"} {
+		crb := &rbacv1.ClusterRoleBinding{
+			ObjectMeta: metav1.ObjectMeta{Name: "butler-local-" + sa + "-admin"},
+			RoleRef:    rbacv1.RoleRef{APIGroup: "rbac.authorization.k8s.io", Kind: "ClusterRole", Name: "cluster-admin"},
+			Subjects:   []rbacv1.Subject{{Kind: "ServiceAccount", Name: sa, Namespace: butlerNamespace}},
+		}
+		if _, err := clientset.RbacV1().ClusterRoleBindings().Create(ctx, crb, metav1.CreateOptions{}); err != nil && !strings.Contains(err.Error(), "already exists") {
+			o.logger.Warn("Failed to grant cluster-admin", "serviceAccount", sa, "error", err)
+		}
+	}
+
+	// Normally the admin gets platform-admin RBAC via the CLI device flow (butleradm
+	// login creates a ServiceAccount + ClusterRoleBinding to butler-cli-platform-admin).
+	// On local we drive everything through the console, whose legacy login impersonates
+	// the admin@butler.local identity directly, so bind that identity to cluster-admin
+	// for the console-driven flow. (Using butleradm/butlerctl against the local
+	// kubeconfig works the same way it does on a normal bootstrap.)
+	adminCRB := &rbacv1.ClusterRoleBinding{
+		ObjectMeta: metav1.ObjectMeta{Name: "butler-local-admin-user"},
+		RoleRef:    rbacv1.RoleRef{APIGroup: "rbac.authorization.k8s.io", Kind: "ClusterRole", Name: "cluster-admin"},
+		Subjects:   []rbacv1.Subject{{APIGroup: "rbac.authorization.k8s.io", Kind: "User", Name: "admin@butler.local"}},
+	}
+	if _, err := clientset.RbacV1().ClusterRoleBindings().Create(ctx, adminCRB, metav1.CreateOptions{}); err != nil && !strings.Contains(err.Error(), "already exists") {
+		o.logger.Warn("Failed to grant admin user cluster-admin", "error", err)
+	}
+
+	// Expose the console on the kind node's mapped host port so it is reachable at
+	// http://localhost:8080 with no port-forward. The KIND config maps host 8080 to
+	// container NodePort 30080 (see buildKINDConfig); flip the frontend Service to it.
+	consolePatch := []byte(`{"spec":{"type":"NodePort","ports":[{"port":80,"nodePort":30080}]}}`)
+	if _, err := clientset.CoreV1().Services(butlerNamespace).Patch(ctx, "butler-console-frontend", types.StrategicMergePatchType, consolePatch, metav1.PatchOptions{}); err != nil {
+		o.logger.Warn("Failed to expose console on host port 8080", "error", err)
+	} else {
+		o.logger.Info("Console reachable at http://localhost:8080")
+	}
+
+	o.logger.Success("Local stability profile applied")
+	return nil
+}
+
+// deriveKindLBPool inspects the kind docker network and returns a MetalLB pool high in
+// its IPv4 subnet, so LoadBalancer IPs are reachable by CAPD worker containers on the
+// same network.
+func deriveKindLBPool(ctx context.Context) (*LBPoolConfig, error) {
+	out, err := exec.CommandContext(ctx, "docker", "network", "inspect", "kind",
+		"-f", "{{range .IPAM.Config}}{{.Subnet}} {{end}}").Output()
+	if err != nil {
+		return nil, fmt.Errorf("docker network inspect kind: %w", err)
+	}
+	for _, field := range strings.Fields(string(out)) {
+		ip, _, perr := net.ParseCIDR(field)
+		if perr != nil {
+			continue
+		}
+		ip4 := ip.To4()
+		if ip4 == nil {
+			continue // skip IPv6 subnets
+		}
+		return &LBPoolConfig{
+			Start: fmt.Sprintf("%d.%d.255.200", ip4[0], ip4[1]),
+			End:   fmt.Sprintf("%d.%d.255.250", ip4[0], ip4[1]),
+		}, nil
+	}
+	return nil, fmt.Errorf("no IPv4 subnet found on kind network")
+}
+
+// buildKINDConfig generates a KIND cluster configuration with CA certificate mounts.
+// For the local provider it also mounts the host Docker socket so the in-cluster CAPD
+// controller can create sibling node containers, and maps the console NodePort to the host.
+func (o *Orchestrator) buildKINDConfig(caCerts []string) string {
+	// Build extraMounts for each certificate.
 	var mounts strings.Builder
 	for i, certPath := range caCerts {
 		containerPath := fmt.Sprintf("/usr/local/share/ca-certificates/butler-custom-%d.crt", i)
@@ -515,12 +712,34 @@ nodes:
 `, certPath, containerPath))
 	}
 
-	return fmt.Sprintf(`kind: Cluster
+	if o.isLocal {
+		// Mount the host Docker socket so the CAPD (Cluster API Docker) controller
+		// running inside this cluster can create sibling node containers. Without
+		// this mount, DockerMachines never provision and the tenant hangs.
+		mounts.WriteString(`      - hostPath: /var/run/docker.sock
+        containerPath: /var/run/docker.sock
+`)
+	}
+
+	var b strings.Builder
+	b.WriteString(`kind: Cluster
 apiVersion: kind.x-k8s.io/v1alpha4
 nodes:
   - role: control-plane
-    extraMounts:
-%s`, mounts.String())
+`)
+	if mounts.Len() > 0 {
+		b.WriteString("    extraMounts:\n")
+		b.WriteString(mounts.String())
+	}
+	if o.isLocal {
+		// Expose the Butler console NodePort on the host for the laptop demo.
+		b.WriteString(`    extraPortMappings:
+      - containerPort: 30080
+        hostPort: 8080
+        protocol: TCP
+`)
+	}
+	return b.String()
 }
 
 // installCACertificates runs update-ca-certificates in the KIND node
@@ -634,6 +853,78 @@ func (o *Orchestrator) injectHostAliases(ctx context.Context, hostAliases []stri
 }
 
 // createKINDCluster creates a KIND cluster with the specified configuration
+// teardownLocalEnvironment removes a prior local environment so a fresh bootstrap
+// starts from a known-good state. It deletes the management KIND cluster and every
+// tenant cluster the management cluster created (each local tenant runs as its own
+// KIND cluster via CAPD). Tenant names are read from the management cluster while it
+// is still up, so only Butler-created clusters are removed; unrelated KIND clusters
+// on the machine are left untouched and surfaced as a warning.
+func (o *Orchestrator) teardownLocalEnvironment(ctx context.Context, provider *cluster.Provider, existing []string) error {
+	existingSet := make(map[string]bool, len(existing))
+	for _, c := range existing {
+		existingSet[c] = true
+	}
+
+	// Discover tenant clusters from the management cluster before deleting it.
+	for _, name := range o.listLocalTenantClusters(ctx, provider) {
+		if name == "" || name == kindClusterName || !existingSet[name] {
+			continue
+		}
+		o.logger.Info("Deleting tenant cluster", "name", name)
+		if err := provider.Delete(name, ""); err != nil {
+			o.logger.Warn("Failed to delete tenant cluster", "name", name, "error", err)
+		}
+		delete(existingSet, name)
+	}
+
+	// Delete the management cluster.
+	o.logger.Info("Deleting management cluster", "name", kindClusterName)
+	if err := provider.Delete(kindClusterName, ""); err != nil {
+		return fmt.Errorf("deleting existing KIND cluster: %w", err)
+	}
+	delete(existingSet, kindClusterName)
+
+	// Surface any KIND clusters that were not recognized as Butler tenants (for
+	// example orphans from an interrupted prior run). They are not deleted because
+	// they cannot be confirmed as Butler-created.
+	if len(existingSet) > 0 {
+		leftover := make([]string, 0, len(existingSet))
+		for c := range existingSet {
+			leftover = append(leftover, c)
+		}
+		o.logger.Warn("Other KIND clusters remain and were left untouched", "clusters", strings.Join(leftover, ", "))
+		o.logger.Info("If any are leftover Butler tenants, remove with: kind delete cluster --name <name>")
+	}
+
+	return nil
+}
+
+// listLocalTenantClusters returns the names of TenantClusters registered on the
+// existing management KIND cluster. Each local tenant runs as a KIND cluster with
+// the same name. Best-effort: returns nil if the management cluster is unreachable.
+func (o *Orchestrator) listLocalTenantClusters(ctx context.Context, provider *cluster.Provider) []string {
+	kubeconfigPath, err := o.getKINDKubeconfig(provider)
+	if err != nil {
+		o.logger.Debug("Could not read management kubeconfig for tenant discovery", "error", err)
+		return nil
+	}
+	_, dyn, err := o.createClients(kubeconfigPath)
+	if err != nil {
+		o.logger.Debug("Could not build client for tenant discovery", "error", err)
+		return nil
+	}
+	list, err := dyn.Resource(tenantClusterGVR).Namespace("").List(ctx, metav1.ListOptions{})
+	if err != nil {
+		o.logger.Debug("Could not list tenant clusters for cleanup", "error", err)
+		return nil
+	}
+	names := make([]string, 0, len(list.Items))
+	for _, item := range list.Items {
+		names = append(names, item.GetName())
+	}
+	return names
+}
+
 func (o *Orchestrator) createKINDCluster(ctx context.Context, provider *cluster.Provider) (string, error) {
 	// Check if cluster already exists
 	clusters, err := provider.List()
@@ -642,6 +933,17 @@ func (o *Orchestrator) createKINDCluster(ctx context.Context, provider *cluster.
 	}
 	for _, c := range clusters {
 		if c == kindClusterName {
+			// The local provider's KIND cluster is permanent (no pivot), so a
+			// leftover from a prior run carries stale controller images and
+			// CRs. Tear it down and recreate clean rather than reuse, so a
+			// fresh bootstrap is always from a known-good state.
+			if o.isLocal {
+				o.logger.Warn("Existing local environment found, tearing it down for a clean bootstrap")
+				if err := o.teardownLocalEnvironment(ctx, provider, clusters); err != nil {
+					return "", err
+				}
+				break
+			}
 			o.logger.Warn("KIND cluster already exists, reusing")
 			kubeconfigPath, err := o.getKINDKubeconfig(provider)
 			if err != nil {
@@ -1057,6 +1359,45 @@ func (o *Orchestrator) deployControllers(ctx context.Context, clientset *kuberne
 		return fmt.Errorf("deploying controllers: %w", err)
 	}
 
+	// Point the bootstrap deployment at the local-capable butler-bootstrap image so
+	// the IsLocal install path runs (otherwise the controller treats local as a VM
+	// provider and provisions machines). In the default pull mode the image is
+	// fetched from ghcr (Always, so a stranger gets the current published build); in
+	// --from-source mode it is the :latest image just built and loaded into KIND
+	// (IfNotPresent, so the local build is used rather than re-pulled).
+	if o.isLocal {
+		pullPolicy := "Always"
+		if o.options.LocalDev {
+			pullPolicy = "IfNotPresent"
+		}
+		// Recreate strategy: the controller binds a host port, so a rolling update
+		// would leave the new pod Pending on a port conflict while the old pod keeps
+		// reconciling. Recreate deletes the old pod first.
+		patch := []byte(fmt.Sprintf(`{"spec":{"strategy":{"$retainKeys":["type"],"type":"Recreate"},"template":{"spec":{"containers":[{"name":"manager","image":"ghcr.io/butlerdotdev/butler-bootstrap:latest","imagePullPolicy":%q}]}}}}`, pullPolicy))
+		if _, err := clientset.AppsV1().Deployments(butlerNamespace).Patch(
+			ctx, "butler-bootstrap-controller", types.StrategicMergePatchType, patch, metav1.PatchOptions{}); err != nil {
+			return fmt.Errorf("patching bootstrap controller to local image: %w", err)
+		}
+		o.logger.Info("patched bootstrap controller image", "image", "ghcr.io/butlerdotdev/butler-bootstrap:latest", "pullPolicy", pullPolicy)
+
+		// For local the controller installs addons onto its own cluster using its
+		// in-cluster credentials. Its default RBAC is scoped for remote installs via a
+		// provisioned kubeconfig, so grant it cluster-admin on this (local) cluster.
+		crb := &rbacv1.ClusterRoleBinding{
+			ObjectMeta: metav1.ObjectMeta{Name: "butler-local-bootstrap-admin"},
+			RoleRef:    rbacv1.RoleRef{APIGroup: "rbac.authorization.k8s.io", Kind: "ClusterRole", Name: "cluster-admin"},
+			Subjects: []rbacv1.Subject{{
+				Kind:      "ServiceAccount",
+				Name:      "butler-bootstrap-controller",
+				Namespace: butlerNamespace,
+			}},
+		}
+		if _, err := clientset.RbacV1().ClusterRoleBindings().Create(ctx, crb, metav1.CreateOptions{}); err != nil && !strings.Contains(err.Error(), "already exists") {
+			return fmt.Errorf("granting bootstrap controller cluster-admin for local: %w", err)
+		}
+		o.logger.Info("granted bootstrap controller cluster-admin for local install")
+	}
+
 	// Wait for controllers to be ready
 	o.logger.Debug("waiting for controllers to be ready")
 
@@ -1069,6 +1410,12 @@ func (o *Orchestrator) deployControllers(ctx context.Context, clientset *kuberne
 		return fmt.Errorf("waiting for butler-bootstrap-controller: %w", err)
 	}
 	o.logger.Success("butler-bootstrap-controller is ready")
+
+	// The local provider has no Butler provider controller (CAPD handles tenant
+	// workers), so there is nothing further to wait for.
+	if o.isLocal {
+		return nil
+	}
 
 	// Wait for provider controller
 	providerDeployment := fmt.Sprintf("butler-provider-%s", cfg.Provider)
@@ -1087,6 +1434,10 @@ func (o *Orchestrator) createProviderConfig(ctx context.Context, client dynamic.
 	_, err := client.Resource(providerConfigGVR).Namespace(butlerNamespace).Create(
 		ctx, pc, metav1.CreateOptions{})
 	if err != nil {
+		if apierrors.IsAlreadyExists(err) {
+			o.logger.Info("ProviderConfig already exists, reusing", "name", pc.GetName())
+			return nil
+		}
 		return fmt.Errorf("creating ProviderConfig: %w", err)
 	}
 
@@ -1335,6 +1686,14 @@ func (o *Orchestrator) buildProviderConfigUnstructured(cfg *Config) *unstructure
 	case "proxmox":
 		// TODO: Proxmox ProviderConfig not yet implemented
 
+	case "local":
+		// The local provider needs no credentials. It is platform-scoped so tenant
+		// clusters can reference it, and uses cloud network mode to skip IPAM
+		// (CAPD manages container networking).
+		spec["scope"] = map[string]interface{}{"type": "platform"}
+		spec["network"] = map[string]interface{}{"mode": "cloud"}
+		spec["local"] = map[string]interface{}{}
+
 	case "gcp":
 		spec["credentialsRef"] = map[string]interface{}{
 			"name":      cfg.Cluster.Name + "-gcp-credentials",
@@ -1516,7 +1875,7 @@ func (o *Orchestrator) buildClusterBootstrapUnstructured(cfg *Config) *unstructu
 					}
 					return n
 				}(),
-				"talos": buildTalosSpec(cfg),
+				"talos":  buildTalosSpec(cfg),
 				"addons": buildAddonsConfig(cfg),
 			},
 		},
@@ -1649,19 +2008,45 @@ func (o *Orchestrator) watchBootstrap(ctx context.Context, client dynamic.Interf
 			case "Ready":
 				o.logger.Success("Cluster is ready!")
 
-				// Decode kubeconfig
-				kubeconfig, _ := status["kubeconfig"].(string)
-				kubeconfigBytes, err := base64.StdEncoding.DecodeString(kubeconfig)
-				if err != nil {
-					return nil, fmt.Errorf("decoding kubeconfig: %w", err)
+				var kubeconfigBytes, talosconfigBytes []byte
+				if o.isLocal {
+					// The KIND cluster IS the management cluster, so its kubeconfig is the
+					// management kubeconfig. There is no Talos config for a local cluster.
+					kc, readErr := os.ReadFile(o.kindKubeconfigPath)
+					if readErr != nil {
+						return nil, fmt.Errorf("reading KIND kubeconfig: %w", readErr)
+					}
+					kubeconfigBytes = kc
+				} else {
+					// Decode kubeconfig
+					kubeconfig, _ := status["kubeconfig"].(string)
+					kc, decErr := base64.StdEncoding.DecodeString(kubeconfig)
+					if decErr != nil {
+						return nil, fmt.Errorf("decoding kubeconfig: %w", decErr)
+					}
+					kubeconfigBytes = kc
+
+					// Decode talosconfig - NOTE: JSON field is lowercase "talosconfig"
+					talosconfig, _ := status["talosconfig"].(string)
+					tc, decErr := base64.StdEncoding.DecodeString(talosconfig)
+					if decErr != nil {
+						return nil, fmt.Errorf("decoding talosconfig: %w", decErr)
+					}
+					talosconfigBytes = tc
 				}
 
-				// Decode talosconfig - NOTE: JSON field is lowercase "talosconfig"
-				talosconfig, _ := status["talosconfig"].(string)
-				talosconfigBytes, err := base64.StdEncoding.DecodeString(talosconfig)
-				if err != nil {
-					return nil, fmt.Errorf("decoding talosconfig: %w", err)
+				// The local console is exposed on the host via the KIND NodePort
+				// mapping, so report the reachable host URL rather than the
+				// in-cluster Service or a port-forward command.
+				if o.isLocal {
+					consoleURL = "http://localhost:8080"
 				}
+
+				// Surface the sign-in details on the completion screen so the
+				// operator does not have to go hunting for the password. The
+				// management kubeconfig file is not written yet, so read from the
+				// in-memory bytes.
+				o.consolePassword = o.consoleAdminPasswordFromBytes(ctx, kubeconfigBytes)
 
 				creds := &clusterCredentials{
 					kubeconfig:      kubeconfigBytes,
@@ -1678,6 +2063,8 @@ func (o *Orchestrator) watchBootstrap(ctx context.Context, client dynamic.Interf
 						Talosconfig:     talosconfigBytes,
 						ControlPlaneIPs: controlPlaneIPs,
 						ConsoleURL:      consoleURL,
+						ConsoleUser:     "admin",
+						ConsolePassword: o.consolePassword,
 					},
 				})
 				return creds, nil
@@ -1787,24 +2174,47 @@ func (o *Orchestrator) buildAndLoadImages(ctx context.Context, provider string) 
 	// pointing to a sibling repo (e.g., replace ../butler-api). In that case
 	// the Docker build context must be the parent directory so the sibling
 	// is accessible, and -f points to the repo's Dockerfile.
-	images := []struct {
+	type buildImage struct {
 		name             string
 		repoDir          string
 		image            string
 		useParentContext bool
-	}{
+	}
+	images := []buildImage{
 		{
 			name:             "butler-bootstrap",
 			repoDir:          filepath.Join(o.options.RepoRoot, "butler-bootstrap"),
 			image:            "ghcr.io/butlerdotdev/butler-bootstrap:latest",
 			useParentContext: true,
 		},
-		{
+	}
+	if o.isLocal {
+		// The local provider uses CAPD for tenant workers (there is no
+		// butler-provider-local), and it needs butler-controller built from source
+		// so the CAPD resource builder is present.
+		images = append(images, buildImage{
+			name:    "butler-controller",
+			repoDir: filepath.Join(o.options.RepoRoot, "butler-controller"),
+			image:   "ghcr.io/butlerdotdev/butler-controller:latest",
+			// butler-controller fetches butler-api as a normal module (no sibling
+			// replace), so it builds with its own repo as the context.
+			useParentContext: false,
+		})
+		// Steward carries local-only fixes not yet in a published release (the hosted
+		// control plane admin RBAC binding). InstallSteward uses :latest for local.
+		images = append(images, buildImage{
+			name:             "steward",
+			repoDir:          filepath.Join(o.options.RepoRoot, "steward"),
+			image:            "ghcr.io/butlerdotdev/steward:latest",
+			useParentContext: false,
+		})
+	} else {
+		images = append(images, buildImage{
 			name:             fmt.Sprintf("butler-provider-%s", provider),
 			repoDir:          filepath.Join(o.options.RepoRoot, fmt.Sprintf("butler-provider-%s", provider)),
 			image:            fmt.Sprintf("ghcr.io/butlerdotdev/butler-provider-%s:latest", provider),
 			useParentContext: true,
-		},
+		})
 	}
 
 	for _, img := range images {
@@ -1843,27 +2253,46 @@ func (o *Orchestrator) buildAndLoadImages(ctx context.Context, provider string) 
 			buildCmd = exec.CommandContext(ctx, "docker", "build", "-t", img.image, ".")
 			buildCmd.Dir = img.repoDir
 		}
-		buildCmd.Stdout = os.Stdout
-		buildCmd.Stderr = os.Stderr
+		// Capture build output to a buffer instead of the terminal. Docker's
+		// buildx progress writes TTY control sequences that corrupt the
+		// bootstrap TUI's alt-screen. Surface the tail only if the build fails.
+		var buildOut bytes.Buffer
+		buildCmd.Stdout = &buildOut
+		buildCmd.Stderr = &buildOut
+
+		// Force plain progress so a fallback to non-buffered output (or the
+		// error tail) is line-oriented rather than ANSI cursor movement.
+		buildCmd.Env = append(os.Environ(), "BUILDKIT_PROGRESS=plain", "DOCKER_BUILDKIT=1")
 
 		if err := buildCmd.Run(); err != nil {
-			return fmt.Errorf("building %s: %w", img.name, err)
+			return fmt.Errorf("building %s: %w\n%s", img.name, err, tailLines(buildOut.String(), 30))
 		}
 		o.logger.Success("built image", "image", img.image)
 
 		// Load into KIND
 		o.logger.Info("loading image into KIND", "image", img.image)
 		loadCmd := exec.CommandContext(ctx, "kind", "load", "docker-image", img.image, "--name", kindClusterName)
-		loadCmd.Stdout = os.Stdout
-		loadCmd.Stderr = os.Stderr
+		var loadOut bytes.Buffer
+		loadCmd.Stdout = &loadOut
+		loadCmd.Stderr = &loadOut
 
 		if err := loadCmd.Run(); err != nil {
-			return fmt.Errorf("loading %s into KIND: %w", img.name, err)
+			return fmt.Errorf("loading %s into KIND: %w\n%s", img.name, err, tailLines(loadOut.String(), 30))
 		}
 		o.logger.Success("loaded image into KIND", "image", img.image)
 	}
 
 	return nil
+}
+
+// tailLines returns the last n lines of s, for surfacing the relevant tail of
+// captured command output in an error without dumping the entire build log.
+func tailLines(s string, n int) string {
+	lines := strings.Split(strings.TrimRight(s, "\n"), "\n")
+	if len(lines) > n {
+		lines = lines[len(lines)-n:]
+	}
+	return strings.Join(lines, "\n")
 }
 
 // buildTalosSpec builds the talos section of the ClusterBootstrap spec.

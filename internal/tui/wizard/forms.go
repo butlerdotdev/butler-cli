@@ -38,6 +38,7 @@ func providerSelectGroup(s *wizardState) *huh.Group {
 		huh.NewSelect[string]().
 			Title("Infrastructure Provider").
 			Options(
+				huh.NewOption("Local (laptop, KIND + CAPD, no hypervisor)", "local"),
 				huh.NewOption("Harvester (HCI)", "harvester"),
 				huh.NewOption("Nutanix (AHV)", "nutanix"),
 				huh.NewOption("Amazon Web Services (AWS)", "aws"),
@@ -716,14 +717,14 @@ func ipamStep(s *wizardState) *huh.Group {
 		huh.NewNote().
 			Title("Tenant IP Allocation (IPAM)").
 			Description(
-				"Butler uses a NetworkPool CR to allocate IPs to tenant clusters\n" +
-					"on on-prem providers (Harvester, Nutanix, Proxmox). Without one,\n" +
-					"tenant creation fails at IP allocation and you have to build the\n" +
-					"NetworkPool and ProviderConfig.spec.network by hand later.\n\n" +
-					"Enabling IPAM here makes the bootstrap emit the NetworkPool and\n" +
-					"wire the ProviderConfig to use it — the management cluster is\n" +
-					"tenant-ready the moment bootstrap completes.\n\n" +
-					"Cloud providers (AWS, Azure, GCP) use native networking and\n" +
+				"Butler uses a NetworkPool CR to allocate IPs to tenant clusters\n"+
+					"on on-prem providers (Harvester, Nutanix, Proxmox). Without one,\n"+
+					"tenant creation fails at IP allocation and you have to build the\n"+
+					"NetworkPool and ProviderConfig.spec.network by hand later.\n\n"+
+					"Enabling IPAM here makes the bootstrap emit the NetworkPool and\n"+
+					"wire the ProviderConfig to use it -- the management cluster is\n"+
+					"tenant-ready the moment bootstrap completes.\n\n"+
+					"Cloud providers (AWS, Azure, GCP) use native networking and\n"+
 					"should leave this disabled."),
 
 		huh.NewConfirm().
@@ -741,18 +742,18 @@ func networkPoolStep(s *wizardState) *huh.Group {
 		huh.NewNote().
 			Title("NetworkPool").
 			Description(
-				"Pool CIDR is the full network range the pool manages.\n\n" +
-					"Reserved Range: IPs outside DHCP that the management cluster\n" +
-					"uses for static assignments (VIP, MetalLB pool, node IPs).\n" +
-					"The IPAM allocator will never hand these to tenants. Use\n" +
-					"start/end IPs — doesn't need to be a power-of-2 block.\n\n" +
-					"Example: subnet 10.92.90.0/23, IPs .1 through .10 are\n" +
-					"outside DHCP for static use:\n" +
-					"  Reserved: 10.92.90.1 - 10.92.90.10\n" +
-					"  VIP: 10.92.90.5, LB pool: .33-.254\n" +
-					"  Tenant alloc: 10.92.90.33 - 10.92.91.254\n\n" +
-					"Tenant Allocation is the sub-range the pool hands out to\n" +
-					"tenant clusters. Everything outside it (including the\n" +
+				"Pool CIDR is the full network range the pool manages.\n\n"+
+					"Reserved Range: IPs outside DHCP that the management cluster\n"+
+					"uses for static assignments (VIP, MetalLB pool, node IPs).\n"+
+					"The IPAM allocator will never hand these to tenants. Use\n"+
+					"start/end IPs -- doesn't need to be a power-of-2 block.\n\n"+
+					"Example: subnet 10.92.90.0/23, IPs .1 through .10 are\n"+
+					"outside DHCP for static use:\n"+
+					"  Reserved: 10.92.90.1 - 10.92.90.10\n"+
+					"  VIP: 10.92.90.5, LB pool: .33-.254\n"+
+					"  Tenant alloc: 10.92.90.33 - 10.92.91.254\n\n"+
+					"Tenant Allocation is the sub-range the pool hands out to\n"+
+					"tenant clusters. Everything outside it (including the\n"+
 					"reserved range) is untouched by IPAM."),
 
 		huh.NewInput().
@@ -818,10 +819,10 @@ func providerNetworkStep(s *wizardState) *huh.Group {
 		huh.NewNote().
 			Title("Tenant LB Allocation").
 			Description(
-				"These settings go into ProviderConfig.spec.network and control\n" +
-					"how aggressively the platform allocates LoadBalancer IPs to each\n" +
-					"tenant cluster, plus the hard caps on per-tenant IP usage.\n\n" +
-					"Defaults match butler-beta's production values — safe starting\n" +
+				"These settings go into ProviderConfig.spec.network and control\n"+
+					"how aggressively the platform allocates LoadBalancer IPs to each\n"+
+					"tenant cluster, plus the hard caps on per-tenant IP usage.\n\n"+
+					"Defaults match butler-beta's production values -- safe starting\n"+
 					"point that you can tune later via kubectl edit providerconfig."),
 
 		huh.NewSelect[string]().
@@ -873,15 +874,15 @@ func multiTenancyStep(s *wizardState) *huh.Group {
 		huh.NewNote().
 			Title("Multi-Tenancy").
 			Description(
-				"Butler supports two multi-tenancy modes:\n\n" +
-					"Optional (default):\n" +
-					"  Teams are available but not required. Clusters can be created\n" +
-					"  without belonging to a team. Good for small teams or dev\n" +
-					"  environments where you want flexibility.\n\n" +
-					"Enforced:\n" +
-					"  Every cluster must belong to a team. Team quotas are enforced.\n" +
-					"  Required for production multi-tenant platforms where teams\n" +
-					"  need resource boundaries and RBAC isolation.\n\n" +
+				"Butler supports two multi-tenancy modes:\n\n"+
+					"Optional (default):\n"+
+					"  Teams are available but not required. Clusters can be created\n"+
+					"  without belonging to a team. Good for small teams or dev\n"+
+					"  environments where you want flexibility.\n\n"+
+					"Enforced:\n"+
+					"  Every cluster must belong to a team. Team quotas are enforced.\n"+
+					"  Required for production multi-tenant platforms where teams\n"+
+					"  need resource boundaries and RBAC isolation.\n\n"+
 					"This setting is changeable later by editing the ButlerConfig CR."),
 
 		huh.NewSelect[string]().
@@ -902,17 +903,17 @@ func exposureModeStep(s *wizardState) *huh.Group {
 		huh.NewNote().
 			Title("Control Plane Exposure").
 			Description(
-				"How should tenant-cluster Kubernetes API servers be reached?\n\n" +
-					"LoadBalancer (recommended for starters):\n" +
-					"  1 LoadBalancer IP per tenant cluster. Simplest setup.\n" +
-					"  Burns 1 IP from the MetalLB pool per tenant.\n\n" +
-					"Ingress:\n" +
-					"  Shared IP via an ingress controller with TLS passthrough.\n" +
-					"  IP-efficient. Requires steward-tcp-proxy and a wildcard DNS\n" +
-					"  record pointing at the ingress.\n\n" +
-					"Gateway:\n" +
-					"  Shared IP via Gateway API TLSRoute. Modern alternative to\n" +
-					"  Ingress. Requires a configured Gateway resource.\n\n" +
+				"How should tenant-cluster Kubernetes API servers be reached?\n\n"+
+					"LoadBalancer (recommended for starters):\n"+
+					"  1 LoadBalancer IP per tenant cluster. Simplest setup.\n"+
+					"  Burns 1 IP from the MetalLB pool per tenant.\n\n"+
+					"Ingress:\n"+
+					"  Shared IP via an ingress controller with TLS passthrough.\n"+
+					"  IP-efficient. Requires steward-tcp-proxy and a wildcard DNS\n"+
+					"  record pointing at the ingress.\n\n"+
+					"Gateway:\n"+
+					"  Shared IP via Gateway API TLSRoute. Modern alternative to\n"+
+					"  Ingress. Requires a configured Gateway resource.\n\n"+
 					"This setting is changeable later by editing the ButlerConfig CR."),
 
 		huh.NewSelect[string]().
@@ -991,11 +992,11 @@ func consoleStep(s *wizardState) *huh.Group {
 		huh.NewNote().
 			Title("Butler Console").
 			Description(
-				"Butler Console is the web UI for managing tenant clusters, teams,\n" +
-					"and platform settings. It's installed automatically.\n\n" +
-					"By default the console is reachable only via port-forward:\n" +
-					"  kubectl port-forward -n butler-system svc/butler-console-frontend 3000:80\n\n" +
-					"Enable ingress to expose it at a hostname instead. You'll need\n" +
+				"Butler Console is the web UI for managing tenant clusters, teams,\n"+
+					"and platform settings. It's installed automatically.\n\n"+
+					"By default the console is reachable only via port-forward:\n"+
+					"  kubectl port-forward -n butler-system svc/butler-console-frontend 3000:80\n\n"+
+					"Enable ingress to expose it at a hostname instead. You'll need\n"+
 					"a DNS record pointing at the ingress IP."),
 
 		huh.NewInput().

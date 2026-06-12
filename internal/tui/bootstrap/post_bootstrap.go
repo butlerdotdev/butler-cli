@@ -95,12 +95,28 @@ func (m postBootstrapModel) viewSuccess(width int) string {
 	b.WriteString(fmt.Sprintf("  %s %s\n", labelStyle.Render("Duration:"), valueStyle.Render(m.elapsed.Round(time.Second).String())))
 
 	kubeconfigPath := fmt.Sprintf("~/.butler/%s-kubeconfig", m.clusterName)
-	talosconfigPath := fmt.Sprintf("~/.butler/%s-talosconfig", m.clusterName)
 	b.WriteString(fmt.Sprintf("  %s %s\n", labelStyle.Render("Kubeconfig:"), valueStyle.Render(kubeconfigPath)))
-	b.WriteString(fmt.Sprintf("  %s %s\n", labelStyle.Render("Talosconfig:"), valueStyle.Render(talosconfigPath)))
+	// The local provider runs on KIND and has no Talos node config.
+	if m.provider != "local" {
+		talosconfigPath := fmt.Sprintf("~/.butler/%s-talosconfig", m.clusterName)
+		b.WriteString(fmt.Sprintf("  %s %s\n", labelStyle.Render("Talosconfig:"), valueStyle.Render(talosconfigPath)))
+	}
 
 	if m.creds != nil && m.creds.ConsoleURL != "" {
 		b.WriteString(fmt.Sprintf("  %s %s\n", labelStyle.Render("Console URL:"), valueStyle.Render(m.creds.ConsoleURL)))
+	}
+
+	if m.creds != nil && m.creds.ConsoleUser != "" {
+		b.WriteString(fmt.Sprintf("  %s %s\n", labelStyle.Render("Username:"), valueStyle.Render(m.creds.ConsoleUser)))
+	}
+
+	if m.creds != nil {
+		if m.creds.ConsolePassword != "" {
+			b.WriteString(fmt.Sprintf("  %s %s\n", labelStyle.Render("Password:"), valueStyle.Render(m.creds.ConsolePassword)))
+		} else if m.creds.ConsoleURL != "" {
+			b.WriteString(fmt.Sprintf("  %s %s\n", labelStyle.Render("Password:"),
+				dimStyle.Render("kubectl get secret butler-console-admin -n butler-system -o jsonpath='{.data.admin-password}' | base64 -d")))
+		}
 	}
 
 	if m.creds != nil && len(m.creds.ControlPlaneIPs) > 0 {

@@ -542,11 +542,10 @@ spec:
                     type: string
                   vip:
                     description: |-
-                      VIP is the virtual IP for the control plane endpoint (kube-vip).
-                      Required for on-prem providers (harvester, nutanix, proxmox).
-                      Optional for cloud providers (gcp, aws, azure) where the first
-                      control plane node IP is used as the endpoint instead.
-                    pattern: ^([0-9]{1,3}\.){3}[0-9]{1,3}$
+                      VIP is the control plane endpoint. For on-prem providers this is
+                      a virtual IP managed by kube-vip. For cloud providers this can be
+                      a load balancer IP or DNS name. Optional for cloud providers where
+                      the first control plane node IP is used as the endpoint instead.
                     type: string
                   vipInterface:
                     description: VIPInterface is the network interface for the VIP
@@ -568,6 +567,7 @@ spec:
                 - gcp
                 - aws
                 - azure
+                - local
                 type: string
               providerRef:
                 description: |-
