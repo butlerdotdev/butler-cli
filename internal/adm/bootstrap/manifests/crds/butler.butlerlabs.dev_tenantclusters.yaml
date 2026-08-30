@@ -240,10 +240,10 @@ spec:
                       Required for Harvester, vSphere, and other infrastructure providers.
                     type: boolean
                   replicas:
-                    default: 1
                     description: |-
-                      Replicas is the number of API server replicas.
-                      Steward manages high availability automatically.
+                      Replicas is the number of API server replicas. When omitted, the
+                      hosted control plane provider selects the default; Butler does not
+                      impose one. Steward manages high availability automatically.
                     format: int32
                     maximum: 3
                     minimum: 1
