@@ -244,6 +244,47 @@ spec:
                             x-kubernetes-int-or-string: true
                         type: object
                     type: object
+                  konnectivity:
+                    description: Konnectivity resource requirements for the konnectivity-server
+                      sidecar.
+                    properties:
+                      limits:
+                        description: Limits describes the maximum resources allowed.
+                        properties:
+                          cpu:
+                            anyOf:
+                            - type: integer
+                            - type: string
+                            description: CPU resource (e.g., "100m", "1", "2").
+                            pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                            x-kubernetes-int-or-string: true
+                          memory:
+                            anyOf:
+                            - type: integer
+                            - type: string
+                            description: Memory resource (e.g., "128Mi", "1Gi").
+                            pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                            x-kubernetes-int-or-string: true
+                        type: object
+                      requests:
+                        description: Requests describes the minimum resources required.
+                        properties:
+                          cpu:
+                            anyOf:
+                            - type: integer
+                            - type: string
+                            description: CPU resource (e.g., "100m", "1", "2").
+                            pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                            x-kubernetes-int-or-string: true
+                          memory:
+                            anyOf:
+                            - type: integer
+                            - type: string
+                            description: Memory resource (e.g., "128Mi", "1Gi").
+                            pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                            x-kubernetes-int-or-string: true
+                        type: object
+                    type: object
                   scheduler:
                     description: Scheduler resource requirements.
                     properties:
