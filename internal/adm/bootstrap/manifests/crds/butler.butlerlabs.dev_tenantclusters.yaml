@@ -240,10 +240,10 @@ spec:
                       Required for Harvester, vSphere, and other infrastructure providers.
                     type: boolean
                   replicas:
-                    default: 1
                     description: |-
-                      Replicas is the number of API server replicas.
-                      Steward manages high availability automatically.
+                      Replicas is the number of API server replicas. When omitted, the
+                      hosted control plane provider selects the default; Butler does not
+                      impose one. Steward manages high availability automatically.
                     format: int32
                     maximum: 3
                     minimum: 1
@@ -297,6 +297,48 @@ spec:
                         type: object
                       controllerManager:
                         description: ControllerManager resource requirements.
+                        properties:
+                          limits:
+                            description: Limits describes the maximum resources allowed.
+                            properties:
+                              cpu:
+                                anyOf:
+                                - type: integer
+                                - type: string
+                                description: CPU resource (e.g., "100m", "1", "2").
+                                pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                                x-kubernetes-int-or-string: true
+                              memory:
+                                anyOf:
+                                - type: integer
+                                - type: string
+                                description: Memory resource (e.g., "128Mi", "1Gi").
+                                pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                                x-kubernetes-int-or-string: true
+                            type: object
+                          requests:
+                            description: Requests describes the minimum resources
+                              required.
+                            properties:
+                              cpu:
+                                anyOf:
+                                - type: integer
+                                - type: string
+                                description: CPU resource (e.g., "100m", "1", "2").
+                                pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                                x-kubernetes-int-or-string: true
+                              memory:
+                                anyOf:
+                                - type: integer
+                                - type: string
+                                description: Memory resource (e.g., "128Mi", "1Gi").
+                                pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                                x-kubernetes-int-or-string: true
+                            type: object
+                        type: object
+                      konnectivity:
+                        description: Konnectivity resource requirements for the konnectivity-server
+                          sidecar.
                         properties:
                           limits:
                             description: Limits describes the maximum resources allowed.
